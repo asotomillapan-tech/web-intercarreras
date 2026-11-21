@@ -363,57 +363,111 @@ export async function loadAuthorizedPlayerPrivateMap(
 // 2. Users & Exclusive Admin Role Management
 // ---------------------------------------------------------------------------
 
-export async function syncGoogleUserToFirestore(user: User): Promise<AppUserProfile> {
-  const path = `users/${user.uid}`;
-  try {
+const inFlightUserSyncs = new Map<string, Promise<AppUserProfile>>();
+
+export function syncGoogleUserToFirestore(user: User): Promise<AppUserProfile> {
+  const existingPromise = inFlightUserSyncs.get(user.uid);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const syncPromise = (async (): Promise<AppUserProfile> => {
+    const path = `users/${user.uid}`;
     const userRef = doc(db, 'users', user.uid);
-    const snap = await getDoc(userRef);
+    const isBootstrappedAdmin =
+      Boolean(user.emailVerified) &&
+      (user.email ?? '').toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
+
+    let snap;
+    try {
+      snap = await getDoc(userRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
 
     if (snap.exists()) {
       const data = snap.data();
+      let resolvedRole: UserRole = (data.role as UserRole) || 'tradicional';
+
+      // Auto-promote bootstrapped admin if an older profile doc existed with a lower role
+      if (isBootstrappedAdmin && resolvedRole !== 'admin') {
+        try {
+          await updateDoc(userRef, {
+            role: 'admin',
+            updatedAt: serverTimestamp(),
+          });
+          resolvedRole = 'admin';
+        } catch (err) {
+          console.warn('No se pudo promover automáticamente el documento del admin principal:', err);
+        }
+      }
+
+      if (isBootstrappedAdmin) {
+        try {
+          const adminRef = doc(db, 'admins', user.uid);
+          const adminSnap = await getDoc(adminRef);
+          if (!adminSnap.exists()) {
+            await setDoc(adminRef, {
+              uid: user.uid,
+              email: (user.email || BOOTSTRAPPED_ADMIN_EMAIL).slice(0, 160),
+              grantedBy: user.uid,
+              createdAt: serverTimestamp(),
+            });
+          }
+        } catch {
+          // Verified via bootstrapped admin email rule even if /admins write is skipped
+        }
+      }
+
       return {
         uid: user.uid,
         displayName: String(data.displayName || user.displayName || 'Estudiante UFRO'),
         email: String(data.email || user.email || ''),
         photoURL: typeof data.photoURL === 'string' ? data.photoURL : user.photoURL ?? undefined,
-        role: (data.role as UserRole) || 'tradicional',
+        role: isBootstrappedAdmin ? 'admin' : resolvedRole,
         favoriteTeamIds: Array.isArray(data.favoriteTeamIds) ? data.favoriteTeamIds : [],
         linkedPlayerId: typeof data.linkedPlayerId === 'string' ? data.linkedPlayerId : undefined,
         delegatedTeamId: typeof data.delegatedTeamId === 'string' ? data.delegatedTeamId : undefined,
-        notificationsEnabled: typeof data.notificationsEnabled === 'boolean' ? data.notificationsEnabled : true,
+        notificationsEnabled:
+          typeof data.notificationsEnabled === 'boolean' ? data.notificationsEnabled : true,
         authSource: 'google',
         createdAt: toIso(data.createdAt),
         updatedAt: toIso(data.updatedAt),
       };
     }
 
-    const isBootstrappedAdmin =
-      Boolean(user.emailVerified) &&
-      (user.email ?? '').toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
     const initialRole: UserRole = isBootstrappedAdmin ? 'admin' : 'tradicional';
+    const safeDisplayName =
+      (user.displayName || user.email?.split('@')[0] || 'Estudiante UFRO').trim().slice(0, 120) ||
+      'Estudiante UFRO';
+    const safeEmail = (user.email || '').trim().slice(0, 160);
 
     const payload: Record<string, unknown> = {
       uid: user.uid,
-      displayName: (user.displayName || user.email?.split('@')[0] || 'Estudiante UFRO').slice(0, 120),
-      email: (user.email || '').slice(0, 160),
+      displayName: safeDisplayName,
+      email: safeEmail,
       role: initialRole,
       favoriteTeamIds: [],
       notificationsEnabled: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
-    if (user.photoURL) {
-      payload.photoURL = user.photoURL.slice(0, 500);
+    if (user.photoURL && user.photoURL.trim()) {
+      payload.photoURL = user.photoURL.trim().slice(0, 500);
     }
 
-    await setDoc(userRef, payload);
+    try {
+      await setDoc(userRef, payload);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
 
     // Ensure bootstrapped admin is also recorded in /admins for delegation consistency
     if (isBootstrappedAdmin) {
       try {
         await setDoc(doc(db, 'admins', user.uid), {
           uid: user.uid,
-          email: (user.email || BOOTSTRAPPED_ADMIN_EMAIL).slice(0, 160),
+          email: (safeEmail || BOOTSTRAPPED_ADMIN_EMAIL).slice(0, 160),
           grantedBy: user.uid,
           createdAt: serverTimestamp(),
         });
@@ -425,8 +479,8 @@ export async function syncGoogleUserToFirestore(user: User): Promise<AppUserProf
     const nowIso = new Date().toISOString();
     return {
       uid: user.uid,
-      displayName: String(payload.displayName),
-      email: String(payload.email),
+      displayName: safeDisplayName,
+      email: safeEmail,
       photoURL: user.photoURL ?? undefined,
       role: initialRole,
       favoriteTeamIds: [],
@@ -435,9 +489,12 @@ export async function syncGoogleUserToFirestore(user: User): Promise<AppUserProf
       createdAt: nowIso,
       updatedAt: nowIso,
     };
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  })().finally(() => {
+    inFlightUserSyncs.delete(user.uid);
+  });
+
+  inFlightUserSyncs.set(user.uid, syncPromise);
+  return syncPromise;
 }
 
 export async function updateFirestoreUserPreferences(

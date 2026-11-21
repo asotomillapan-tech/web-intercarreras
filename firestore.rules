@@ -34,7 +34,8 @@ service cloud.firestore {
 
     function isBootstrappedAdmin() {
       return isVerified()
-        && request.auth.token.email == 'a.sotomillapan@gmail.com';
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'a.sotomillapan@gmail.com';
     }
 
     function isAdmin() {
@@ -634,7 +635,7 @@ service cloud.firestore {
       allow delete: if isValidId(userId)
         && isAdmin()
         && userId != request.auth.uid
-        && existing().email != 'a.sotomillapan@gmail.com';
+        && existing().email.lower() != 'a.sotomillapan@gmail.com';
     }
 
     // --- Collection 3: /settings/{settingId} (Global Tournament & Drive 2026 Config) ---
