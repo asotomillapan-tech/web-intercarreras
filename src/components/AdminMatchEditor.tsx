@@ -23,6 +23,7 @@ interface AdminMatchEditorProps {
   state: TournamentState;
   initialEditMatchId?: string | null;
   onUpdateMatch: (match: Match) => void;
+  onAddMatch?: (match: Match) => void;
 }
 
 const MATCH_PHASES: Match['fase'][] = [
@@ -30,6 +31,7 @@ const MATCH_PHASES: Match['fase'][] = [
   'Octavos',
   'Cuartos',
   'Semifinal',
+  'Tercer Lugar',
   'Final',
 ];
 
@@ -37,12 +39,14 @@ export function AdminMatchEditor({
   state,
   initialEditMatchId,
   onUpdateMatch,
+  onAddMatch,
 }: AdminMatchEditorProps) {
   const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
   const [query, setQuery] = useState('');
 
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
+  const [isCreatingMatch, setIsCreatingMatch] = useState(false);
   const [correctionNote, setCorrectionNote] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -95,6 +99,7 @@ export function AdminMatchEditor({
   }, [state.teams, editingMatch]);
 
   const startEditing = (match: Match) => {
+    setIsCreatingMatch(false);
     setEditingMatch({
       ...match,
       periods: match.periods.map((p) => ({ ...p })),
@@ -102,6 +107,72 @@ export function AdminMatchEditor({
     setCorrectionNote('');
     setErrorMsg(null);
     setSavedMsg(null);
+  };
+
+  const startCreatingMatch = () => {
+    const defaultDisc: DisciplineId =
+      disciplineFilter !== 'ALL' ? disciplineFilter : DISCIPLINES[0].id;
+    const discTeams = state.teams
+      .filter((t) => t.disciplineId === defaultDisc)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const discMeta = DISCIPLINE_MAP[defaultDisc];
+    const defaultRef =
+      discMeta.sportType === 'futbol7'
+        ? 'ref-f7-1'
+        : discMeta.sportType === 'voleibol'
+        ? 'ref-vl-1'
+        : 'ref-bk-1';
+
+    setIsCreatingMatch(true);
+    setEditingMatch({
+      id: `m-${defaultDisc}-${Date.now()}`,
+      disciplineId: defaultDisc,
+      groupName: 'Playoffs',
+      fase: 'Tercer Lugar',
+      jornada: 1,
+      fecha: new Date().toISOString().slice(0, 10),
+      hora: '19:00',
+      cancha: discMeta.sedePrincipal,
+      homeTeamId: discTeams[0]?.id ?? '',
+      awayTeamId: discTeams[1]?.id ?? '',
+      homeScore: 0,
+      awayScore: 0,
+      status: 'PROGRAMADO',
+      periodLabel: 'Por iniciar',
+      clock: '00:00',
+      periods: [],
+      fouls: { home: 0, away: 0 },
+      timeouts: { home: 0, away: 0 },
+      events: [],
+      refereeId: defaultRef,
+    });
+    setCorrectionNote('');
+    setErrorMsg(null);
+    setSavedMsg(null);
+  };
+
+  const handleCreateDisciplineChange = (nextDiscId: DisciplineId) => {
+    setEditingMatch((prev) => {
+      if (!prev) return prev;
+      const discTeams = state.teams
+        .filter((t) => t.disciplineId === nextDiscId)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+      const discMeta = DISCIPLINE_MAP[nextDiscId];
+      const defaultRef =
+        discMeta.sportType === 'futbol7'
+          ? 'ref-f7-1'
+          : discMeta.sportType === 'voleibol'
+          ? 'ref-vl-1'
+          : 'ref-bk-1';
+      return {
+        ...prev,
+        disciplineId: nextDiscId,
+        cancha: discMeta.sedePrincipal,
+        homeTeamId: discTeams[0]?.id ?? '',
+        awayTeamId: discTeams[1]?.id ?? '',
+        refereeId: defaultRef,
+      };
+    });
   };
 
   const updatePeriod = (index: number, side: 'home' | 'away', value: number) => {
@@ -132,6 +203,10 @@ export function AdminMatchEditor({
     e.preventDefault();
     if (!editingMatch) return;
 
+    if (!editingMatch.homeTeamId || !editingMatch.awayTeamId) {
+      setErrorMsg('Debes seleccionar equipo local y equipo visitante de la disciplina.');
+      return;
+    }
     if (editingMatch.homeTeamId === editingMatch.awayTeamId) {
       setErrorMsg('El equipo local y el equipo visitante deben ser distintos.');
       return;
@@ -146,13 +221,16 @@ export function AdminMatchEditor({
 
     const auditNote =
       correctionNote.trim() ||
-      `Corrección administrativa: ${homeName} ${editingMatch.homeScore} - ${editingMatch.awayScore} ${awayName} (${editingMatch.status}).`;
+      (isCreatingMatch
+        ? `Programación oficial (${editingMatch.fase}): ${homeName} vs ${awayName}.`
+        : `Corrección administrativa: ${homeName} ${editingMatch.homeScore} - ${editingMatch.awayScore} ${awayName} (${editingMatch.status}).`);
 
     const finalHomeScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.homeScore) || 0)));
     const finalAwayScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.awayScore) || 0)));
 
-    const updatedMatch: Match = {
+    const savedMatch: Match = {
       ...editingMatch,
+      groupName: editingMatch.groupName.trim() || (editingMatch.fase === 'Grupos' ? 'Grupo A' : 'Playoffs'),
       homeScore: finalHomeScore,
       awayScore: finalAwayScore,
       jornada: Math.max(1, Math.min(50, Math.trunc(Number(editingMatch.jornada) || 1))),
@@ -160,22 +238,34 @@ export function AdminMatchEditor({
         editingMatch.status === 'FINALIZADO'
           ? editingMatch.periodLabel || 'Final'
           : editingMatch.periodLabel || 'Por iniciar',
-      scoresheetValidation: {
-        ...(editingMatch.scoresheetValidation ?? {}),
-        validatedAt: new Date().toISOString(),
-        refereeName: 'Administrador UFRO',
-        method: 'MANUAL_ARBITRO',
-        manualNotes: auditNote,
-        finalHomeScore,
-        finalAwayScore,
-      },
+      ...(isCreatingMatch && editingMatch.status === 'PROGRAMADO'
+        ? {}
+        : {
+            scoresheetValidation: {
+              ...(editingMatch.scoresheetValidation ?? {}),
+              validatedAt: new Date().toISOString(),
+              refereeName: 'Administrador UFRO',
+              method: 'MANUAL_ARBITRO',
+              manualNotes: auditNote,
+              finalHomeScore,
+              finalAwayScore,
+            },
+          }),
     };
 
-    onUpdateMatch(updatedMatch);
-    setSavedMsg(
-      `Partido actualizado en Firestore: ${homeName} ${updatedMatch.homeScore} — ${updatedMatch.awayScore} ${awayName} (${updatedMatch.status}). Las tablas y el perfil histórico se recalcularon automáticamente.`
-    );
+    if (isCreatingMatch && onAddMatch) {
+      onAddMatch(savedMatch);
+      setSavedMsg(
+        `Encuentro programado en Firestore (${savedMatch.fase}): ${homeName} vs ${awayName} · ${savedMatch.fecha} ${savedMatch.hora}.`
+      );
+    } else {
+      onUpdateMatch(savedMatch);
+      setSavedMsg(
+        `Partido actualizado en Firestore: ${homeName} ${savedMatch.homeScore} — ${savedMatch.awayScore} ${awayName} (${savedMatch.fase} · ${savedMatch.status}). Las tablas y el cuadro de playoffs se recalcularon automáticamente.`
+      );
+    }
     setEditingMatch(null);
+    setIsCreatingMatch(false);
     setCorrectionNote('');
     setErrorMsg(null);
   };
@@ -202,18 +292,30 @@ export function AdminMatchEditor({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 text-center shrink-0">
-          <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-neutral-500">Pasados</p>
-            <p className="font-display text-2xl tabular-nums text-[#0d0d0d]">{pastCount}</p>
-          </div>
-          <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-neutral-500">En Vivo</p>
-            <p className="font-display text-2xl tabular-nums text-[#707ef9]">{liveCount}</p>
-          </div>
-          <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wider text-neutral-500">Programados</p>
-            <p className="font-display text-2xl tabular-nums text-neutral-700">{scheduledCount}</p>
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {onAddMatch && (
+            <button
+              type="button"
+              onClick={startCreatingMatch}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Programar encuentro</span>
+            </button>
+          )}
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Pasados</p>
+              <p className="font-display text-2xl tabular-nums text-[#0d0d0d]">{pastCount}</p>
+            </div>
+            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500">En Vivo</p>
+              <p className="font-display text-2xl tabular-nums text-[#707ef9]">{liveCount}</p>
+            </div>
+            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Programados</p>
+              <p className="font-display text-2xl tabular-nums text-neutral-700">{scheduledCount}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -247,17 +349,22 @@ export function AdminMatchEditor({
           <div className="flex items-center justify-between gap-3 border-b border-neutral-300 pb-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                Modificación Administrativa · {DISCIPLINE_MAP[editingMatch.disciplineId].nombre}
+                {isCreatingMatch ? 'Programar Nuevo Encuentro' : 'Modificación Administrativa'} ·{' '}
+                {DISCIPLINE_MAP[editingMatch.disciplineId].nombre}
               </p>
               <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
-                {teamMap.get(editingMatch.homeTeamId)?.nombre ?? editingMatch.homeTeamId} vs{' '}
-                {teamMap.get(editingMatch.awayTeamId)?.nombre ?? editingMatch.awayTeamId}
+                {isCreatingMatch
+                  ? `Nuevo encuentro (${editingMatch.fase})`
+                  : `${teamMap.get(editingMatch.homeTeamId)?.nombre ?? editingMatch.homeTeamId} vs ${
+                      teamMap.get(editingMatch.awayTeamId)?.nombre ?? editingMatch.awayTeamId
+                    }`}
               </h3>
             </div>
             <button
               type="button"
               onClick={() => {
                 setEditingMatch(null);
+                setIsCreatingMatch(false);
                 setErrorMsg(null);
               }}
               aria-label="Cerrar editor de partido"
@@ -266,6 +373,26 @@ export function AdminMatchEditor({
               <X className="w-5 h-5" />
             </button>
           </div>
+
+          {isCreatingMatch && (
+            <div>
+              <label htmlFor="create-m-disc" className="block text-xs font-medium text-neutral-700 mb-1">
+                Disciplina del nuevo encuentro
+              </label>
+              <select
+                id="create-m-disc"
+                value={editingMatch.disciplineId}
+                onChange={(e) => handleCreateDisciplineChange(e.target.value as DisciplineId)}
+                className="w-full sm:w-96 bg-white border border-neutral-300 px-3 py-2 text-sm"
+              >
+                {DISCIPLINES.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {errorMsg && (
             <div role="alert" className="bg-red-50 border border-red-300 p-4 text-xs text-red-900 flex items-center gap-2">
@@ -544,6 +671,7 @@ export function AdminMatchEditor({
               type="button"
               onClick={() => {
                 setEditingMatch(null);
+                setIsCreatingMatch(false);
                 setErrorMsg(null);
               }}
               className="px-4 py-2.5 border border-neutral-300 bg-white text-xs font-medium text-neutral-700 cursor-pointer"
@@ -554,7 +682,7 @@ export function AdminMatchEditor({
               type="submit"
               className="px-6 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display uppercase tracking-widest text-sm transition-colors cursor-pointer"
             >
-              Guardar Corrección en Firestore
+              {isCreatingMatch ? 'Crear Encuentro en Firestore' : 'Guardar Corrección en Firestore'}
             </button>
           </div>
         </form>

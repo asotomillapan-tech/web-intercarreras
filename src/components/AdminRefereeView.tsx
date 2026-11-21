@@ -11,10 +11,18 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Undo2,
   Upload,
+  UserCheck,
   UserCog,
+  X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  applyMatchLiveEvent,
+  revertMatchLiveEvent,
+  type PlayerStatDelta,
+} from '../domain/liveMatchEngine';
 import {
   ALL_USER_ROLES,
   BOOTSTRAPPED_ADMIN_EMAIL,
@@ -26,7 +34,6 @@ import {
   ROLE_META,
   validateRoleChange,
 } from '../domain/rbacEngine';
-import { isVolleyballSetWon } from '../domain/tournamentEngine';
 import { getFirebaseIdToken } from '../services/firebaseAuth';
 import type { Editorial2025Photos } from '../services/googleDrive';
 import type { DeletedEntityIds, SheetImportDelta } from '../domain/sheetsMergeEngine';
@@ -72,7 +79,8 @@ interface AdminRefereeViewProps {
   deletedIds?: DeletedEntityIds;
   autoSyncSessionApproved: boolean;
   autoSyncState: AutoSyncStatusInfo;
-  onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: Partial<{ goles: number; tarjetasAmarillas: number; tarjetasRojas: number; puntos: number; triples: number; faltas: number; aces: number; bloqueos: number }>) => void;
+  onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: PlayerStatDelta) => void;
+  onAddMatch?: (match: Match) => void;
   onAddTeam: (team: Team) => void;
   onUpdateTeam: (team: Team) => void;
   onDeleteTeam: (team: Team) => void;
@@ -197,6 +205,7 @@ export function AdminRefereeView({
   autoSyncSessionApproved,
   autoSyncState,
   onUpdateMatch,
+  onAddMatch,
   onAddTeam,
   onUpdateTeam,
   onDeleteTeam,
@@ -237,12 +246,19 @@ export function AdminRefereeView({
   const [roleStatusMsg, setRoleStatusMsg] = useState<string | null>(null);
   const [roleErrorMsg, setRoleErrorMsg] = useState<string | null>(null);
 
-  // Referee Console State
+  // Referee Console State (Action-First -> Player Menu -> Confirmar Registro)
   const [selectedRefId, setSelectedRefId] = useState<string>(state.referees[0]?.id ?? 'ref-f7-1');
   const [selectedMatchId, setSelectedMatchId] = useState<string>(
     focusedMatchId ?? state.matches.find((m) => m.status === 'EN_VIVO')?.id ?? state.matches[0]?.id ?? ''
   );
-  const [selectedScorerId, setSelectedScorerId] = useState<string>('');
+  const [pendingAction, setPendingAction] = useState<{
+    side: 'home' | 'away';
+    actionType: MatchEvent['type'];
+    pointsDelta: number;
+    label: string;
+  } | null>(null);
+  const [pendingPlayerId, setPendingPlayerId] = useState<string>('');
+  const [liveActionNotice, setLiveActionNotice] = useState<string | null>(null);
 
   // Scoresheet AI & Manual Validation State
   const [scoresheetImage, setScoresheetImage] = useState<string | null>(null);
@@ -327,12 +343,18 @@ export function AdminRefereeView({
     );
   }, [state.players, activeMatch]);
 
-  // Sync manual score fields when active match changes
+  // Sync manual score fields & reset pending live action when active match changes
   useEffect(() => {
     if (!activeMatch) return;
     setManualHome(String(activeMatch.homeScore));
     setManualAway(String(activeMatch.awayScore));
   }, [activeMatch?.id, activeMatch?.homeScore, activeMatch?.awayScore]);
+
+  useEffect(() => {
+    setPendingAction(null);
+    setPendingPlayerId('');
+    setLiveActionNotice(null);
+  }, [activeMatch?.id]);
 
   const handleSelectReferee = (refId: string) => {
     setSelectedRefId(refId);
@@ -352,151 +374,61 @@ export function AdminRefereeView({
     }
   };
 
-  // Live Scoreboard Actions per Sport
-  const applyLiveAction = (
+  // Step 1: Select Action (Gol, Falta, Amarilla, Roja, etc.) -> opens inline player menu
+  const handleChooseLiveAction = (
     side: 'home' | 'away',
     actionType: MatchEvent['type'],
+    label: string,
     pointsDelta = 0
   ) => {
+    setPendingAction({ side, actionType, pointsDelta, label });
+    setPendingPlayerId('');
+    setLiveActionNotice(null);
+  };
+
+  // Step 2: Confirm with selected player (or team-level) -> register action
+  const handleConfirmPendingAction = () => {
+    if (!pendingAction || !activeMatch || !activeMatchMeta) return;
+    const teamId =
+      pendingAction.side === 'home' ? activeMatch.homeTeamId : activeMatch.awayTeamId;
+    const teamName =
+      pendingAction.side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
+    const player = pendingPlayerId
+      ? matchPlayers.find((p) => p.id === pendingPlayerId && p.teamId === teamId)
+      : undefined;
+
+    const result = applyMatchLiveEvent({
+      match: activeMatch,
+      sportType: activeMatchMeta.sportType,
+      side: pendingAction.side,
+      actionType: pendingAction.actionType,
+      pointsDelta: pendingAction.pointsDelta,
+      teamName,
+      player,
+    });
+
+    onUpdateMatch(result.updatedMatch, player?.id, result.statDelta);
+    setLiveActionNotice(`Acción registrada: ${result.event.detail}`);
+    setPendingAction(null);
+    setPendingPlayerId('');
+  };
+
+  // Revert any registered event (Gol, Falta, Amarilla, Roja, points, timeouts)
+  const handleRevertLiveEvent = (eventId: string) => {
     if (!activeMatch || !activeMatchMeta) return;
-    const teamId = side === 'home' ? activeMatch.homeTeamId : activeMatch.awayTeamId;
-    const teamName = side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
-    const scorer = matchPlayers.find((p) => p.id === selectedScorerId && p.teamId === teamId);
-    const scorerLabel = scorer ? `${scorer.nombre} ${scorer.apellidoPaterno} (#${scorer.dorsal})` : teamName;
-
-    let nextHome = activeMatch.homeScore;
-    let nextAway = activeMatch.awayScore;
-    let nextPeriods = activeMatch.periods.map((p) => ({ ...p }));
-    let nextPeriodLabel = activeMatch.periodLabel;
-    const nextFouls = { ...activeMatch.fouls };
-    const nextTimeouts = { ...activeMatch.timeouts };
-    let detail = '';
-
-    const sport = activeMatchMeta.sportType;
-
-    if (sport === 'futbol7') {
-      if (actionType === 'GOL') {
-        if (side === 'home') nextHome += 1;
-        else nextAway += 1;
-        detail = `Gol anotado por ${scorerLabel}`;
-      } else if (actionType === 'AMARILLA') {
-        detail = `Tarjeta amarilla para ${scorerLabel}`;
-      } else if (actionType === 'ROJA') {
-        detail = `Tarjeta roja directa para ${scorerLabel}`;
-      } else if (actionType === 'FALTA') {
-        if (side === 'home') nextFouls.home += 1;
-        else nextFouls.away += 1;
-        detail = `Falta acumulada (${teamName})`;
-      }
-    } else if (sport === 'basquetbol' || sport === 'basquetbol3x3') {
-      if (actionType === 'PUNTO_1' || actionType === 'PUNTO_2' || actionType === 'PUNTO_3') {
-        if (side === 'home') nextHome += pointsDelta;
-        else nextAway += pointsDelta;
-        if (nextPeriods.length === 0) nextPeriods = [{ home: 0, away: 0 }];
-        const last = nextPeriods[nextPeriods.length - 1];
-        if (side === 'home') last.home += pointsDelta;
-        else last.away += pointsDelta;
-        detail = `+${pointsDelta} pts (${actionType === 'PUNTO_3' ? 'Triple' : actionType === 'PUNTO_2' ? 'Doble' : 'Tiro libre'}) · ${scorerLabel}`;
-      } else if (actionType === 'FALTA') {
-        if (side === 'home') nextFouls.home += 1;
-        else nextFouls.away += 1;
-        detail = `Falta personal/equipo · ${scorerLabel}`;
-      } else if (actionType === 'TIEMPO_MUERTO') {
-        if (side === 'home') nextTimeouts.home += 1;
-        else nextTimeouts.away += 1;
-        detail = `Tiempo muerto solicitado por ${teamName}`;
-      }
-    } else {
-      // Voleibol: manage current set points & automatically award set when 25/15 rule met
-      if (actionType === 'PUNTO_VOLEY' || actionType === 'ACE' || actionType === 'BLOQUEO') {
-        if (nextPeriods.length === 0) nextPeriods = [{ home: 0, away: 0 }];
-        const setIdx = nextPeriods.length - 1;
-        if (side === 'home') nextPeriods[setIdx].home += 1;
-        else nextPeriods[setIdx].away += 1;
-
-        const winner = isVolleyballSetWon(
-          nextPeriods[setIdx].home,
-          nextPeriods[setIdx].away,
-          setIdx + 1
-        );
-        detail =
-          actionType === 'ACE'
-            ? `Ace directo de ${scorerLabel} (Set ${setIdx + 1}: ${nextPeriods[setIdx].home}-${nextPeriods[setIdx].away})`
-            : actionType === 'BLOQUEO'
-            ? `Bloqueo ganador de ${scorerLabel} (Set ${setIdx + 1}: ${nextPeriods[setIdx].home}-${nextPeriods[setIdx].away})`
-            : `Punto de ${teamName} (Set ${setIdx + 1}: ${nextPeriods[setIdx].home}-${nextPeriods[setIdx].away})`;
-
-        if (winner) {
-          if (winner === 'home') nextHome += 1;
-          else nextAway += 1;
-          if (nextHome < 2 && nextAway < 2) {
-            nextPeriods.push({ home: 0, away: 0 });
-            nextPeriodLabel = `Set ${nextPeriods.length}`;
-          } else {
-            nextPeriodLabel = 'Partido definido (pendiente planilla)';
-          }
-        }
-      } else if (actionType === 'TIEMPO_MUERTO') {
-        if (side === 'home') nextTimeouts.home += 1;
-        else nextTimeouts.away += 1;
-        detail = `Tiempo técnico pedido por ${teamName}`;
-      }
-    }
-
-    const newEvent: MatchEvent = {
-      id: `ev-${Date.now()}`,
-      minuteOrPeriod: activeMatch.clock === 'Por iniciar' ? nextPeriodLabel : activeMatch.clock,
-      teamId,
-      playerId: scorer?.id,
-      playerName: scorer ? `${scorer.nombre} ${scorer.apellidoPaterno}` : undefined,
-      type: actionType,
-      detail,
-    };
-
-    const statDelta: Partial<{
-      goles: number;
-      tarjetasAmarillas: number;
-      tarjetasRojas: number;
-      puntos: number;
-      triples: number;
-      faltas: number;
-      aces: number;
-      bloqueos: number;
-    }> = {};
-    if (actionType === 'GOL') statDelta.goles = 1;
-    if (actionType === 'AMARILLA') statDelta.tarjetasAmarillas = 1;
-    if (actionType === 'ROJA') statDelta.tarjetasRojas = 1;
-    if (actionType === 'PUNTO_1' || actionType === 'PUNTO_2' || actionType === 'PUNTO_3') {
-      statDelta.puntos = pointsDelta;
-      if (actionType === 'PUNTO_3') statDelta.triples = 1;
-    }
-    if (actionType === 'FALTA') statDelta.faltas = 1;
-    if (actionType === 'PUNTO_VOLEY') statDelta.puntos = 1;
-    if (actionType === 'ACE') {
-      statDelta.puntos = 1;
-      statDelta.aces = 1;
-    }
-    if (actionType === 'BLOQUEO') {
-      statDelta.puntos = 1;
-      statDelta.bloqueos = 1;
-    }
+    const reverted = revertMatchLiveEvent({
+      match: activeMatch,
+      sportType: activeMatchMeta.sportType,
+      eventId,
+    });
+    if (!reverted) return;
 
     onUpdateMatch(
-      {
-        ...activeMatch,
-        status: activeMatch.status === 'PROGRAMADO' ? 'EN_VIVO' : activeMatch.status,
-        periodLabel: nextPeriodLabel === 'Programado' ? (sport === 'futbol7' ? '1° Tiempo' : sport === 'voleibol' ? 'Set 1' : '1° Cuarto') : nextPeriodLabel,
-        clock: activeMatch.clock === 'Por iniciar' ? (sport === 'futbol7' ? "01'" : sport === 'voleibol' ? 'Set 1' : '10:00') : activeMatch.clock,
-        homeScore: nextHome,
-        awayScore: nextAway,
-        periods: nextPeriods,
-        fouls: nextFouls,
-        timeouts: nextTimeouts,
-        events: [newEvent, ...activeMatch.events],
-      },
-      scorer?.id,
-      statDelta
+      reverted.updatedMatch,
+      reverted.revertedEvent.playerId,
+      reverted.statDelta
     );
+    setLiveActionNotice(`Acción revertida: ${reverted.revertedEvent.detail}`);
   };
 
   const advancePeriod = () => {
@@ -1111,156 +1043,404 @@ export function AdminRefereeView({
                       </span>
                     </button>
 
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="ref-scorer" className="text-xs text-neutral-400">
-                        Jugador implicado:
-                      </label>
-                      <select
-                        id="ref-scorer"
-                        value={selectedScorerId}
-                        onChange={(e) => setSelectedScorerId(e.target.value)}
-                        className="bg-[#18181f] border border-white/15 text-xs text-white px-2.5 py-1.5"
-                      >
-                        <option value="">Asignar al equipo</option>
-                        {matchPlayers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            #{p.dorsal} {p.nombre} {p.apellidoPaterno} ({teamMap.get(p.teamId)?.sigla})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <button
+                      type="button"
+                      disabled={activeMatch.events.length === 0}
+                      onClick={() => {
+                        if (activeMatch.events[0]) {
+                          handleRevertLiveEvent(activeMatch.events[0].id);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white/10 hover:bg-red-600/80 text-xs font-medium text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>Revertir última acción</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Discipline-Specific Live Action Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(['home', 'away'] as const).map((side) => {
-                    const label = side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
-                    return (
-                      <div key={side} className="border border-neutral-200 p-4 space-y-3">
-                        <p className="font-display text-sm font-bold uppercase tracking-wide text-[#0d0d0d] truncate">
-                          {side === 'home' ? 'Local' : 'Visita'}: {label}
-                        </p>
+                {liveActionNotice && (
+                  <div
+                    role="status"
+                    className="bg-[#f5f6f8] border border-neutral-300 px-4 py-2.5 text-xs text-[#0d0d0d] flex items-center justify-between gap-2"
+                  >
+                    <span className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-[#707ef9] shrink-0" />
+                      <span>{liveActionNotice}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLiveActionNotice(null)}
+                      aria-label="Cerrar aviso de acción"
+                      className="text-neutral-500 hover:text-[#0d0d0d] cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
-                        {activeMatchMeta.sportType === 'futbol7' && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'GOL', 1)}
-                              className="py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer"
-                            >
-                              +1 Gol ({side === 'home' ? 'Local' : 'Visita'})
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'FALTA')}
-                              className="py-2.5 bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d] text-xs font-medium cursor-pointer"
-                            >
-                              +1 Falta
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'AMARILLA')}
-                              className="py-2 bg-amber-100 hover:bg-amber-200 text-amber-950 text-xs font-medium cursor-pointer"
-                            >
-                              T. Amarilla
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'ROJA')}
-                              className="py-2 bg-red-100 hover:bg-red-200 text-red-950 text-xs font-medium cursor-pointer"
-                            >
-                              T. Roja
-                            </button>
-                          </div>
-                        )}
+                {/* Step 1: Select Action per Team (Action-First Workflow) */}
+                <div className="space-y-4">
+                  <p className="text-xs text-neutral-600">
+                    <strong>Paso 1:</strong> Selecciona la acción (Gol, Falta, Tarjeta o Puntos) del
+                    equipo correspondiente. Luego se desplegará el menú para elegir al jugador y
+                    confirmar con <strong>Registrar acción</strong>.
+                  </p>
 
-                        {(activeMatchMeta.sportType === 'basquetbol' ||
-                          activeMatchMeta.sportType === 'basquetbol3x3') && (
-                          <div className="grid grid-cols-3 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'PUNTO_1', 1)}
-                              className="py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold cursor-pointer"
-                            >
-                              +1 TL
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'PUNTO_2', 2)}
-                              className="py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold cursor-pointer"
-                            >
-                              +2 Doble
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'PUNTO_3', 3)}
-                              className="py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold cursor-pointer"
-                            >
-                              +3 Triple
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'FALTA')}
-                              className="col-span-2 py-2 bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d] text-xs font-medium cursor-pointer"
-                            >
-                              +1 Falta equipo
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'TIEMPO_MUERTO')}
-                              className="py-2 bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d] text-xs font-medium cursor-pointer"
-                            >
-                              T. Muerto
-                            </button>
-                          </div>
-                        )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(['home', 'away'] as const).map((side) => {
+                      const label =
+                        side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
+                      const isActiveBtn = (type: MatchEvent['type']) =>
+                        pendingAction?.side === side && pendingAction.actionType === type;
 
-                        {activeMatchMeta.sportType === 'voleibol' && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'PUNTO_VOLEY', 1)}
-                              className="col-span-2 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer"
-                            >
-                              +1 Punto Set ({side === 'home' ? 'Local' : 'Visita'})
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'ACE', 1)}
-                              className="py-2 bg-[#0d0d0d] hover:bg-neutral-800 text-white text-xs font-medium cursor-pointer"
-                            >
-                              +1 Ace
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => applyLiveAction(side, 'BLOQUEO', 1)}
-                              className="py-2 bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d] text-xs font-medium cursor-pointer"
-                            >
-                              +1 Bloqueo
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div key={side} className="border border-neutral-200 p-4 space-y-3 bg-white">
+                          <p className="font-display text-sm font-bold uppercase tracking-wide text-[#0d0d0d] truncate">
+                            {side === 'home' ? 'Local' : 'Visita'}: {label}
+                          </p>
+
+                          {activeMatchMeta.sportType === 'futbol7' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('GOL')}
+                                onClick={() => handleChooseLiveAction(side, 'GOL', 'Gol (+1)', 1)}
+                                className={`py-2.5 text-xs font-display font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                                  isActiveBtn('GOL')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
+                                }`}
+                              >
+                                Gol ({side === 'home' ? 'Local' : 'Visita'})
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('FALTA')}
+                                onClick={() => handleChooseLiveAction(side, 'FALTA', 'Falta')}
+                                className={`py-2.5 text-xs font-medium cursor-pointer transition-colors ${
+                                  isActiveBtn('FALTA')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
+                                }`}
+                              >
+                                Falta
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('AMARILLA')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'AMARILLA', 'Tarjeta Amarilla')
+                                }
+                                className={`py-2 text-xs font-medium cursor-pointer transition-colors ${
+                                  isActiveBtn('AMARILLA')
+                                    ? 'bg-amber-400 text-[#0d0d0d] ring-2 ring-[#0d0d0d] font-bold'
+                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-950'
+                                }`}
+                              >
+                                T. Amarilla
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('ROJA')}
+                                onClick={() => handleChooseLiveAction(side, 'ROJA', 'Tarjeta Roja')}
+                                className={`py-2 text-xs font-medium cursor-pointer transition-colors ${
+                                  isActiveBtn('ROJA')
+                                    ? 'bg-red-600 text-white ring-2 ring-[#0d0d0d] font-bold'
+                                    : 'bg-red-100 hover:bg-red-200 text-red-950'
+                                }`}
+                              >
+                                T. Roja
+                              </button>
+                            </div>
+                          )}
+
+                          {(activeMatchMeta.sportType === 'basquetbol' ||
+                            activeMatchMeta.sportType === 'basquetbol3x3') && (
+                            <div className="grid grid-cols-3 gap-2">
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('PUNTO_1')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'PUNTO_1', '+1 Tiro Libre', 1)
+                                }
+                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
+                                  isActiveBtn('PUNTO_1')
+                                    ? 'bg-[#707ef9] text-white ring-2 ring-[#0d0d0d]'
+                                    : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
+                                }`}
+                              >
+                                +1 TL
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('PUNTO_2')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'PUNTO_2', '+2 Doble', 2)
+                                }
+                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
+                                  isActiveBtn('PUNTO_2')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
+                                }`}
+                              >
+                                +2 Doble
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('PUNTO_3')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'PUNTO_3', '+3 Triple', 3)
+                                }
+                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
+                                  isActiveBtn('PUNTO_3')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
+                                }`}
+                              >
+                                +3 Triple
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('FALTA')}
+                                onClick={() => handleChooseLiveAction(side, 'FALTA', 'Falta')}
+                                className={`col-span-2 py-2 text-xs font-medium cursor-pointer ${
+                                  isActiveBtn('FALTA')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
+                                }`}
+                              >
+                                +1 Falta
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('TIEMPO_MUERTO')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'TIEMPO_MUERTO', 'Tiempo Muerto')
+                                }
+                                className={`py-2 text-xs font-medium cursor-pointer ${
+                                  isActiveBtn('TIEMPO_MUERTO')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
+                                }`}
+                              >
+                                T. Muerto
+                              </button>
+                            </div>
+                          )}
+
+                          {activeMatchMeta.sportType === 'voleibol' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('PUNTO_VOLEY')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'PUNTO_VOLEY', '+1 Punto Set', 1)
+                                }
+                                className={`col-span-2 py-2.5 text-xs font-display font-bold uppercase tracking-wider cursor-pointer ${
+                                  isActiveBtn('PUNTO_VOLEY')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
+                                }`}
+                              >
+                                +1 Punto Set ({side === 'home' ? 'Local' : 'Visita'})
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('ACE')}
+                                onClick={() => handleChooseLiveAction(side, 'ACE', '+1 Ace', 1)}
+                                className={`py-2 text-xs font-medium cursor-pointer ${
+                                  isActiveBtn('ACE')
+                                    ? 'bg-[#707ef9] text-white ring-2 ring-[#0d0d0d]'
+                                    : 'bg-[#0d0d0d] hover:bg-neutral-800 text-white'
+                                }`}
+                              >
+                                +1 Ace
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={isActiveBtn('BLOQUEO')}
+                                onClick={() =>
+                                  handleChooseLiveAction(side, 'BLOQUEO', '+1 Bloqueo', 1)
+                                }
+                                className={`py-2 text-xs font-medium cursor-pointer ${
+                                  isActiveBtn('BLOQUEO')
+                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
+                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
+                                }`}
+                              >
+                                +1 Bloqueo
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Step 2: Inline Player Selection Menu + Explicit "Registrar acción" CTA */}
+                  {pendingAction && (
+                    <div
+                      data-testid="live-action-player-menu"
+                      className="border-2 border-[#707ef9] bg-[#f5f6f8] p-5 space-y-4"
+                    >
+                      {(() => {
+                        const targetTeamId =
+                          pendingAction.side === 'home'
+                            ? activeMatch.homeTeamId
+                            : activeMatch.awayTeamId;
+                        const targetTeamName =
+                          pendingAction.side === 'home'
+                            ? homeTeam?.nombre ?? 'Local'
+                            : awayTeam?.nombre ?? 'Visita';
+                        const teamRoster = matchPlayers
+                          .filter((p) => p.teamId === targetTeamId)
+                          .sort((a, b) => a.dorsal - b.dorsal);
+
+                        return (
+                          <>
+                            <div className="flex items-start justify-between gap-3 border-b border-neutral-300 pb-3">
+                              <div className="flex items-center gap-2.5">
+                                <UserCheck className="w-5 h-5 text-[#707ef9] shrink-0" />
+                                <div>
+                                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#707ef9]">
+                                    Paso 2 · Seleccionar jugador y confirmar
+                                  </p>
+                                  <p className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                                    {pendingAction.label} — {targetTeamName}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPendingAction(null);
+                                  setPendingPlayerId('');
+                                }}
+                                aria-label="Cancelar acción pendiente"
+                                className="p-1 text-neutral-500 hover:text-[#0d0d0d] cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <div className="space-y-3">
+                              <label
+                                htmlFor="pending-action-player"
+                                className="block text-xs font-medium text-neutral-700"
+                              >
+                                Jugador que realiza la acción ({targetTeamName})
+                              </label>
+                              <select
+                                id="pending-action-player"
+                                value={pendingPlayerId}
+                                onChange={(e) => setPendingPlayerId(e.target.value)}
+                                className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                              >
+                                <option value="">
+                                  Sin jugador específico (Asignar a {targetTeamName})
+                                </option>
+                                {teamRoster.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    #{p.dorsal} · {p.nombre} {p.apellidoPaterno} ({p.posicion})
+                                  </option>
+                                ))}
+                              </select>
+
+                              {teamRoster.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {teamRoster.slice(0, 12).map((p) => {
+                                    const selected = pendingPlayerId === p.id;
+                                    return (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        onClick={() =>
+                                          setPendingPlayerId(selected ? '' : p.id)
+                                        }
+                                        className={`px-2.5 py-1 text-xs border transition-colors cursor-pointer ${
+                                          selected
+                                            ? 'bg-[#0d0d0d] text-white border-[#0d0d0d] font-bold'
+                                            : 'bg-white text-[#0d0d0d] border-neutral-300 hover:border-[#707ef9]'
+                                        }`}
+                                      >
+                                        <span className="font-mono text-[#707ef9] mr-1">
+                                          #{p.dorsal}
+                                        </span>
+                                        {p.nombre} {p.apellidoPaterno}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-neutral-300">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPendingAction(null);
+                                  setPendingPlayerId('');
+                                }}
+                                className="px-4 py-2.5 bg-white border border-neutral-300 hover:border-[#0d0d0d] text-xs font-medium text-neutral-700 cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleConfirmPendingAction}
+                                className="px-5 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+                              >
+                                Registrar acción
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
 
-                {/* Live Event Feed */}
+                {/* Live Event Feed with Per-Event Revertir */}
                 <div className="border border-neutral-200 p-4 space-y-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                    Bitácora del encuentro ({activeMatch.events.length} incidencias)
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+                      Bitácora del encuentro ({activeMatch.events.length} incidencias)
+                    </p>
+                    {activeMatch.events.length > 0 && (
+                      <span className="text-[11px] text-neutral-500">
+                        Puedes revertir cualquier gol, falta o tarjeta registrada
+                      </span>
+                    )}
+                  </div>
                   {activeMatch.events.length === 0 ? (
                     <p className="text-xs text-neutral-500">
                       Aún no se registran eventos en vivo para este encuentro.
                     </p>
                   ) : (
-                    <ul className="divide-y divide-neutral-100 max-h-44 overflow-y-auto text-xs">
-                      {activeMatch.events.slice(0, 10).map((ev) => (
-                        <li key={ev.id} className="py-2 flex items-center justify-between gap-3">
-                          <span className="text-[#0d0d0d]">{ev.detail}</span>
-                          <span className="text-neutral-500 tabular-nums shrink-0">{ev.minuteOrPeriod}</span>
+                    <ul className="divide-y divide-neutral-100 max-h-60 overflow-y-auto text-xs">
+                      {activeMatch.events.slice(0, 20).map((ev) => (
+                        <li
+                          key={ev.id}
+                          className="py-2.5 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[#0d0d0d] font-medium block truncate">
+                              {ev.detail}
+                            </span>
+                            <span className="text-[11px] text-neutral-400 tabular-nums">
+                              {ev.minuteOrPeriod} · {ev.type.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRevertLiveEvent(ev.id)}
+                            aria-label={`Revertir ${ev.detail}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 border border-red-200 bg-red-50 hover:bg-red-600 text-red-700 hover:text-white text-[11px] font-medium transition-colors shrink-0 cursor-pointer"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Revertir</span>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -1485,6 +1665,7 @@ export function AdminRefereeView({
             state={state}
             initialEditMatchId={focusedMatchId}
             onUpdateMatch={(updated) => onUpdateMatch(updated)}
+            onAddMatch={onAddMatch}
           />
         )}
 
@@ -2096,6 +2277,18 @@ export function AdminRefereeView({
                     className="accent-[#707ef9] w-4 h-4"
                   />
                   <span>Ventana de transferencias post-grupos abierta</span>
+                </label>
+
+                <label className="inline-flex items-center gap-2.5 text-sm font-medium text-[#0d0d0d] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.incluyeTercerLugar !== false}
+                    onChange={(e) =>
+                      setDraftConfig((c) => ({ ...c, incluyeTercerLugar: e.target.checked }))
+                    }
+                    className="accent-[#707ef9] w-4 h-4"
+                  />
+                  <span>Incluir partido por el Tercer Lugar en Playoffs</span>
                 </label>
               </div>
 

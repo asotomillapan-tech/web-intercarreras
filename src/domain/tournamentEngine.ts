@@ -2,9 +2,12 @@ import type {
   AiScoresheetResult,
   DisciplineFormatConfig,
   DisciplineId,
+  FullPlayoffBracket,
   Match,
   Player,
+  PlayoffBracketSlot,
   PlayoffMatchup,
+  PlayoffRoundColumn,
   SportType,
   StandingsRow,
   Team,
@@ -354,6 +357,273 @@ export function generatePlayoffBracket(
   return matchups;
 }
 
+const ROUND_TITLES: Record<'Octavos' | 'Cuartos' | 'Semifinal' | 'Final', string> = {
+  Octavos: 'Octavos de Final',
+  Cuartos: 'Cuartos de Final',
+  Semifinal: 'Semifinales',
+  Final: 'Gran Final',
+};
+
+const ROUND_SINGULAR: Record<'Octavos' | 'Cuartos' | 'Semifinal' | 'Final', string> = {
+  Octavos: 'Octavo',
+  Cuartos: 'Cuarto',
+  Semifinal: 'Semifinal',
+  Final: 'Final',
+};
+
+function getRoundSequence(formatoPlayoff: 4 | 8 | 16): Array<'Octavos' | 'Cuartos' | 'Semifinal' | 'Final'> {
+  if (formatoPlayoff === 16) return ['Octavos', 'Cuartos', 'Semifinal', 'Final'];
+  if (formatoPlayoff === 8) return ['Cuartos', 'Semifinal', 'Final'];
+  return ['Semifinal', 'Final'];
+}
+
+function resolveSlotOutcome(
+  slot: PlayoffBracketSlot,
+  teamMap: Map<string, Pick<Team, 'nombre'>>
+): PlayoffBracketSlot {
+  if (!slot.match) return slot;
+  const m = slot.match;
+  const homeTeamId = m.homeTeamId || slot.homeTeamId;
+  const awayTeamId = m.awayTeamId || slot.awayTeamId;
+  const homeTeamName =
+    (homeTeamId ? teamMap.get(homeTeamId)?.nombre : undefined) ?? slot.homeTeamName;
+  const awayTeamName =
+    (awayTeamId ? teamMap.get(awayTeamId)?.nombre : undefined) ?? slot.awayTeamName;
+
+  const swappedSides =
+    Boolean(slot.homeTeamId && m.awayTeamId === slot.homeTeamId) ||
+    Boolean(slot.awayTeamId && m.homeTeamId === slot.awayTeamId);
+  const homeSeed = swappedSides ? slot.awaySeed : slot.homeSeed;
+  const awaySeed = swappedSides ? slot.homeSeed : slot.awaySeed;
+
+  let winnerSide: 'home' | 'away' | null = null;
+  if (m.status === 'FINALIZADO' && m.homeScore !== m.awayScore) {
+    winnerSide = m.homeScore > m.awayScore ? 'home' : 'away';
+  }
+
+  return {
+    ...slot,
+    homeSeed,
+    awaySeed,
+    homeTeamId,
+    awayTeamId,
+    homeTeamName,
+    awayTeamName,
+    homeScore: m.status === 'PROGRAMADO' ? undefined : m.homeScore,
+    awayScore: m.status === 'PROGRAMADO' ? undefined : m.awayScore,
+    winnerSide,
+    status: m.status,
+  };
+}
+
+function getSlotWinner(slot: PlayoffBracketSlot): { teamId?: string; teamName: string } | null {
+  if (slot.winnerSide === 'home') {
+    return { teamId: slot.homeTeamId, teamName: slot.homeTeamName };
+  }
+  if (slot.winnerSide === 'away') {
+    return { teamId: slot.awayTeamId, teamName: slot.awayTeamName };
+  }
+  return null;
+}
+
+function getSlotLoser(slot: PlayoffBracketSlot): { teamId?: string; teamName: string } | null {
+  if (slot.winnerSide === 'home') {
+    return { teamId: slot.awayTeamId, teamName: slot.awayTeamName };
+  }
+  if (slot.winnerSide === 'away') {
+    return { teamId: slot.homeTeamId, teamName: slot.homeTeamName };
+  }
+  return null;
+}
+
+function attachMatchesToSlots(
+  slots: PlayoffBracketSlot[],
+  phaseMatches: Match[],
+  teamMap: Map<string, Pick<Team, 'nombre'>>
+): PlayoffBracketSlot[] {
+  const usedMatchIds = new Set<string>();
+  const sortedPhaseMatches = [...phaseMatches].sort((a, b) => {
+    const keyA = `${a.jornada}-${a.fecha}-${a.hora}-${a.id}`;
+    const keyB = `${b.jornada}-${b.fecha}-${b.hora}-${b.id}`;
+    return keyA.localeCompare(keyB);
+  });
+
+  // Pass 1: exact team-pair matches
+  const matchedFirstPass = slots.map((slot) => {
+    if (!slot.homeTeamId || !slot.awayTeamId) return slot;
+    const found = sortedPhaseMatches.find(
+      (m) =>
+        !usedMatchIds.has(m.id) &&
+        ((m.homeTeamId === slot.homeTeamId && m.awayTeamId === slot.awayTeamId) ||
+          (m.homeTeamId === slot.awayTeamId && m.awayTeamId === slot.homeTeamId))
+    );
+    if (!found) return slot;
+    usedMatchIds.add(found.id);
+    return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+  });
+
+  // Pass 2: single-team overlap
+  const matchedSecondPass = matchedFirstPass.map((slot) => {
+    if (slot.match) return slot;
+    if (!slot.homeTeamId && !slot.awayTeamId) return slot;
+    const found = sortedPhaseMatches.find(
+      (m) =>
+        !usedMatchIds.has(m.id) &&
+        ((slot.homeTeamId && (m.homeTeamId === slot.homeTeamId || m.awayTeamId === slot.homeTeamId)) ||
+          (slot.awayTeamId && (m.homeTeamId === slot.awayTeamId || m.awayTeamId === slot.awayTeamId)))
+    );
+    if (!found) return slot;
+    usedMatchIds.add(found.id);
+    return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+  });
+
+  // Pass 3: remaining unmatched matches of this phase sequentially
+  const remainingMatches = sortedPhaseMatches.filter((m) => !usedMatchIds.has(m.id));
+  let remIdx = 0;
+  return matchedSecondPass.map((slot) => {
+    if (slot.match) return slot;
+    const fallback = remainingMatches[remIdx];
+    if (!fallback) return slot;
+    remIdx += 1;
+    usedMatchIds.add(fallback.id);
+    return resolveSlotOutcome({ ...slot, match: fallback }, teamMap);
+  });
+}
+
+/**
+ * Builds the complete multi-round single-elimination playoff bracket from opening round
+ * all the way to the Grand Final, plus the optional Third Place match ("Tercer Lugar").
+ */
+export function buildFullPlayoffTree(params: {
+  standingsByGroup: Record<string, StandingsRow[]>;
+  clasificadosPorGrupo: number;
+  formatoPlayoff: 4 | 8 | 16;
+  incluyeTercerLugar?: boolean;
+  disciplineMatches: Match[];
+  teamMap: Map<string, Pick<Team, 'nombre'>>;
+}): FullPlayoffBracket {
+  const {
+    standingsByGroup,
+    clasificadosPorGrupo,
+    formatoPlayoff,
+    incluyeTercerLugar = true,
+    disciplineMatches,
+    teamMap,
+  } = params;
+
+  const sequence = getRoundSequence(formatoPlayoff);
+  const openingMatchups = generatePlayoffBracket(
+    standingsByGroup,
+    clasificadosPorGrupo,
+    formatoPlayoff
+  );
+
+  const matchesByPhase = new Map<Match['fase'], Match[]>();
+  for (const m of disciplineMatches) {
+    const existing = matchesByPhase.get(m.fase) ?? [];
+    existing.push(m);
+    matchesByPhase.set(m.fase, existing);
+  }
+
+  const rounds: PlayoffRoundColumn[] = [];
+
+  for (let rIdx = 0; rIdx < sequence.length; rIdx++) {
+    const round = sequence[rIdx];
+    let baseSlots: PlayoffBracketSlot[];
+
+    if (rIdx === 0) {
+      baseSlots = openingMatchups.map((m) => ({
+        ...m,
+        winnerSide: null,
+        status: 'PROYECTADO',
+      }));
+    } else {
+      const prevColumn = rounds[rIdx - 1];
+      const prevSingular = ROUND_SINGULAR[prevColumn.round];
+      const pairCount = Math.max(1, Math.floor(prevColumn.slots.length / 2));
+      baseSlots = [];
+
+      for (let i = 0; i < pairCount; i++) {
+        const leftPrev = prevColumn.slots[i * 2];
+        const rightPrev = prevColumn.slots[i * 2 + 1];
+        const leftWinner = leftPrev ? getSlotWinner(leftPrev) : null;
+        const rightWinner = rightPrev ? getSlotWinner(rightPrev) : null;
+
+        const leftLabel = `Ganador ${prevSingular} ${i * 2 + 1}`;
+        const rightLabel = `Ganador ${prevSingular} ${i * 2 + 2}`;
+
+        baseSlots.push({
+          id: `po-${round.toLowerCase()}-${i + 1}`,
+          round,
+          slot: i + 1,
+          homeSeed: leftLabel,
+          awaySeed: rightLabel,
+          homeTeamName: leftWinner ? leftWinner.teamName : leftLabel,
+          awayTeamName: rightWinner ? rightWinner.teamName : rightLabel,
+          homeTeamId: leftWinner?.teamId,
+          awayTeamId: rightWinner?.teamId,
+          winnerSide: null,
+          status: 'PROYECTADO',
+        });
+      }
+    }
+
+    const resolvedSlots = attachMatchesToSlots(
+      baseSlots,
+      matchesByPhase.get(round) ?? [],
+      teamMap
+    );
+
+    rounds.push({
+      round,
+      title: ROUND_TITLES[round],
+      slots: resolvedSlots,
+    });
+  }
+
+  // Third place match (losers of Semifinals)
+  let thirdPlace: PlayoffBracketSlot | null = null;
+  if (incluyeTercerLugar) {
+    const semiColumn = rounds.find((r) => r.round === 'Semifinal');
+    const semi1 = semiColumn?.slots[0];
+    const semi2 = semiColumn?.slots[1];
+    const semi1Loser = semi1 ? getSlotLoser(semi1) : null;
+    const semi2Loser = semi2 ? getSlotLoser(semi2) : null;
+
+    const baseThird: PlayoffBracketSlot = {
+      id: 'po-tercer-lugar-1',
+      round: 'Tercer Lugar',
+      slot: 1,
+      homeSeed: 'Perdedor Semifinal 1',
+      awaySeed: 'Perdedor Semifinal 2',
+      homeTeamName: semi1Loser ? semi1Loser.teamName : 'Perdedor Semifinal 1',
+      awayTeamName: semi2Loser ? semi2Loser.teamName : 'Perdedor Semifinal 2',
+      homeTeamId: semi1Loser?.teamId,
+      awayTeamId: semi2Loser?.teamId,
+      winnerSide: null,
+      status: 'PROYECTADO',
+    };
+
+    const [resolvedThird] = attachMatchesToSlots(
+      [baseThird],
+      matchesByPhase.get('Tercer Lugar') ?? [],
+      teamMap
+    );
+    thirdPlace = resolvedThird;
+  }
+
+  const finalSlot = rounds[rounds.length - 1]?.slots[0];
+  const champion = finalSlot ? getSlotWinner(finalSlot) : null;
+  const thirdWinner = thirdPlace ? getSlotWinner(thirdPlace) : null;
+
+  return {
+    rounds,
+    thirdPlace,
+    championName: champion?.teamName,
+    thirdPlaceWinnerName: thirdWinner?.teamName,
+  };
+}
+
 /**
  * Validates whether a post-group-stage player transfer complies with tournament regulations.
  */
@@ -698,6 +968,8 @@ export function computeTeamMatchProgression(
         ? '4tos'
         : match.fase === 'Semifinal'
         ? 'Semi'
+        : match.fase === 'Tercer Lugar'
+        ? '3° Lugar'
         : 'Final';
 
     return {

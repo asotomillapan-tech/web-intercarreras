@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   Award,
   Bell,
@@ -9,6 +9,7 @@ import {
   Shield,
   Star,
   Upload,
+  User,
   UserCog,
 } from 'lucide-react';
 import { DISCIPLINE_MAP, UFRO_CAREERS } from '../data/ufroSeed';
@@ -32,6 +33,13 @@ interface AccountViewProps {
   onOpenAuth: () => void;
   onToggleFavoriteTeam: (teamId: string) => void;
   onToggleNotifications: (enabled: boolean) => void;
+  onUpdateUserProfile: (updates: {
+    displayName: string;
+    fechaNacimiento: string;
+    carrera: string;
+    facultad: string;
+    telefono: string;
+  }) => Promise<void> | void;
   onUpdatePlayerProfile: (updated: Player) => void;
   onInspectTeam: (teamId: string) => void;
   onOpenMatchModal: (match: Match) => void;
@@ -44,6 +52,7 @@ export function AccountView({
   onOpenAuth,
   onToggleFavoriteTeam,
   onToggleNotifications,
+  onUpdateUserProfile,
   onUpdatePlayerProfile,
   onInspectTeam,
   onOpenMatchModal,
@@ -52,6 +61,33 @@ export function AccountView({
   const [teamSearch, setTeamSearch] = useState('');
   const [profileSavedMsg, setProfileSavedMsg] = useState<string | null>(null);
   const [profileErrors, setProfileErrors] = useState<string[]>([]);
+
+  // General user account profile form state (available for all authenticated roles)
+  const [userDisplayName, setUserDisplayName] = useState(currentUser?.displayName ?? '');
+  const [userBirthDate, setUserBirthDate] = useState(currentUser?.fechaNacimiento ?? '');
+  const [userPhone, setUserPhone] = useState(currentUser?.telefono ?? '');
+  const [userCareer, setUserCareer] = useState(currentUser?.carrera ?? '');
+  const [userFaculty, setUserFaculty] = useState(currentUser?.facultad ?? '');
+  const [userProfileSaving, setUserProfileSaving] = useState(false);
+  const [userProfileSavedMsg, setUserProfileSavedMsg] = useState<string | null>(null);
+  const [userProfileError, setUserProfileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUserDisplayName(currentUser?.displayName ?? '');
+    setUserBirthDate(currentUser?.fechaNacimiento ?? '');
+    setUserPhone(currentUser?.telefono ?? '');
+    setUserCareer(currentUser?.carrera ?? '');
+    setUserFaculty(currentUser?.facultad ?? '');
+    setUserProfileSavedMsg(null);
+    setUserProfileError(null);
+  }, [
+    currentUser?.uid,
+    currentUser?.displayName,
+    currentUser?.fechaNacimiento,
+    currentUser?.telefono,
+    currentUser?.carrera,
+    currentUser?.facultad,
+  ]);
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
   const matchMap = useMemo(() => new Map(state.matches.map((m) => [m.id, m])), [state.matches]);
@@ -181,6 +217,76 @@ export function AccountView({
     setProfileErrors([]);
     setProfileSavedMsg('Tus datos estudiantiles oficiales han sido actualizados correctamente.');
   };
+
+  const handleUserCareerChange = (nextCareer: string) => {
+    setUserCareer(nextCareer);
+    const matchedCareer = UFRO_CAREERS.find((c) => c.carrera === nextCareer);
+    if (matchedCareer) {
+      setUserFaculty(matchedCareer.facultad);
+    } else if (!nextCareer) {
+      setUserFaculty('');
+    }
+  };
+
+  const handleSaveUserAccountProfile = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmedName = userDisplayName.trim();
+    const trimmedDob = userBirthDate.trim();
+    const trimmedPhone = userPhone.trim();
+    const trimmedCareer = userCareer.trim();
+    const trimmedFaculty = userFaculty.trim();
+
+    if (!trimmedName) {
+      setUserProfileError('Ingresa tu nombre completo.');
+      setUserProfileSavedMsg(null);
+      return;
+    }
+    if (trimmedName.length > 120) {
+      setUserProfileError('El nombre no puede superar los 120 caracteres.');
+      setUserProfileSavedMsg(null);
+      return;
+    }
+    if (trimmedDob && !/^\d{4}-\d{2}-\d{2}$/.test(trimmedDob)) {
+      setUserProfileError('Selecciona una fecha de nacimiento válida.');
+      setUserProfileSavedMsg(null);
+      return;
+    }
+    if (trimmedPhone.length > 30) {
+      setUserProfileError('El teléfono no puede superar los 30 caracteres.');
+      setUserProfileSavedMsg(null);
+      return;
+    }
+    if (trimmedCareer.length > 140 || trimmedFaculty.length > 140) {
+      setUserProfileError('La carrera y la facultad no pueden superar los 140 caracteres.');
+      setUserProfileSavedMsg(null);
+      return;
+    }
+
+    setUserProfileSaving(true);
+    setUserProfileError(null);
+    setUserProfileSavedMsg(null);
+    try {
+      await onUpdateUserProfile({
+        displayName: trimmedName,
+        fechaNacimiento: trimmedDob,
+        carrera: trimmedCareer,
+        facultad: trimmedFaculty,
+        telefono: trimmedPhone,
+      });
+      setUserProfileSavedMsg('Tus datos personales han sido actualizados correctamente.');
+    } catch (err) {
+      setUserProfileError(
+        err instanceof Error ? err.message : 'No se pudieron guardar tus datos personales.'
+      );
+    } finally {
+      setUserProfileSaving(false);
+    }
+  };
+
+  const isCustomCareerValue =
+    Boolean(userCareer) &&
+    userCareer !== 'Otra / Externo UFRO' &&
+    !UFRO_CAREERS.some((c) => c.carrera === userCareer);
 
   return (
     <div className="bg-white min-h-[75vh]">
@@ -343,6 +449,145 @@ export function AccountView({
             </button>
           </div>
         )}
+
+        {/* PERSONAL ACCOUNT PROFILE EDITOR (Available to ALL authenticated users) */}
+        <section className="border border-neutral-200 p-6 sm:p-8 space-y-6">
+          <div className="flex items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex items-center gap-2.5">
+              <User className="w-5 h-5 text-[#707ef9]" />
+              <div>
+                <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                  Mis Datos Personales
+                </h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Actualiza tu nombre visible, fecha de nacimiento, carrera y datos de contacto en tu cuenta.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {userProfileSavedMsg && (
+            <div
+              role="status"
+              className="bg-emerald-50 border border-emerald-300 p-4 text-xs text-emerald-950 flex items-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span>{userProfileSavedMsg}</span>
+            </div>
+          )}
+
+          {userProfileError && (
+            <div role="alert" className="bg-red-50 border border-red-300 p-4 text-xs text-red-900">
+              {userProfileError}
+            </div>
+          )}
+
+          <form onSubmit={handleSaveUserAccountProfile} className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="account-display-name" className="block text-xs text-neutral-600 mb-1">
+                  Nombre completo *
+                </label>
+                <input
+                  id="account-display-name"
+                  type="text"
+                  required
+                  maxLength={120}
+                  value={userDisplayName}
+                  onChange={(e) => setUserDisplayName(e.target.value)}
+                  className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="account-email-readonly" className="block text-xs text-neutral-600 mb-1">
+                  Correo electrónico (cuenta Google)
+                </label>
+                <input
+                  id="account-email-readonly"
+                  type="email"
+                  readOnly
+                  value={currentUser.email}
+                  className="w-full border border-neutral-200 bg-[#f5f6f8] px-3 py-2 text-sm text-neutral-600"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="account-dob" className="block text-xs text-neutral-600 mb-1">
+                  Fecha de nacimiento
+                </label>
+                <input
+                  id="account-dob"
+                  type="date"
+                  value={userBirthDate}
+                  onChange={(e) => setUserBirthDate(e.target.value)}
+                  className="w-full border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="account-phone" className="block text-xs text-neutral-600 mb-1">
+                  Teléfono de contacto
+                </label>
+                <input
+                  id="account-phone"
+                  type="tel"
+                  maxLength={30}
+                  value={userPhone}
+                  onChange={(e) => setUserPhone(e.target.value)}
+                  placeholder="+56 9 1234 5678"
+                  className="w-full border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="account-career" className="block text-xs text-neutral-600 mb-1">
+                  Carrera / Unidad
+                </label>
+                <select
+                  id="account-career"
+                  value={userCareer}
+                  onChange={(e) => handleUserCareerChange(e.target.value)}
+                  className="w-full border border-neutral-300 bg-white px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+                >
+                  <option value="">No especificada</option>
+                  {UFRO_CAREERS.map((c) => (
+                    <option key={c.carrera} value={c.carrera}>
+                      {c.carrera}
+                    </option>
+                  ))}
+                  <option value="Otra / Externo UFRO">Otra / Externo UFRO</option>
+                  {isCustomCareerValue && <option value={userCareer}>{userCareer}</option>}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="account-faculty" className="block text-xs text-neutral-600 mb-1">
+                  Facultad / Área
+                </label>
+                <input
+                  id="account-faculty"
+                  type="text"
+                  maxLength={140}
+                  value={userFaculty}
+                  onChange={(e) => setUserFaculty(e.target.value)}
+                  placeholder="Ej: Facultad de Ingeniería y Ciencias"
+                  className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-3 border-t border-neutral-200">
+              <button
+                type="submit"
+                disabled={userProfileSaving}
+                className="px-6 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] disabled:opacity-50 text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer"
+              >
+                {userProfileSaving ? 'Guardando...' : 'Guardar mis datos'}
+              </button>
+            </div>
+          </form>
+        </section>
 
         {/* PLAYER SELF-SERVICE PROFILE EDITOR (ONLY for 'jugador' or linked player) */}
         {currentUser.role === 'jugador' && activeDraft && (

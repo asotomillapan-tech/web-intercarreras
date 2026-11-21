@@ -128,6 +128,10 @@ service cloud.firestore {
           'displayName',
           'email',
           'photoURL',
+          'fechaNacimiento',
+          'carrera',
+          'facultad',
+          'telefono',
           'role',
           'favoriteTeamIds',
           'linkedPlayerId',
@@ -140,6 +144,10 @@ service cloud.firestore {
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!('fechaNacimiento' in data) || (data.fechaNacimiento is string && data.fechaNacimiento.size() <= 20))
+        && (!('carrera' in data) || (data.carrera is string && data.carrera.size() <= 140))
+        && (!('facultad' in data) || (data.facultad is string && data.facultad.size() <= 140))
+        && (!('telefono' in data) || (data.telefono is string && data.telefono.size() <= 30))
         && isValidRole(data.role)
         && isValidFavoriteList(data.favoriteTeamIds)
         && (!('linkedPlayerId' in data) || (data.linkedPlayerId is string && data.linkedPlayerId.size() <= 128))
@@ -223,6 +231,7 @@ service cloud.firestore {
           'numGrupos',
           'clasificadosPorGrupo',
           'formatoPlayoff',
+          'incluyeTercerLugar',
           'inscripcionesAbiertas',
           'transferenciasAbiertas',
           'maxTransferenciasPorEquipo',
@@ -235,6 +244,7 @@ service cloud.firestore {
         && data.numGrupos is int && data.numGrupos >= 1 && data.numGrupos <= 16
         && data.clasificadosPorGrupo is int && data.clasificadosPorGrupo >= 1 && data.clasificadosPorGrupo <= 8
         && data.formatoPlayoff in [4, 8, 16]
+        && (!('incluyeTercerLugar' in data) || data.incluyeTercerLugar is bool)
         && data.inscripcionesAbiertas is bool
         && data.transferenciasAbiertas is bool
         && data.maxTransferenciasPorEquipo is int && data.maxTransferenciasPorEquipo >= 0 && data.maxTransferenciasPorEquipo <= 10
@@ -444,7 +454,7 @@ service cloud.firestore {
         && isValidId(data.id)
         && isValidDiscipline(data.disciplineId)
         && data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 40
-        && data.fase in ['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Final']
+        && data.fase in ['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Tercer Lugar', 'Final']
         && data.jornada is int && data.jornada >= 1 && data.jornada <= 50
         && data.fecha is string && data.fecha.size() >= 8 && data.fecha.size() <= 20
         && data.hora is string && data.hora.size() >= 4 && data.hora.size() <= 12
@@ -682,6 +692,10 @@ service cloud.firestore {
               'delegatedTeamId',
               'displayName',
               'photoURL',
+              'fechaNacimiento',
+              'carrera',
+              'facultad',
+              'telefono',
               'favoriteTeamIds',
               'notificationsEnabled',
               'updatedAt'
@@ -693,6 +707,10 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'displayName',
               'photoURL',
+              'fechaNacimiento',
+              'carrera',
+              'facultad',
+              'telefono',
               'favoriteTeamIds',
               'notificationsEnabled',
               'updatedAt'
@@ -772,6 +790,7 @@ service cloud.firestore {
           'numGrupos',
           'clasificadosPorGrupo',
           'formatoPlayoff',
+          'incluyeTercerLugar',
           'inscripcionesAbiertas',
           'transferenciasAbiertas',
           'maxTransferenciasPorEquipo',

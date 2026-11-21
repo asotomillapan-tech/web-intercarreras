@@ -175,6 +175,8 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
           formatoPlayoff: ([4, 8, 16].includes(Number(data.formatoPlayoff))
             ? Number(data.formatoPlayoff)
             : mergedConfigs[id].formatoPlayoff) as 4 | 8 | 16,
+          incluyeTercerLugar:
+            typeof data.incluyeTercerLugar === 'boolean' ? data.incluyeTercerLugar : true,
           inscripcionesAbiertas: Boolean(data.inscripcionesAbiertas),
           transferenciasAbiertas: Boolean(data.transferenciasAbiertas),
           maxTransferenciasPorEquipo: Number(data.maxTransferenciasPorEquipo) ?? 2,
@@ -502,6 +504,10 @@ export function syncGoogleUserToFirestore(user: User): Promise<AppUserProfile> {
         displayName: String(data.displayName || user.displayName || 'Estudiante UFRO'),
         email: String(data.email || user.email || ''),
         photoURL: typeof data.photoURL === 'string' ? data.photoURL : user.photoURL ?? undefined,
+        fechaNacimiento: typeof data.fechaNacimiento === 'string' ? data.fechaNacimiento : undefined,
+        carrera: typeof data.carrera === 'string' ? data.carrera : undefined,
+        facultad: typeof data.facultad === 'string' ? data.facultad : undefined,
+        telefono: typeof data.telefono === 'string' ? data.telefono : undefined,
         role: isBootstrappedAdmin ? 'admin' : resolvedRole,
         favoriteTeamIds: Array.isArray(data.favoriteTeamIds) ? data.favoriteTeamIds : [],
         linkedPlayerId: typeof data.linkedPlayerId === 'string' ? data.linkedPlayerId : undefined,
@@ -577,7 +583,15 @@ export function syncGoogleUserToFirestore(user: User): Promise<AppUserProfile> {
 
 export async function updateFirestoreUserPreferences(
   uid: string,
-  updates: { favoriteTeamIds?: string[]; notificationsEnabled?: boolean; displayName?: string }
+  updates: {
+    favoriteTeamIds?: string[];
+    notificationsEnabled?: boolean;
+    displayName?: string;
+    fechaNacimiento?: string;
+    carrera?: string;
+    facultad?: string;
+    telefono?: string;
+  }
 ): Promise<void> {
   const path = `users/${uid}`;
   try {
@@ -593,6 +607,18 @@ export async function updateFirestoreUserPreferences(
     }
     if (updates.displayName !== undefined && updates.displayName.trim()) {
       safeUpdate.displayName = updates.displayName.trim().slice(0, 120);
+    }
+    if (updates.fechaNacimiento !== undefined) {
+      safeUpdate.fechaNacimiento = updates.fechaNacimiento.trim().slice(0, 20);
+    }
+    if (updates.carrera !== undefined) {
+      safeUpdate.carrera = updates.carrera.trim().slice(0, 140);
+    }
+    if (updates.facultad !== undefined) {
+      safeUpdate.facultad = updates.facultad.trim().slice(0, 140);
+    }
+    if (updates.telefono !== undefined) {
+      safeUpdate.telefono = updates.telefono.trim().slice(0, 30);
     }
     await updateDoc(userRef, safeUpdate);
   } catch (error) {
@@ -654,6 +680,10 @@ export async function listFirestoreUsers(): Promise<AppUserProfile[]> {
         displayName: String(data.displayName || 'Usuario UFRO'),
         email: String(data.email || ''),
         photoURL: typeof data.photoURL === 'string' ? data.photoURL : undefined,
+        fechaNacimiento: typeof data.fechaNacimiento === 'string' ? data.fechaNacimiento : undefined,
+        carrera: typeof data.carrera === 'string' ? data.carrera : undefined,
+        facultad: typeof data.facultad === 'string' ? data.facultad : undefined,
+        telefono: typeof data.telefono === 'string' ? data.telefono : undefined,
         role: (data.role as UserRole) || 'tradicional',
         favoriteTeamIds: Array.isArray(data.favoriteTeamIds) ? data.favoriteTeamIds : [],
         linkedPlayerId: typeof data.linkedPlayerId === 'string' ? data.linkedPlayerId : undefined,
@@ -740,6 +770,7 @@ export async function saveFirestoreDisciplineConfig(config: DisciplineFormatConf
       numGrupos: Math.max(1, Math.min(16, Math.trunc(config.numGrupos))),
       clasificadosPorGrupo: Math.max(1, Math.min(8, Math.trunc(config.clasificadosPorGrupo))),
       formatoPlayoff: config.formatoPlayoff,
+      incluyeTercerLugar: config.incluyeTercerLugar !== false,
       inscripcionesAbiertas: Boolean(config.inscripcionesAbiertas),
       transferenciasAbiertas: Boolean(config.transferenciasAbiertas),
       maxTransferenciasPorEquipo: Math.max(0, Math.min(10, Math.trunc(config.maxTransferenciasPorEquipo))),

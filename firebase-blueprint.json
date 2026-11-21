@@ -24,6 +24,22 @@
           "type": "string",
           "maxLength": 500
         },
+        "fechaNacimiento": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "carrera": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "facultad": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "telefono": {
+          "type": "string",
+          "maxLength": 30
+        },
         "role": {
           "type": "string",
           "enum": ["tradicional", "jugador", "delegado", "arbitro", "fotografo", "prensa", "admin"]
@@ -151,6 +167,9 @@
         "formatoPlayoff": {
           "type": "integer",
           "enum": [4, 8, 16]
+        },
+        "incluyeTercerLugar": {
+          "type": "boolean"
         },
         "inscripcionesAbiertas": {
           "type": "boolean"
@@ -400,7 +419,7 @@
         },
         "fase": {
           "type": "string",
-          "enum": ["Grupos", "Octavos", "Cuartos", "Semifinal", "Final"]
+          "enum": ["Grupos", "Octavos", "Cuartos", "Semifinal", "Tercer Lugar", "Final"]
         },
         "jornada": {
           "type": "integer"

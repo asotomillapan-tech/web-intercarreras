@@ -82,7 +82,7 @@ export function Navbar({
             referrerPolicy="no-referrer"
           />
           <span className="font-display text-base lg:text-lg font-bold tracking-wider uppercase text-white">
-            Intercarreras UFRO
+            Intercarreras
           </span>
         </button>
 

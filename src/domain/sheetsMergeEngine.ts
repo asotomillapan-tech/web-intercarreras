@@ -222,6 +222,9 @@ function parseMatchPhase(raw: string | undefined, fallback: MatchPhase): MatchPh
   if (norm.includes('octav')) return 'Octavos';
   if (norm.includes('cuart')) return 'Cuartos';
   if (norm.includes('semi')) return 'Semifinal';
+  if (norm.includes('tercer') || norm.includes('3er') || norm.includes('3°') || norm.includes('bronce')) {
+    return 'Tercer Lugar';
+  }
   if (norm === 'final' || norm.includes('final')) return 'Final';
   if (norm.includes('grup')) return 'Grupos';
   return fallback;

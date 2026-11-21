@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildFullPlayoffTree,
   compareScoresheetWithLive,
   computeStandings,
   computeTeamHistoricalStats,
@@ -418,4 +419,131 @@ test('computeTeamMatchProgression returns chronological per-match and cumulative
   const emptySeries = computeTeamMatchProgression(teamA, [matches[1], matches[3]], lookup);
   assert.deepEqual(emptySeries, []);
 });
+
+test('buildFullPlayoffTree generates all elimination rounds, propagates winners to Final, and losers to Tercer Lugar', () => {
+  const standingsByGroup = {
+    'Grupo A': [
+      { teamId: 'a1', teamName: 'Alpha', sigla: 'ALP', carrera: 'Med', groupName: 'Grupo A', pj: 3, pg: 3, pe: 0, pp: 0, favor: 9, contra: 1, diferencia: 8, puntos: 9, racha: [] },
+      { teamId: 'a2', teamName: 'Beta', sigla: 'BET', carrera: 'Der', groupName: 'Grupo A', pj: 3, pg: 2, pe: 0, pp: 1, favor: 6, contra: 3, diferencia: 3, puntos: 6, racha: [] },
+    ],
+    'Grupo B': [
+      { teamId: 'b1', teamName: 'Gamma', sigla: 'GAM', carrera: 'Ing', groupName: 'Grupo B', pj: 3, pg: 3, pe: 0, pp: 0, favor: 7, contra: 2, diferencia: 5, puntos: 9, racha: [] },
+      { teamId: 'b2', teamName: 'Delta', sigla: 'DEL', carrera: 'Kin', groupName: 'Grupo B', pj: 3, pg: 1, pe: 1, pp: 1, favor: 4, contra: 4, diferencia: 0, puntos: 4, racha: [] },
+    ],
+  };
+
+  const teamMap = new Map<string, Pick<Team, 'nombre'>>([
+    ['a1', { nombre: 'Alpha' }],
+    ['a2', { nombre: 'Beta' }],
+    ['b1', { nombre: 'Gamma' }],
+    ['b2', { nombre: 'Delta' }],
+  ]);
+
+  // 1) Projected 8-team bracket shows Cuartos -> Semifinal -> Final + Tercer Lugar
+  const tree8 = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 8,
+    incluyeTercerLugar: true,
+    disciplineMatches: [],
+    teamMap,
+  });
+  assert.deepEqual(
+    tree8.rounds.map((r) => [r.round, r.slots.length]),
+    [
+      ['Cuartos', 4],
+      ['Semifinal', 2],
+      ['Final', 1],
+    ]
+  );
+  assert.equal(tree8.rounds[1].slots[0].homeTeamName, 'Ganador Cuarto 1');
+  assert.equal(tree8.rounds[2].slots[0].awayTeamName, 'Ganador Semifinal 2');
+  assert.ok(tree8.thirdPlace);
+  assert.equal(tree8.thirdPlace.homeTeamName, 'Perdedor Semifinal 1');
+  assert.equal(tree8.thirdPlace.awayTeamName, 'Perdedor Semifinal 2');
+
+  // 2) 16-team bracket includes Octavos -> Cuartos -> Semifinal -> Final
+  const tree16 = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 16,
+    incluyeTercerLugar: false,
+    disciplineMatches: [],
+    teamMap,
+  });
+  assert.deepEqual(
+    tree16.rounds.map((r) => [r.round, r.slots.length]),
+    [
+      ['Octavos', 8],
+      ['Cuartos', 4],
+      ['Semifinal', 2],
+      ['Final', 1],
+    ]
+  );
+  assert.equal(tree16.thirdPlace, null);
+
+  // 3) 4-team bracket with real Semifinal + Tercer Lugar + Final matches propagates real teams and podium
+  const makePoMatch = (overrides: Partial<Match>): Match => ({
+    id: 'm',
+    disciplineId: 'f7-h-1',
+    groupName: 'Playoffs',
+    fase: 'Semifinal',
+    jornada: 1,
+    fecha: '2026-11-20',
+    hora: '19:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a1',
+    awayTeamId: 'b2',
+    homeScore: 0,
+    awayScore: 0,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 0, away: 0 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+    ...overrides,
+  });
+
+  const tree4 = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 4,
+    incluyeTercerLugar: true,
+    disciplineMatches: [
+      makePoMatch({ id: 'sf1', fase: 'Semifinal', homeTeamId: 'a1', awayTeamId: 'b2', homeScore: 3, awayScore: 1 }),
+      makePoMatch({ id: 'sf2', fase: 'Semifinal', homeTeamId: 'b1', awayTeamId: 'a2', homeScore: 1, awayScore: 2 }),
+      makePoMatch({ id: 'tp1', fase: 'Tercer Lugar', homeTeamId: 'b2', awayTeamId: 'b1', homeScore: 0, awayScore: 2 }),
+      makePoMatch({ id: 'fn1', fase: 'Final', homeTeamId: 'a1', awayTeamId: 'a2', homeScore: 4, awayScore: 2 }),
+    ],
+    teamMap,
+  });
+
+  assert.equal(tree4.rounds[1].slots[0].homeTeamId, 'a1');
+  assert.equal(tree4.rounds[1].slots[0].awayTeamId, 'a2');
+  assert.equal(tree4.championName, 'Alpha');
+  assert.ok(tree4.thirdPlace);
+  assert.equal(tree4.thirdPlace.homeTeamId, 'b2');
+  assert.equal(tree4.thirdPlace.awayTeamId, 'b1');
+  assert.equal(tree4.thirdPlaceWinnerName, 'Gamma');
+
+  // 4) computeTeamMatchProgression labels Tercer Lugar cleanly as '3° Lugar'
+  const teamGamma: Team = {
+    id: 'b1',
+    nombre: 'Gamma',
+    sigla: 'GAM',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ing',
+    facultad: 'FICA',
+    groupName: 'Grupo B',
+  };
+  const prog = computeTeamMatchProgression(
+    teamGamma,
+    [makePoMatch({ id: 'tp1', fase: 'Tercer Lugar', homeTeamId: 'b2', awayTeamId: 'b1', homeScore: 0, awayScore: 2 })]
+  );
+  assert.equal(prog[0].label, '3° Lugar');
+});
+
 

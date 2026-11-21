@@ -38,6 +38,7 @@ import type {
   Player,
   TournamentState,
 } from '../types/tournament';
+import { HomeMatchCalendar } from './HomeMatchCalendar';
 import type { NavSection } from './Navbar';
 
 interface HomeViewProps {
@@ -585,6 +586,16 @@ export function HomeView({
           </div>
         )}
       </section>
+
+      {/* Section 1C: Calendario de Partidos (Filtro por Disciplina y Sede) */}
+      <HomeMatchCalendar
+        matches={state.matches}
+        teams={state.teams}
+        temporada={state.temporada}
+        currentUser={currentUser}
+        onOpenMatchModal={onOpenMatchModal}
+        onOpenMatchInReferee={onOpenMatchInReferee}
+      />
 
       {/* Section 2: Match Center (Public Post-Match Results + Live-Hour MVP Voting) */}
       <section className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-14 border-b border-neutral-200">

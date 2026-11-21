@@ -14,7 +14,13 @@ export type AcademicLevel = 'Pregrado' | 'Postgrado';
 
 export type MatchStatus = 'PROGRAMADO' | 'EN_VIVO' | 'FINALIZADO';
 
-export type MatchPhase = 'Grupos' | 'Octavos' | 'Cuartos' | 'Semifinal' | 'Final';
+export type MatchPhase =
+  | 'Grupos'
+  | 'Octavos'
+  | 'Cuartos'
+  | 'Semifinal'
+  | 'Tercer Lugar'
+  | 'Final';
 
 export type TournamentStage = 'INSCRIPCIONES' | 'FASE_GRUPOS' | 'TRANSFERENCIAS' | 'PLAYOFFS';
 
@@ -38,6 +44,7 @@ export interface DisciplineFormatConfig {
   numGrupos: number;
   clasificadosPorGrupo: number;
   formatoPlayoff: 4 | 8 | 16;
+  incluyeTercerLugar?: boolean;
   inscripcionesAbiertas: boolean;
   transferenciasAbiertas: boolean;
   maxTransferenciasPorEquipo: number;
@@ -118,6 +125,9 @@ export interface MatchEvent {
     | 'BLOQUEO'
     | 'SET_GANADO';
   detail: string;
+  pointsDelta?: number;
+  periodIndex?: number;
+  triggeredSetWin?: boolean;
 }
 
 export interface PeriodScore {
@@ -218,7 +228,7 @@ export interface StandingsRow {
 
 export interface PlayoffMatchup {
   id: string;
-  round: 'Octavos' | 'Cuartos' | 'Semifinal' | 'Final';
+  round: 'Octavos' | 'Cuartos' | 'Semifinal' | 'Tercer Lugar' | 'Final';
   slot: number;
   homeSeed: string;
   awaySeed: string;
@@ -226,6 +236,27 @@ export interface PlayoffMatchup {
   awayTeamName: string;
   homeTeamId?: string;
   awayTeamId?: string;
+}
+
+export interface PlayoffBracketSlot extends PlayoffMatchup {
+  match?: Match;
+  homeScore?: number;
+  awayScore?: number;
+  winnerSide?: 'home' | 'away' | null;
+  status: 'PROYECTADO' | MatchStatus;
+}
+
+export interface PlayoffRoundColumn {
+  round: 'Octavos' | 'Cuartos' | 'Semifinal' | 'Final';
+  title: string;
+  slots: PlayoffBracketSlot[];
+}
+
+export interface FullPlayoffBracket {
+  rounds: PlayoffRoundColumn[];
+  thirdPlace: PlayoffBracketSlot | null;
+  championName?: string;
+  thirdPlaceWinnerName?: string;
 }
 
 export type UserRole =
@@ -242,6 +273,10 @@ export interface AppUserProfile {
   displayName: string;
   email: string;
   photoURL?: string;
+  fechaNacimiento?: string;
+  carrera?: string;
+  facultad?: string;
+  telefono?: string;
   role: UserRole;
   favoriteTeamIds: string[];
   linkedPlayerId?: string;

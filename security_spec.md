@@ -11,7 +11,9 @@
 8. **Referee Stats & Scoreboard Guard**: An `arbitro` may update non-finalized `/matches/{matchId}` (score/periods/events/status/validation) and ONLY `stats` + `updatedAt` on `/players/{playerId}`.
 9. **Photographer Scope**: Only `fotografo` or `admin` can create, update, or delete `/photos/{photoId}` records.
 10. **Press / Newsroom Scope**: Only `prensa` or `admin` can create, update, publish, delete, or read unpublished drafts in `/news/{newsId}`. Public visitors may only read `/news` documents where `published == true`.
-11. **Strict Timestamps & Schema Validation**: Every write validates `isValidId()` on single-doc targets, `isValid[Entity](incoming())`, `hasAll`/`hasOnly` keys, string `.size()` limits, bounded arrays, and `request.time` for `createdAt`/`updatedAt`.
+11. **User Profile Personal Data Isolation & Self-Edit**: Authenticated owners may update their own `/users/{uid}` personal fields (`displayName`, `fechaNacimiento`, `carrera`, `facultad`, `telefono`, `photoURL`, `favoriteTeamIds`, `notificationsEnabled`) without being able to escalate `role`, `linkedPlayerId`, or `delegatedTeamId`. PII in `/users/{uid}` remains readable strictly by `isOwner(userId)` or `isAdmin()`.
+12. **Playoff Phase Integrity**: `/matches/{matchId}.fase` is restricted strictly to `['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Tercer Lugar', 'Final']`.
+13. **Strict Timestamps & Schema Validation**: Every write validates `isValidId()` on single-doc targets, `isValid[Entity](incoming())`, `hasAll`/`hasOnly` keys, string `.size()` limits, bounded arrays, and `request.time` for `createdAt`/`updatedAt`.
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
 1. **Self-Admin Escalation on Create**: `POST /users/{uid}` with `role: 'admin'` by non-bootstrapped user -> DENIED.

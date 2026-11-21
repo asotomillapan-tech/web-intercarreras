@@ -3,6 +3,7 @@ import { AlertCircle, X } from 'lucide-react';
 import { createInitialTournamentState, DISCIPLINE_MAP } from './data/ufroSeed';
 import { validateRoleChange } from './domain/rbacEngine';
 import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tournamentEngine';
+import { applyStatDeltaClamped, type PlayerStatDelta } from './domain/liveMatchEngine';
 import {
   getGoogleAccessToken,
   initGoogleAuth,
@@ -606,6 +607,38 @@ function AppContent() {
     }).catch((err) => reportCloudError('Error actualizando notificaciones', err));
   };
 
+  const handleUpdateUserProfile = async (updates: {
+    displayName: string;
+    fechaNacimiento: string;
+    carrera: string;
+    facultad: string;
+    telefono: string;
+  }) => {
+    if (!currentUser) return;
+    const sanitized = {
+      displayName: updates.displayName.trim().slice(0, 120),
+      fechaNacimiento: updates.fechaNacimiento.trim().slice(0, 20),
+      carrera: updates.carrera.trim().slice(0, 140),
+      facultad: updates.facultad.trim().slice(0, 140),
+      telefono: updates.telefono.trim().slice(0, 30),
+    };
+    if (!sanitized.displayName) {
+      throw new Error('Ingresa un nombre válido.');
+    }
+
+    await updateFirestoreUserPreferences(currentUser.uid, sanitized);
+
+    const updatedUser: AppUserProfile = {
+      ...currentUser,
+      ...sanitized,
+      updatedAt: new Date().toISOString(),
+    };
+    setState((prev) => ({
+      ...prev,
+      users: prev.users.map((u) => (u.uid === currentUser.uid ? updatedUser : u)),
+    }));
+  };
+
   const handleVoteMvp = (match: Match, player: Player) => {
     if (!currentUser) {
       setAuthModalOpen(true);
@@ -869,16 +902,7 @@ function AppContent() {
   const handleUpdateMatch = (
     updatedMatch: Match,
     scorerPlayerId?: string,
-    statDelta?: Partial<{
-      goles: number;
-      tarjetasAmarillas: number;
-      tarjetasRojas: number;
-      puntos: number;
-      triples: number;
-      faltas: number;
-      aces: number;
-      bloqueos: number;
-    }>
+    statDelta?: PlayerStatDelta
   ) => {
     if (!currentUser) return;
     let updatedPlayerForCloud: Player | null = null;
@@ -891,17 +915,7 @@ function AppContent() {
               if (p.id !== scorerPlayerId) return p;
               const nextP: Player = {
                 ...p,
-                stats: {
-                  ...p.stats,
-                  goles: p.stats.goles + (statDelta.goles ?? 0),
-                  tarjetasAmarillas: p.stats.tarjetasAmarillas + (statDelta.tarjetasAmarillas ?? 0),
-                  tarjetasRojas: p.stats.tarjetasRojas + (statDelta.tarjetasRojas ?? 0),
-                  puntos: p.stats.puntos + (statDelta.puntos ?? 0),
-                  triples: p.stats.triples + (statDelta.triples ?? 0),
-                  faltas: p.stats.faltas + (statDelta.faltas ?? 0),
-                  aces: p.stats.aces + (statDelta.aces ?? 0),
-                  bloqueos: p.stats.bloqueos + (statDelta.bloqueos ?? 0),
-                },
+                stats: applyStatDeltaClamped(p.stats, statDelta),
               };
               updatedPlayerForCloud = nextP;
               return nextP;
@@ -926,6 +940,18 @@ function AppContent() {
         reportCloudError('Error actualizando estadísticas del jugador', err)
       );
     }
+  };
+
+  const handleAdminAddMatch = (newMatch: Match) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    setState((prev) => ({
+      ...prev,
+      matches: [newMatch, ...prev.matches],
+    }));
+    queueMasterSyncForDiscipline(newMatch.disciplineId);
+    void saveFirestoreMatch(newMatch, true, 'admin').catch((err) =>
+      reportCloudError('Error programando nuevo encuentro en Firestore', err)
+    );
   };
 
   const handleRegisterTeam = (team: Team, roster: Player[]) => {
@@ -1205,6 +1231,7 @@ function AppContent() {
             onOpenAuth={() => setAuthModalOpen(true)}
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
             onToggleNotifications={handleToggleNotifications}
+            onUpdateUserProfile={handleUpdateUserProfile}
             onUpdatePlayerProfile={handleUpdatePlayer}
             onInspectTeam={setInspectedTeamId}
             onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
@@ -1224,6 +1251,7 @@ function AppContent() {
             autoSyncSessionApproved={autoSyncSessionApproved}
             autoSyncState={autoSyncState}
             onUpdateMatch={handleUpdateMatch}
+            onAddMatch={handleAdminAddMatch}
             onAddTeam={handleAdminAddTeam}
             onUpdateTeam={handleAdminUpdateTeam}
             onDeleteTeam={handleAdminDeleteTeam}
