@@ -452,3 +452,178 @@ export function isVolleyballSetWon(homePts: number, awayPts: number, setNumber: 
   if (awayPts >= target && awayPts - homePts >= 2) return 'away';
   return null;
 }
+
+export type TeamMatchOutcome = 'G' | 'E' | 'P' | 'EN_VIVO' | 'PROGRAMADO';
+
+export interface TeamHistoryMatchItem {
+  match: Match;
+  isHome: boolean;
+  opponentTeamId: string;
+  teamScore: number;
+  opponentScore: number;
+  outcome: TeamMatchOutcome;
+}
+
+export interface TeamHistoricalStats {
+  teamId: string;
+  pj: number;
+  pg: number;
+  pe: number;
+  pp: number;
+  favor: number;
+  contra: number;
+  diferencia: number;
+  setsFavor?: number;
+  setsContra?: number;
+  puntos: number;
+  winRatePct: number;
+  racha: ('G' | 'E' | 'P')[];
+  history: TeamHistoryMatchItem[];
+}
+
+/**
+ * Computes complete historical match list and aggregate performance statistics for a single team
+ * across ALL phases (Grupos + Playoffs).
+ */
+export function computeTeamHistoricalStats(
+  team: Team,
+  sportType: SportType,
+  allMatches: Match[]
+): TeamHistoricalStats {
+  const teamMatches = allMatches
+    .filter((m) => m.homeTeamId === team.id || m.awayTeamId === team.id)
+    .sort((a, b) => {
+      const aKey = `${a.fecha} ${a.hora}`;
+      const bKey = `${b.fecha} ${b.hora}`;
+      return bKey.localeCompare(aKey);
+    });
+
+  let pj = 0;
+  let pg = 0;
+  let pe = 0;
+  let pp = 0;
+  let favor = 0;
+  let contra = 0;
+  let setsFavor = 0;
+  let setsContra = 0;
+  let puntos = 0;
+  const rachaChronological: ('G' | 'E' | 'P')[] = [];
+
+  // Process chronologically for accurate streak (racha)
+  const chronological = [...teamMatches].reverse();
+  const outcomeByMatchId = new Map<string, TeamMatchOutcome>();
+
+  for (const match of chronological) {
+    const isHome = match.homeTeamId === team.id;
+    const teamScore = isHome ? match.homeScore : match.awayScore;
+    const opponentScore = isHome ? match.awayScore : match.homeScore;
+
+    if (match.status === 'PROGRAMADO') {
+      outcomeByMatchId.set(match.id, 'PROGRAMADO');
+      continue;
+    }
+
+    if (match.status === 'EN_VIVO') {
+      outcomeByMatchId.set(match.id, 'EN_VIVO');
+      continue;
+    }
+
+    // FINALIZADO: counts in full historical stats
+    pj += 1;
+
+    if (sportType === 'voleibol') {
+      setsFavor += teamScore;
+      setsContra += opponentScore;
+      const homePts = match.periods.reduce((acc, p) => acc + p.home, 0);
+      const awayPts = match.periods.reduce((acc, p) => acc + p.away, 0);
+      const teamPts = isHome ? homePts : awayPts;
+      const oppPts = isHome ? awayPts : homePts;
+      favor += teamPts || teamScore * 25;
+      contra += oppPts || opponentScore * 25;
+
+      if (teamScore > opponentScore) {
+        pg += 1;
+        const isTiebreak = teamScore - opponentScore === 1 && opponentScore >= 1;
+        puntos += isTiebreak ? 2 : 3;
+        rachaChronological.push('G');
+        outcomeByMatchId.set(match.id, 'G');
+      } else if (opponentScore > teamScore) {
+        pp += 1;
+        const isTiebreak = opponentScore - teamScore === 1 && teamScore >= 1;
+        puntos += isTiebreak ? 1 : 0;
+        rachaChronological.push('P');
+        outcomeByMatchId.set(match.id, 'P');
+      } else {
+        pe += 1;
+        rachaChronological.push('E');
+        outcomeByMatchId.set(match.id, 'E');
+      }
+    } else if (sportType === 'basquetbol' || sportType === 'basquetbol3x3') {
+      favor += teamScore;
+      contra += opponentScore;
+      if (teamScore > opponentScore) {
+        pg += 1;
+        puntos += 2;
+        rachaChronological.push('G');
+        outcomeByMatchId.set(match.id, 'G');
+      } else if (opponentScore > teamScore) {
+        pp += 1;
+        puntos += 1;
+        rachaChronological.push('P');
+        outcomeByMatchId.set(match.id, 'P');
+      } else {
+        pe += 1;
+        puntos += 1;
+        rachaChronological.push('E');
+        outcomeByMatchId.set(match.id, 'E');
+      }
+    } else {
+      favor += teamScore;
+      contra += opponentScore;
+      if (teamScore > opponentScore) {
+        pg += 1;
+        puntos += 3;
+        rachaChronological.push('G');
+        outcomeByMatchId.set(match.id, 'G');
+      } else if (opponentScore > teamScore) {
+        pp += 1;
+        rachaChronological.push('P');
+        outcomeByMatchId.set(match.id, 'P');
+      } else {
+        pe += 1;
+        puntos += 1;
+        rachaChronological.push('E');
+        outcomeByMatchId.set(match.id, 'E');
+      }
+    }
+  }
+
+  const history: TeamHistoryMatchItem[] = teamMatches.map((match) => {
+    const isHome = match.homeTeamId === team.id;
+    return {
+      match,
+      isHome,
+      opponentTeamId: isHome ? match.awayTeamId : match.homeTeamId,
+      teamScore: isHome ? match.homeScore : match.awayScore,
+      opponentScore: isHome ? match.awayScore : match.homeScore,
+      outcome: outcomeByMatchId.get(match.id) ?? 'PROGRAMADO',
+    };
+  });
+
+  return {
+    teamId: team.id,
+    pj,
+    pg,
+    pe,
+    pp,
+    favor,
+    contra,
+    diferencia: sportType === 'voleibol' ? setsFavor - setsContra : favor - contra,
+    setsFavor: sportType === 'voleibol' ? setsFavor : undefined,
+    setsContra: sportType === 'voleibol' ? setsContra : undefined,
+    puntos,
+    winRatePct: pj > 0 ? Math.round((pg / pj) * 100) : 0,
+    racha: rachaChronological.slice(-5),
+    history,
+  };
+}

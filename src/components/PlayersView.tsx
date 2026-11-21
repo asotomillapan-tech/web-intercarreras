@@ -16,6 +16,7 @@ interface PlayersViewProps {
   currentUser: AppUserProfile | null;
   selectedPlayer: Player | null;
   onSelectPlayer: (player: Player | null) => void;
+  onInspectTeam: (teamId: string) => void;
   onUpdatePlayer: (updated: Player) => void;
 }
 
@@ -24,6 +25,7 @@ export function PlayersView({
   currentUser,
   selectedPlayer,
   onSelectPlayer,
+  onInspectTeam,
   onUpdatePlayer,
 }: PlayersViewProps) {
   const [query, setQuery] = useState('');
@@ -303,8 +305,16 @@ export function PlayersView({
                         </div>
                       </td>
                       <td className="py-3.5 px-3">
-                        <p className="font-medium text-[#0d0d0d]">{team?.nombre ?? player.teamId}</p>
-                        <p className="text-xs text-neutral-500">{disc.nombreCorto}</p>
+                        <button
+                          type="button"
+                          onClick={() => onInspectTeam(player.teamId)}
+                          className="text-left group cursor-pointer"
+                        >
+                          <p className="font-medium text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors">
+                            {team?.nombre ?? player.teamId}
+                          </p>
+                          <p className="text-xs text-neutral-500">{disc.nombreCorto}</p>
+                        </button>
                       </td>
                       <td className="py-3.5 px-3 hidden md:table-cell">
                         <p className="text-xs text-[#0d0d0d]">{player.carrera}</p>
@@ -379,7 +389,17 @@ export function PlayersView({
                     {liveSelectedPlayer.apellidoMaterno}
                   </h2>
                   <p className="text-xs text-neutral-300 mt-1">
-                    {teamMap.get(liveSelectedPlayer.teamId)?.nombre} · {liveSelectedPlayer.posicion} · Dorsal #{liveSelectedPlayer.dorsal}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectPlayer(null);
+                        onInspectTeam(liveSelectedPlayer.teamId);
+                      }}
+                      className="underline hover:text-[#707ef9] cursor-pointer"
+                    >
+                      {teamMap.get(liveSelectedPlayer.teamId)?.nombre}
+                    </button>{' '}
+                    · {liveSelectedPlayer.posicion} · Dorsal #{liveSelectedPlayer.dorsal}
                   </p>
                 </div>
               </div>

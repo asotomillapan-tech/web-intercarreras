@@ -3,8 +3,8 @@ import { ArrowRight, Award, Calendar, ChevronRight, Lock, MapPin, Star } from 'l
 import {
   DISCIPLINES,
   DISCIPLINE_MAP,
-  HERO_IMAGE_URL,
   LOGO_COLOR_SVG,
+  LOGO_LIGHT_SVG,
 } from '../data/ufroSeed';
 import {
   canRefereeMatches,
@@ -13,6 +13,7 @@ import {
   shouldRevealPublicMatchData,
 } from '../domain/rbacEngine';
 import { computeStandings } from '../domain/tournamentEngine';
+import type { Editorial2025Photos } from '../services/googleDrive';
 import type { AppUserProfile, DisciplineId, Match, Player, TournamentState } from '../types/tournament';
 import type { NavSection } from './Navbar';
 
@@ -20,9 +21,11 @@ interface HomeViewProps {
   state: TournamentState;
   currentUser: AppUserProfile | null;
   selectedDiscipline: DisciplineId;
+  editorialPhotos: Editorial2025Photos | null;
   onSelectDiscipline: (id: DisciplineId) => void;
   onNavigate: (section: NavSection) => void;
   onInspectPlayer: (player: Player) => void;
+  onInspectTeam: (teamId: string) => void;
   onOpenMatchModal: (match: Match) => void;
   onOpenMatchInReferee: (matchId: string) => void;
   onToggleFavoriteTeam: (teamId: string) => void;
@@ -33,9 +36,11 @@ export function HomeView({
   state,
   currentUser,
   selectedDiscipline,
+  editorialPhotos,
   onSelectDiscipline,
   onNavigate,
   onInspectPlayer,
+  onInspectTeam,
   onOpenMatchModal,
   onOpenMatchInReferee,
   onToggleFavoriteTeam,
@@ -99,12 +104,16 @@ export function HomeView({
       {/* Section 1: RSC Anderlecht-inspired Editorial Hero */}
       <section className="relative bg-[#0d0d0d] text-white overflow-hidden">
         <div className="absolute inset-0">
-          <img
-            src={HERO_IMAGE_URL}
-            alt="Encuentro nocturno del Campeonato Intercarreras en el Complejo Deportivo UFRO"
-            className="w-full h-full object-cover object-center opacity-50"
-            referrerPolicy="no-referrer"
-          />
+          {editorialPhotos?.heroUrl ? (
+            <img
+              src={editorialPhotos.heroUrl}
+              alt={editorialPhotos.heroCaption || 'Fotografía oficial de la Galería 2025 del Campeonato Intercarreras UFRO'}
+              className="w-full h-full object-cover object-center opacity-50"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-[#141522] via-[#0d0d0d] to-[#1a1c2e]" />
+          )}
           <div className="absolute inset-0 bg-gradient-to-r from-[#0d0d0d] via-[#0d0d0d]/85 to-[#0d0d0d]/40" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-transparent to-transparent" />
         </div>
@@ -599,8 +608,16 @@ export function HomeView({
                           </span>
                         </td>
                         <td className="py-3 px-3">
-                          <p className="font-medium text-[#0d0d0d]">{row.teamName}</p>
-                          <p className="text-xs text-neutral-500">{row.carrera}</p>
+                          <button
+                            type="button"
+                            onClick={() => onInspectTeam(row.teamId)}
+                            className="text-left group cursor-pointer"
+                          >
+                            <p className="font-medium text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors">
+                              {row.teamName}
+                            </p>
+                            <p className="text-xs text-neutral-500">{row.carrera}</p>
+                          </button>
                         </td>
                         <td className="py-3 px-3 text-right tabular-nums text-neutral-600">{row.pj}</td>
                         <td className="py-3 px-3 text-right tabular-nums text-neutral-600">{row.pg}</td>
@@ -735,12 +752,23 @@ export function HomeView({
                   className="group bg-white border border-neutral-200 text-left flex flex-col overflow-hidden hover:border-[#707ef9] transition-colors cursor-pointer"
                 >
                   <div className="relative h-40 w-full bg-[#0d0d0d] overflow-hidden">
-                    <img
-                      src={disc.imagenEditorial}
-                      alt={disc.nombre}
-                      className="w-full h-full object-cover opacity-85 group-hover:scale-105 transition-transform duration-300"
-                      referrerPolicy="no-referrer"
-                    />
+                    {editorialPhotos?.byDiscipline[disc.id]?.url ? (
+                      <img
+                        src={editorialPhotos.byDiscipline[disc.id].url}
+                        alt={`${disc.nombre} — ${editorialPhotos.byDiscipline[disc.id].caption}`}
+                        className="w-full h-full object-cover opacity-85 group-hover:scale-105 transition-transform duration-300"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-[#171928] via-[#0d0d0d] to-[#1f2338] flex items-center justify-center">
+                        <img
+                          src={LOGO_LIGHT_SVG}
+                          alt=""
+                          aria-hidden="true"
+                          className="h-10 w-auto opacity-20"
+                        />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d]/85 via-[#0d0d0d]/25 to-transparent" />
                     <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-xs text-neutral-200">
                       <span>{disc.rama}</span>

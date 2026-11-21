@@ -32,6 +32,7 @@ interface AccountViewProps {
   onToggleFavoriteTeam: (teamId: string) => void;
   onToggleNotifications: (enabled: boolean) => void;
   onUpdatePlayerProfile: (updated: Player) => void;
+  onInspectTeam: (teamId: string) => void;
   onOpenMatchModal: (match: Match) => void;
   onNavigate: (section: NavSection) => void;
 }
@@ -43,6 +44,7 @@ export function AccountView({
   onToggleFavoriteTeam,
   onToggleNotifications,
   onUpdatePlayerProfile,
+  onInspectTeam,
   onOpenMatchModal,
   onNavigate,
 }: AccountViewProps) {
@@ -577,12 +579,18 @@ export function AccountView({
                       key={t.id}
                       className="px-4 py-3 flex items-center justify-between gap-3 bg-[#f9fafb]"
                     >
-                      <div className="min-w-0">
-                        <p className="font-bold text-sm text-[#0d0d0d] truncate">{t.nombre}</p>
+                      <button
+                        type="button"
+                        onClick={() => onInspectTeam(t.id)}
+                        className="min-w-0 text-left group cursor-pointer"
+                      >
+                        <p className="font-bold text-sm text-[#0d0d0d] group-hover:text-[#707ef9] truncate">
+                          {t.nombre}
+                        </p>
                         <p className="text-xs text-neutral-500 truncate">
                           {DISCIPLINE_MAP[t.disciplineId].nombreCorto} · {t.carrera} · {t.groupName}
                         </p>
-                      </div>
+                      </button>
                       <button
                         type="button"
                         onClick={() => onToggleFavoriteTeam(t.id)}

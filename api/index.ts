@@ -204,6 +204,199 @@ function createGeminiClient(): GoogleGenAI {
 }
 
 // ---------------------------------------------------------------------------
+// 2025 UFRO Google Drive Public Folder Crawler & In-Memory Photo Pool Cache
+// ---------------------------------------------------------------------------
+
+interface PublicDriveEntry {
+  id: string;
+  name: string;
+  isFolder: boolean;
+  webViewLink: string;
+  thumbnailUrl?: string;
+  imageUrl?: string;
+  modifiedDate?: string;
+}
+
+const UFRO_DRIVE_2025_ROOT_ID = '1whj-oFN-nWPOhZ3CT3tCyftRnJrwktU6';
+const IMAGE_EXT_REGEX = /\.(jpe?g|png|webp)$/i;
+
+async function fetchPublicDriveFolderEntries(folderId: string): Promise<PublicDriveEntry[]> {
+  const publicRes = await fetch(
+    `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#list`,
+    {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; IntercarrerasUFRO/1.0)',
+      },
+    }
+  );
+  if (!publicRes.ok) {
+    throw new Error(`Google Drive respondió con estado ${publicRes.status}`);
+  }
+  const html = await publicRes.text();
+  const entryRegex =
+    /id="entry-([a-zA-Z0-9_-]+)"[\s\S]*?<a href="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]+)<\/div>(?:[\s\S]*?<div class="flip-entry-last-modified"><div>([^<]*)<\/div>)?/g;
+
+  const items: PublicDriveEntry[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = entryRegex.exec(html)) !== null) {
+    const [, id, href, rawTitle, rawDate] = match;
+    const name = rawTitle
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .trim();
+    const isFolder = href.includes('/drive/folders/');
+    items.push({
+      id,
+      name,
+      isFolder,
+      webViewLink: href,
+      thumbnailUrl: isFolder ? undefined : `https://lh3.googleusercontent.com/d/${id}=w600`,
+      imageUrl: isFolder ? undefined : `https://lh3.googleusercontent.com/d/${id}=w1600`,
+      modifiedDate: rawDate?.trim() || undefined,
+    });
+  }
+  return items;
+}
+
+export interface Drive2025PhotoItem {
+  id: string;
+  name: string;
+  folderName: string;
+  imageUrl: string;
+  thumbnailUrl: string;
+}
+
+interface Drive2025PhotoPool {
+  fetchedAt: string;
+  byDiscipline: Record<string, Drive2025PhotoItem[]>;
+  all: Drive2025PhotoItem[];
+}
+
+let cached2025Pool: Drive2025PhotoPool | null = null;
+let cached2025PoolExpiresAt = 0;
+
+function mapRootFolderNameToDisciplines(folderName: string): string[] {
+  const n = folderName.toLowerCase();
+  if (n.includes('f7 hombres primera')) return ['f7-h-1', 'f7-h-3'];
+  if (n.includes('f7 hombres segunda')) return ['f7-h-2', 'f7-h-3'];
+  if (n.includes('f7 hombres tercera')) return ['f7-h-3'];
+  if (n.includes('f7 mujeres')) return ['f7-m'];
+  if (n.includes('básquet 5x5') || n.includes('basquet 5x5')) return ['basquet-h'];
+  if (n.includes('3x3')) return ['basquet-3x3-m'];
+  if (n.includes('voley primera')) return ['voley-m', 'voley-h'];
+  if (n.includes('voley segunda')) return ['voley-h', 'voley-m'];
+  if (n.includes('premiación fútbol') || n.includes('premiacion futbol')) {
+    return ['f7-h-1', 'f7-h-2', 'f7-h-3', 'f7-m'];
+  }
+  if (n.includes('premiación básquet') || n.includes('premiacion basquet')) {
+    return ['basquet-h', 'basquet-3x3-m'];
+  }
+  if (n.includes('premiación voleibol') || n.includes('premiacion voleibol')) {
+    return ['voley-m', 'voley-h'];
+  }
+  return [];
+}
+
+async function collectSampleImagesFromFolder(
+  folderId: string,
+  folderName: string,
+  maxDepth: number,
+  maxImages = 14
+): Promise<Drive2025PhotoItem[]> {
+  try {
+    const entries = await fetchPublicDriveFolderEntries(folderId);
+    const directImages = entries
+      .filter((e) => !e.isFolder && IMAGE_EXT_REGEX.test(e.name) && e.imageUrl && e.thumbnailUrl)
+      .slice(0, maxImages)
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        folderName,
+        imageUrl: e.imageUrl!,
+        thumbnailUrl: e.thumbnailUrl!,
+      }));
+
+    if (directImages.length >= 6 || maxDepth <= 0) {
+      return directImages;
+    }
+
+    const subfolders = entries.filter((e) => e.isFolder);
+    if (subfolders.length === 0) return directImages;
+
+    // Sample up to 2 subfolders (e.g. Finals / Semifinals / Grupos) to keep response fast & diverse
+    const pickedFolders =
+      subfolders.length <= 2
+        ? subfolders
+        : [subfolders[subfolders.length - 1], subfolders[0]];
+
+    const nested = await Promise.all(
+      pickedFolders.map((sf) =>
+        collectSampleImagesFromFolder(sf.id, `${folderName} · ${sf.name}`, maxDepth - 1, 8)
+      )
+    );
+    return [...directImages, ...nested.flat()].slice(0, maxImages);
+  } catch {
+    return [];
+  }
+}
+
+async function get2025DrivePhotoPool(): Promise<Drive2025PhotoPool> {
+  const now = Date.now();
+  if (cached2025Pool && cached2025Pool.all.length > 0 && now < cached2025PoolExpiresAt) {
+    return cached2025Pool;
+  }
+
+  const rootEntries = await fetchPublicDriveFolderEntries(UFRO_DRIVE_2025_ROOT_ID);
+  const rootFolders = rootEntries.filter((e) => e.isFolder);
+
+  const byDiscipline: Record<string, Drive2025PhotoItem[]> = {
+    'f7-h-1': [],
+    'f7-h-2': [],
+    'f7-h-3': [],
+    'f7-m': [],
+    'basquet-h': [],
+    'basquet-3x3-m': [],
+    'voley-m': [],
+    'voley-h': [],
+  };
+
+  const results = await Promise.all(
+    rootFolders.map(async (folder) => {
+      const targetDisciplines = mapRootFolderNameToDisciplines(folder.name);
+      if (targetDisciplines.length === 0) return { targetDisciplines: [], photos: [] };
+      const photos = await collectSampleImagesFromFolder(folder.id, folder.name, 3, 16);
+      return { targetDisciplines, photos };
+    })
+  );
+
+  const allMap = new Map<string, Drive2025PhotoItem>();
+  for (const { targetDisciplines, photos } of results) {
+    for (const p of photos) {
+      allMap.set(p.id, p);
+      for (const discId of targetDisciplines) {
+        if (!byDiscipline[discId]) byDiscipline[discId] = [];
+        if (!byDiscipline[discId].some((existing) => existing.id === p.id)) {
+          byDiscipline[discId].push(p);
+        }
+      }
+    }
+  }
+
+  const pool: Drive2025PhotoPool = {
+    fetchedAt: new Date().toISOString(),
+    byDiscipline,
+    all: Array.from(allMap.values()),
+  };
+
+  if (pool.all.length > 0) {
+    cached2025Pool = pool;
+    cached2025PoolExpiresAt = now + 15 * 60 * 1000;
+  }
+  return pool;
+}
+
+// ---------------------------------------------------------------------------
 // Express API Factory (shared by Vercel Serverless Functions and server.ts)
 // ---------------------------------------------------------------------------
 
@@ -290,57 +483,25 @@ export function createApiApp(): express.Express {
     }
 
     try {
-      const publicRes = await fetch(
-        `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#list`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; IntercarrerasUFRO/1.0)',
-          },
-        }
-      );
-      if (!publicRes.ok) {
-        throw new Error(`Google Drive respondió con estado ${publicRes.status}`);
-      }
-      const html = await publicRes.text();
-      const entryRegex =
-        /id="entry-([a-zA-Z0-9_-]+)"[\s\S]*?<a href="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]+)<\/div>(?:[\s\S]*?<div class="flip-entry-last-modified"><div>([^<]*)<\/div>)?/g;
-
-      const items: Array<{
-        id: string;
-        name: string;
-        isFolder: boolean;
-        webViewLink: string;
-        thumbnailUrl?: string;
-        imageUrl?: string;
-        modifiedDate?: string;
-      }> = [];
-
-      let match: RegExpExecArray | null;
-      while ((match = entryRegex.exec(html)) !== null) {
-        const [, id, href, rawTitle, rawDate] = match;
-        const name = rawTitle
-          .replace(/&amp;/g, '&')
-          .replace(/&#39;/g, "'")
-          .replace(/&quot;/g, '"')
-          .trim();
-        const isFolder = href.includes('/drive/folders/');
-        items.push({
-          id,
-          name,
-          isFolder,
-          webViewLink: href,
-          thumbnailUrl: isFolder ? undefined : `https://lh3.googleusercontent.com/d/${id}=w600`,
-          imageUrl: isFolder ? undefined : `https://lh3.googleusercontent.com/d/${id}=w1600`,
-          modifiedDate: rawDate?.trim() || undefined,
-        });
-      }
-
+      const items = await fetchPublicDriveFolderEntries(folderId);
       res.json({ folderId, source: 'public_folder', items });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error consultando Google Drive.';
       res.status(502).json({
         error: `No se pudo leer la carpeta de Google Drive: ${message}`,
       });
+    }
+  });
+
+  // Cached 2025 UFRO Drive Photo Pool for Editorial Hero & Discipline Cards (zero stock photos)
+  app.get('/api/drive/2025-photos', async (_req, res) => {
+    try {
+      const pool = await get2025DrivePhotoPool();
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.json(pool);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error cargando galería 2025.';
+      res.status(502).json({ error: message });
     }
   });
 

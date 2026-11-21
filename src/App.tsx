@@ -34,6 +34,10 @@ import {
   updateFirestorePlayerStats,
   updateFirestoreUserPreferences,
 } from './services/firestoreService';
+import {
+  fetch2025RandomEditorialPhotos,
+  type Editorial2025Photos,
+} from './services/googleDrive';
 import { AccountView } from './components/AccountView';
 import { AdminRefereeView, type PanelSubTab } from './components/AdminRefereeView';
 import { AuthModal } from './components/AuthModal';
@@ -46,6 +50,7 @@ import { Navbar, type NavSection } from './components/Navbar';
 import { PlayersView } from './components/PlayersView';
 import { RegistrationView } from './components/RegistrationView';
 import { StandingsView } from './components/StandingsView';
+import { TeamProfileModal } from './components/TeamProfileModal';
 import { TransfersView } from './components/TransfersView';
 import type {
   AppUserProfile,
@@ -69,6 +74,8 @@ function AppContent() {
   const [activeSection, setActiveSection] = useState<NavSection>('inicio');
   const [selectedDiscipline, setSelectedDiscipline] = useState<DisciplineId>('f7-h-1');
   const [inspectedPlayer, setInspectedPlayer] = useState<Player | null>(null);
+  const [inspectedTeamId, setInspectedTeamId] = useState<string | null>(null);
+  const [editorialPhotos, setEditorialPhotos] = useState<Editorial2025Photos | null>(null);
   const [panelInitialSubTab, setPanelInitialSubTab] = useState<PanelSubTab>('arbitro');
   const [focusedMatchId, setFocusedMatchId] = useState<string | null>(null);
 
@@ -138,6 +145,21 @@ function AppContent() {
       active = false;
     };
   }, [reportCloudError]);
+
+  // 1B. Fetch random real photographs from the 2025 UFRO Google Drive gallery (replaces stock photos)
+  useEffect(() => {
+    let active = true;
+    fetch2025RandomEditorialPhotos()
+      .then((photos) => {
+        if (active) setEditorialPhotos(photos);
+      })
+      .catch(() => {
+        // Non-fatal fallback: dark carbon editorial background remains clean
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const hydrateForAuthenticatedProfile = useCallback(
     async (profile: AppUserProfile, currentPlayers: Player[], currentConfigs: Record<DisciplineId, DisciplineFormatConfig>) => {
@@ -345,6 +367,11 @@ function AppContent() {
     if (!activeMatchModalId) return null;
     return state.matches.find((m) => m.id === activeMatchModalId) ?? null;
   }, [activeMatchModalId, state.matches]);
+
+  const inspectedTeam: Team | null = useMemo(() => {
+    if (!inspectedTeamId) return null;
+    return state.teams.find((t) => t.id === inspectedTeamId) ?? null;
+  }, [inspectedTeamId, state.teams]);
 
   const handleNavigate = (section: NavSection) => {
     setActiveSection(section);
@@ -576,6 +603,13 @@ function AppContent() {
   const handleOpenMatchInReferee = (matchId: string) => {
     setFocusedMatchId(matchId);
     setPanelInitialSubTab('arbitro');
+    setActiveSection('panel');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAdminEditMatch = (matchId: string) => {
+    setFocusedMatchId(matchId);
+    setPanelInitialSubTab('partidos');
     setActiveSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -841,9 +875,11 @@ function AppContent() {
             state={state}
             currentUser={currentUser}
             selectedDiscipline={selectedDiscipline}
+            editorialPhotos={editorialPhotos}
             onSelectDiscipline={setSelectedDiscipline}
             onNavigate={handleNavigate}
             onInspectPlayer={handleInspectPlayerFromHome}
+            onInspectTeam={setInspectedTeamId}
             onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
             onOpenMatchInReferee={handleOpenMatchInReferee}
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
@@ -857,6 +893,7 @@ function AppContent() {
             currentUser={currentUser}
             selectedDiscipline={selectedDiscipline}
             onSelectDiscipline={setSelectedDiscipline}
+            onInspectTeam={setInspectedTeamId}
             onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
             onOpenAuth={() => setAuthModalOpen(true)}
@@ -869,6 +906,7 @@ function AppContent() {
             currentUser={currentUser}
             selectedPlayer={inspectedPlayer}
             onSelectPlayer={setInspectedPlayer}
+            onInspectTeam={setInspectedTeamId}
             onUpdatePlayer={handleUpdatePlayer}
           />
         )}
@@ -914,6 +952,7 @@ function AppContent() {
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
             onToggleNotifications={handleToggleNotifications}
             onUpdatePlayerProfile={handleUpdatePlayer}
+            onInspectTeam={setInspectedTeamId}
             onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
             onNavigate={handleNavigate}
           />
@@ -929,6 +968,8 @@ function AppContent() {
             autoSyncSessionApproved={autoSyncSessionApproved}
             autoSyncState={autoSyncState}
             onUpdateMatch={handleUpdateMatch}
+            onAddPlayer={handleAddPlayerToTeam}
+            onUpdatePlayer={handleUpdatePlayer}
             onUpdateConfig={handleUpdateConfig}
             onSaveMasterSheets={handleSaveMasterSheets}
             onApproveAutoSyncSession={setAutoSyncSessionApproved}
@@ -942,6 +983,20 @@ function AppContent() {
       </main>
 
       <Footer onNavigate={handleNavigate} />
+
+      <TeamProfileModal
+        team={inspectedTeam}
+        teams={state.teams}
+        players={state.players}
+        matches={state.matches}
+        mvpVotes={state.mvpVotes}
+        currentUser={currentUser}
+        onClose={() => setInspectedTeamId(null)}
+        onToggleFavoriteTeam={handleToggleFavoriteTeam}
+        onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
+        onInspectPlayer={handleInspectPlayerFromHome}
+        onAdminEditMatch={handleAdminEditMatch}
+      />
 
       <MatchMvpModal
         match={activeModalMatch}

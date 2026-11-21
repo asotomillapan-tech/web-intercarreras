@@ -16,6 +16,7 @@ interface StandingsViewProps {
   currentUser: AppUserProfile | null;
   selectedDiscipline: DisciplineId;
   onSelectDiscipline: (id: DisciplineId) => void;
+  onInspectTeam: (teamId: string) => void;
   onOpenMatchModal: (match: Match) => void;
   onToggleFavoriteTeam: (teamId: string) => void;
   onOpenAuth: () => void;
@@ -26,6 +27,7 @@ export function StandingsView({
   currentUser,
   selectedDiscipline,
   onSelectDiscipline,
+  onInspectTeam,
   onOpenMatchModal,
   onToggleFavoriteTeam,
   onOpenAuth,
@@ -289,12 +291,18 @@ export function StandingsView({
                                       }`}
                                     />
                                   </button>
-                                  <div>
-                                    <span>{row.teamName}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onInspectTeam(row.teamId)}
+                                    className="text-left group cursor-pointer"
+                                  >
+                                    <span className="group-hover:text-[#707ef9] transition-colors underline-offset-2 group-hover:underline">
+                                      {row.teamName}
+                                    </span>
                                     <span className="md:hidden block text-xs font-normal text-neutral-500">
                                       {row.carrera}
                                     </span>
-                                  </div>
+                                  </button>
                                 </div>
                               </td>
                               <td className="py-3 px-3 hidden md:table-cell text-xs text-neutral-500">

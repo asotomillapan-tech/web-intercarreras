@@ -76,6 +76,83 @@ export async function fetchDriveFolderContents(
   return data as DriveFolderResponse;
 }
 
+export interface Drive2025PhotoItem {
+  id: string;
+  name: string;
+  folderName: string;
+  imageUrl: string;
+  thumbnailUrl: string;
+}
+
+export interface Editorial2025Photos {
+  heroUrl: string;
+  heroCaption: string;
+  byDiscipline: Record<string, { url: string; caption: string }>;
+}
+
+interface Drive2025PhotoPoolResponse {
+  fetchedAt: string;
+  byDiscipline: Record<string, Drive2025PhotoItem[]>;
+  all: Drive2025PhotoItem[];
+}
+
+function pickRandomDistinct(
+  candidates: Drive2025PhotoItem[],
+  usedIds: Set<string>
+): Drive2025PhotoItem | null {
+  if (candidates.length === 0) return null;
+  const unused = candidates.filter((c) => !usedIds.has(c.id));
+  const pool = unused.length > 0 ? unused : candidates;
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  if (chosen) usedIds.add(chosen.id);
+  return chosen ?? null;
+}
+
+/**
+ * Fetches real photographs from the official 2025 UFRO Google Drive gallery
+ * and selects random distinct photographs for the Hero and each of the 8 disciplines.
+ */
+export async function fetch2025RandomEditorialPhotos(): Promise<Editorial2025Photos> {
+  const res = await fetch('/api/drive/2025-photos');
+  if (!res.ok) {
+    throw new Error('No se pudo cargar la selección aleatoria de fotografías 2025.');
+  }
+  const pool = (await res.json()) as Drive2025PhotoPoolResponse;
+  const usedIds = new Set<string>();
+
+  const heroItem = pickRandomDistinct(pool.all ?? [], usedIds);
+  const disciplineIds = [
+    'f7-h-1',
+    'f7-h-2',
+    'f7-h-3',
+    'f7-m',
+    'basquet-h',
+    'basquet-3x3-m',
+    'voley-m',
+    'voley-h',
+  ];
+
+  const byDiscipline: Record<string, { url: string; caption: string }> = {};
+  for (const discId of disciplineIds) {
+    const discCandidates = pool.byDiscipline?.[discId] ?? [];
+    const chosen =
+      pickRandomDistinct(discCandidates, usedIds) ??
+      pickRandomDistinct(pool.all ?? [], usedIds);
+    if (chosen) {
+      byDiscipline[discId] = {
+        url: chosen.imageUrl,
+        caption: `${chosen.folderName} · Archivo 2025`,
+      };
+    }
+  }
+
+  return {
+    heroUrl: heroItem?.imageUrl ?? '',
+    heroCaption: heroItem ? `${heroItem.folderName} · Galería Oficial 2025` : '',
+    byDiscipline,
+  };
+}
+
 function escapeDriveQueryValue(val: string): string {
   return val.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }

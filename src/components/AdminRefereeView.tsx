@@ -3,9 +3,9 @@ import {
   AlertCircle,
   Camera,
   CheckCircle2,
-  FileSpreadsheet,
   Lock,
   Play,
+  Power,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -35,13 +35,16 @@ import type {
   MasterSheetsConfig,
   Match,
   MatchEvent,
+  Player,
   TournamentStage,
   TournamentState,
   UserRole,
 } from '../types/tournament';
+import { AdminMatchEditor } from './AdminMatchEditor';
+import { AdminPlayersManager } from './AdminPlayersManager';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 
-export type PanelSubTab = 'arbitro' | 'usuarios' | 'formato' | 'sheets';
+export type PanelSubTab = 'arbitro' | 'partidos' | 'jugadores' | 'usuarios' | 'formato' | 'sheets';
 
 interface AdminRefereeViewProps {
   state: TournamentState;
@@ -52,6 +55,8 @@ interface AdminRefereeViewProps {
   autoSyncSessionApproved: boolean;
   autoSyncState: AutoSyncStatusInfo;
   onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: Partial<{ goles: number; tarjetasAmarillas: number; tarjetasRojas: number; puntos: number; triples: number; faltas: number; aces: number; bloqueos: number }>) => void;
+  onAddPlayer: (player: Player) => void;
+  onUpdatePlayer: (player: Player) => void;
   onUpdateConfig: (disciplineId: DisciplineId, config: DisciplineFormatConfig, rebuildGroups: boolean) => void;
   onSaveMasterSheets: (
     nextMasterSheets: MasterSheetsConfig,
@@ -163,6 +168,8 @@ export function AdminRefereeView({
   autoSyncSessionApproved,
   autoSyncState,
   onUpdateMatch,
+  onAddPlayer,
+  onUpdatePlayer,
   onUpdateConfig,
   onSaveMasterSheets,
   onApproveAutoSyncSession,
@@ -784,7 +791,7 @@ export function AdminRefereeView({
               <button
                 type="button"
                 onClick={() => setSubTab('arbitro')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
                   effectiveSubTab === 'arbitro'
                     ? 'bg-[#707ef9] text-white'
                     : 'text-neutral-300 hover:text-white'
@@ -793,35 +800,59 @@ export function AdminRefereeView({
                 Mesa Arbitral
               </button>
               {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setSubTab('usuarios')}
-                  className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
-                    effectiveSubTab === 'usuarios'
-                      ? 'bg-[#707ef9] text-white'
-                      : 'text-neutral-300 hover:text-white'
-                  }`}
-                >
-                  Usuarios y Roles ({state.users.length})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('partidos')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'partidos'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Partidos ({state.matches.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('jugadores')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'jugadores'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Jugadores ({state.players.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('usuarios')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'usuarios'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Usuarios ({state.users.length})
+                  </button>
+                </>
               )}
               {canManageAdminTabs && (
                 <>
                   <button
                     type="button"
                     onClick={() => setSubTab('formato')}
-                    className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
                       effectiveSubTab === 'formato'
                         ? 'bg-[#707ef9] text-white'
                         : 'text-neutral-300 hover:text-white'
                     }`}
                   >
-                    Formato y Cupos
+                    Períodos y Formato
                   </button>
                   <button
                     type="button"
                     onClick={() => setSubTab('sheets')}
-                    className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
                       effectiveSubTab === 'sheets'
                         ? 'bg-[#707ef9] text-white'
                         : 'text-neutral-300 hover:text-white'
@@ -1370,6 +1401,24 @@ export function AdminRefereeView({
           </div>
         )}
 
+        {/* TAB 1B (ADMIN ONLY): EDIT PAST & SCHEDULED MATCHES */}
+        {effectiveSubTab === 'partidos' && isAdmin && (
+          <AdminMatchEditor
+            state={state}
+            initialEditMatchId={focusedMatchId}
+            onUpdateMatch={(updated) => onUpdateMatch(updated)}
+          />
+        )}
+
+        {/* TAB 1C (ADMIN ONLY): ADD & MODIFY PLAYERS */}
+        {effectiveSubTab === 'jugadores' && isAdmin && (
+          <AdminPlayersManager
+            state={state}
+            onAddPlayer={onAddPlayer}
+            onUpdatePlayer={onUpdatePlayer}
+          />
+        )}
+
         {/* TAB 2 (ADMIN ONLY): USER & ROLE MANAGEMENT */}
         {effectiveSubTab === 'usuarios' && isAdmin && (
           <div className="space-y-8">
@@ -1584,9 +1633,182 @@ export function AdminRefereeView({
           </div>
         )}
 
-        {/* TAB 3: CONFIGURABLE TOURNAMENT FORMAT & CUPOS */}
+        {/* TAB 3: PERIOD TOGGLES + CONFIGURABLE TOURNAMENT FORMAT & CUPOS */}
         {effectiveSubTab === 'formato' && canManageAdminTabs && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="space-y-10">
+            {/* Instant Period Control Matrix (Inscripciones & Transferencias ON/OFF) */}
+            <section className="border border-neutral-200 bg-white">
+              <div className="bg-[#0d0d0d] text-white p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <Power className="w-5 h-5 text-[#707ef9] shrink-0 mt-1" />
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+                      Control Inmediato en Firestore
+                    </p>
+                    <h2 className="font-display text-2xl sm:text-3xl uppercase tracking-wide">
+                      Interruptores de Período de Inscripciones y Transferencias
+                    </h2>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      Enciende o apaga las ventanas de inscripciones y transferencias por disciplina
+                      o de forma masiva en un clic. Los cambios se aplican al instante.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      DISCIPLINES.forEach((d) => {
+                        const cfg = state.configs[d.id];
+                        if (!cfg.inscripcionesAbiertas) {
+                          onUpdateConfig(d.id, { ...cfg, inscripcionesAbiertas: true }, false);
+                        }
+                      });
+                      setDraftConfig((c) => ({ ...c, inscripcionesAbiertas: true }));
+                      setConfigSavedMsg('Período de inscripciones ENCENDIDO en las 8 disciplinas.');
+                    }}
+                    className="px-3 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display uppercase tracking-wider cursor-pointer"
+                  >
+                    Abrir todas Inscripciones
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      DISCIPLINES.forEach((d) => {
+                        const cfg = state.configs[d.id];
+                        if (cfg.inscripcionesAbiertas) {
+                          onUpdateConfig(d.id, { ...cfg, inscripcionesAbiertas: false }, false);
+                        }
+                      });
+                      setDraftConfig((c) => ({ ...c, inscripcionesAbiertas: false }));
+                      setConfigSavedMsg('Período de inscripciones APAGADO en las 8 disciplinas.');
+                    }}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-display uppercase tracking-wider cursor-pointer"
+                  >
+                    Cerrar todas Inscripciones
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      DISCIPLINES.forEach((d) => {
+                        const cfg = state.configs[d.id];
+                        if (!cfg.transferenciasAbiertas) {
+                          onUpdateConfig(d.id, { ...cfg, transferenciasAbiertas: true }, false);
+                        }
+                      });
+                      setDraftConfig((c) => ({ ...c, transferenciasAbiertas: true }));
+                      setConfigSavedMsg('Ventana de transferencias ENCENDIDA en las 8 disciplinas.');
+                    }}
+                    className="px-3 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display uppercase tracking-wider cursor-pointer"
+                  >
+                    Abrir todas Transferencias
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      DISCIPLINES.forEach((d) => {
+                        const cfg = state.configs[d.id];
+                        if (cfg.transferenciasAbiertas) {
+                          onUpdateConfig(d.id, { ...cfg, transferenciasAbiertas: false }, false);
+                        }
+                      });
+                      setDraftConfig((c) => ({ ...c, transferenciasAbiertas: false }));
+                      setConfigSavedMsg('Ventana de transferencias APAGADA en las 8 disciplinas.');
+                    }}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-display uppercase tracking-wider cursor-pointer"
+                  >
+                    Cerrar todas Transferencias
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-[#f5f6f8] border-b border-neutral-200 text-xs text-neutral-500 uppercase">
+                      <th className="py-3 px-4 font-medium">Disciplina</th>
+                      <th className="py-3 px-4 font-medium">Fase actual</th>
+                      <th className="py-3 px-4 text-center font-medium">Inscripciones</th>
+                      <th className="py-3 px-4 text-center font-medium">Transferencias</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-200">
+                    {DISCIPLINES.map((d) => {
+                      const cfg = state.configs[d.id];
+                      const toggleInscripciones = () => {
+                        const nextCfg: DisciplineFormatConfig = {
+                          ...cfg,
+                          inscripcionesAbiertas: !cfg.inscripcionesAbiertas,
+                        };
+                        onUpdateConfig(d.id, nextCfg, false);
+                        if (d.id === configDiscId) setDraftConfig(nextCfg);
+                        setConfigSavedMsg(
+                          `Inscripciones de ${d.nombreCorto}: ${nextCfg.inscripcionesAbiertas ? 'ENCENDIDAS' : 'APAGADAS'} y guardadas en Firestore.`
+                        );
+                      };
+                      const toggleTransferencias = () => {
+                        const nextCfg: DisciplineFormatConfig = {
+                          ...cfg,
+                          transferenciasAbiertas: !cfg.transferenciasAbiertas,
+                        };
+                        onUpdateConfig(d.id, nextCfg, false);
+                        if (d.id === configDiscId) setDraftConfig(nextCfg);
+                        setConfigSavedMsg(
+                          `Transferencias de ${d.nombreCorto}: ${nextCfg.transferenciasAbiertas ? 'ENCENDIDAS' : 'APAGADAS'} y guardadas en Firestore.`
+                        );
+                      };
+                      return (
+                        <tr key={d.id} className="hover:bg-[#f9fafb]">
+                          <td className="py-3 px-4">
+                            <p className="font-bold text-[#0d0d0d]">{d.nombre}</p>
+                          </td>
+                          <td className="py-3 px-4 text-xs text-neutral-600 uppercase">
+                            {cfg.faseActual.replace('_', ' ')}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={cfg.inscripcionesAbiertas}
+                              aria-label={`Inscripciones para ${d.nombre}`}
+                              onClick={toggleInscripciones}
+                              className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-display uppercase tracking-wider border transition-colors cursor-pointer ${
+                                cfg.inscripcionesAbiertas
+                                  ? 'bg-[#707ef9] border-[#707ef9] text-white'
+                                  : 'bg-white border-neutral-300 text-neutral-600 hover:border-[#0d0d0d]'
+                              }`}
+                            >
+                              <Power className="w-3.5 h-3.5" />
+                              <span>{cfg.inscripcionesAbiertas ? 'ABIERTAS' : 'CERRADAS'}</span>
+                            </button>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={cfg.transferenciasAbiertas}
+                              aria-label={`Transferencias para ${d.nombre}`}
+                              onClick={toggleTransferencias}
+                              className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-display uppercase tracking-wider border transition-colors cursor-pointer ${
+                                cfg.transferenciasAbiertas
+                                  ? 'bg-[#0d0d0d] border-[#0d0d0d] text-white'
+                                  : 'bg-white border-neutral-300 text-neutral-600 hover:border-[#0d0d0d]'
+                              }`}
+                            >
+                              <Power className="w-3.5 h-3.5" />
+                              <span>{cfg.transferenciasAbiertas ? 'ABIERTAS' : 'CERRADAS'}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div className="lg:col-span-4 space-y-2">
               <p className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-3">
                 Selecciona una disciplina
@@ -1814,6 +2036,7 @@ export function AdminRefereeView({
                   <span>Guardar y generar grupos / fixture</span>
                 </button>
               </div>
+            </div>
             </div>
           </div>
         )}

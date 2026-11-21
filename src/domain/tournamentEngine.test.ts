@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   compareScoresheetWithLive,
   computeStandings,
+  computeTeamHistoricalStats,
   formatRut,
   generateEquitableGroups,
   generatePlayoffBracket,
@@ -245,4 +246,88 @@ test('isVolleyballSetWon checks 25-point and 15-point tiebreak 2-point lead rule
   assert.equal(isVolleyballSetWon(26, 24, 1), 'home');
   assert.equal(isVolleyballSetWon(15, 13, 3), 'home');
   assert.equal(isVolleyballSetWon(14, 15, 3), null);
+});
+
+test('computeTeamHistoricalStats aggregates complete match history across groups and playoffs', () => {
+  const teamA: Team = {
+    id: 'a',
+    nombre: 'Ingeniería FC',
+    sigla: 'ING',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ingeniería Civil Informática',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo A',
+  };
+  const baseMatch: Match = {
+    id: 'm1',
+    disciplineId: 'f7-h-1',
+    groupName: 'Grupo A',
+    fase: 'Grupos',
+    jornada: 1,
+    fecha: '2026-10-01',
+    hora: '18:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a',
+    awayTeamId: 'b',
+    homeScore: 4,
+    awayScore: 1,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 2, away: 3 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+  };
+  const matches: Match[] = [
+    baseMatch,
+    {
+      ...baseMatch,
+      id: 'm2',
+      jornada: 2,
+      fecha: '2026-10-08',
+      homeTeamId: 'c',
+      awayTeamId: 'a',
+      homeScore: 2,
+      awayScore: 2,
+    },
+    {
+      ...baseMatch,
+      id: 'm3',
+      fase: 'Cuartos',
+      jornada: 3,
+      fecha: '2026-10-15',
+      homeTeamId: 'a',
+      awayTeamId: 'd',
+      homeScore: 1,
+      awayScore: 3,
+    },
+    {
+      ...baseMatch,
+      id: 'm4',
+      jornada: 4,
+      fecha: '2026-10-22',
+      homeTeamId: 'a',
+      awayTeamId: 'e',
+      homeScore: 0,
+      awayScore: 0,
+      status: 'PROGRAMADO',
+    },
+  ];
+
+  const stats = computeTeamHistoricalStats(teamA, 'futbol7', matches);
+  assert.equal(stats.pj, 3);
+  assert.equal(stats.pg, 1);
+  assert.equal(stats.pe, 1);
+  assert.equal(stats.pp, 1);
+  assert.equal(stats.favor, 7);
+  assert.equal(stats.contra, 6);
+  assert.equal(stats.diferencia, 1);
+  assert.equal(stats.puntos, 4);
+  assert.equal(stats.winRatePct, 33);
+  assert.deepEqual(stats.racha, ['G', 'E', 'P']);
+  assert.equal(stats.history.length, 4);
+  assert.equal(stats.history[0].match.id, 'm4');
+  assert.equal(stats.history[0].outcome, 'PROGRAMADO');
 });

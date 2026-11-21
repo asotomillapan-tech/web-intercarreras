@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Oswald", sans-serif;
+  --font-display: "League Gothic", sans-serif;
   --font-sans: "Roboto", system-ui, -apple-system, sans-serif;
   --color-ufro-blue: #707ef9;
   --color-ufro-blue-dark: #5766eb;
@@ -19,7 +19,10 @@
   }
 
   h1, h2, h3, .font-display {
-    font-family: "Oswald", sans-serif;
+    font-family: "League Gothic", sans-serif;
+    font-weight: 400;
+    font-synthesis-weight: none;
+    letter-spacing: 0.04em;
   }
 }
 

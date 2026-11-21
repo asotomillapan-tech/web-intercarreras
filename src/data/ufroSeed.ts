@@ -7,11 +7,6 @@ import type {
   TournamentState,
 } from '../types/tournament';
 
-export const HERO_IMAGE_URL = '/src/assets/images/hero_ufro_stadium_1795184390922.jpg';
-export const BASKET_IMAGE_URL = '/src/assets/images/discipline_basquetbol_1795184401933.jpg';
-export const VOLEY_IMAGE_URL = '/src/assets/images/discipline_voleibol_1795184395406.jpg';
-export const FUTBOL_DAMAS_IMAGE_URL = '/src/assets/images/discipline_futbol_damas_1795184386551.jpg';
-
 export const LOGO_LIGHT_SVG = '/assets/aistudio/ISO_Claro_a9e448b9.svg';
 export const LOGO_COLOR_SVG = '/assets/aistudio/ISO_Color_7cae44f2.svg';
 export const LOGO_DARK_SVG = '/assets/aistudio/ISO_Oscuro_d61a4241.svg';
@@ -27,7 +22,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 7,
     maxJugadores: 18,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: HERO_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'f7-h-2',
@@ -39,7 +34,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 7,
     maxJugadores: 18,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: HERO_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'f7-h-3',
@@ -51,7 +46,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 7,
     maxJugadores: 18,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: HERO_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'f7-m',
@@ -63,7 +58,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 7,
     maxJugadores: 16,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: FUTBOL_DAMAS_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'basquet-h',
@@ -75,7 +70,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 5,
     maxJugadores: 14,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: BASKET_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'basquet-3x3-m',
@@ -87,7 +82,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 3,
     maxJugadores: 5,
     maxSeleccionadosPorEquipo: 1,
-    imagenEditorial: BASKET_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'voley-m',
@@ -99,7 +94,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 6,
     maxJugadores: 14,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: VOLEY_IMAGE_URL,
+    imagenEditorial: '',
   },
   {
     id: 'voley-h',
@@ -111,7 +106,7 @@ export const DISCIPLINES: DisciplineMeta[] = [
     minJugadores: 6,
     maxJugadores: 14,
     maxSeleccionadosPorEquipo: 2,
-    imagenEditorial: VOLEY_IMAGE_URL,
+    imagenEditorial: '',
   },
 ];
 
