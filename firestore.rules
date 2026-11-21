@@ -69,6 +69,16 @@ service cloud.firestore {
       );
     }
 
+    function isPress() {
+      return isVerified() && (
+        isAdmin()
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'prensa'
+        )
+      );
+    }
+
     function isDelegado() {
       return isVerified()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -88,7 +98,7 @@ service cloud.firestore {
     }
 
     function isValidRole(role) {
-      return role in ['tradicional', 'jugador', 'delegado', 'arbitro', 'fotografo', 'admin'];
+      return role in ['tradicional', 'jugador', 'delegado', 'arbitro', 'fotografo', 'prensa', 'admin'];
     }
 
     function isValidDiscipline(d) {
@@ -580,6 +590,55 @@ service cloud.firestore {
         && isValidId(data.photographerUid)
         && data.photographerName is string && data.photographerName.size() >= 1 && data.photographerName.size() <= 120
         && data.createdAt is timestamp;
+    }
+
+    function isValidNewsArticle(data) {
+      return data.keys().hasAll([
+          'id',
+          'title',
+          'summary',
+          'content',
+          'category',
+          'featured',
+          'published',
+          'authorUid',
+          'authorName',
+          'authorRole',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'title',
+          'summary',
+          'content',
+          'category',
+          'disciplineId',
+          'coverImageUrl',
+          'featured',
+          'published',
+          'aiGenerated',
+          'authorUid',
+          'authorName',
+          'authorRole',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 160
+        && data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 360
+        && data.content is string && data.content.size() >= 10 && data.content.size() <= 12000
+        && data.category in ['ANUNCIO', 'RESULTADOS', 'DESTACADO', 'CONVOCATORIA', 'PLAYOFFS']
+        && (!('disciplineId' in data) || (data.disciplineId is string && data.disciplineId.size() <= 40))
+        && (!('coverImageUrl' in data) || (data.coverImageUrl is string && data.coverImageUrl.size() <= 1000))
+        && data.featured is bool
+        && data.published is bool
+        && (!('aiGenerated' in data) || data.aiGenerated is bool)
+        && isValidId(data.authorUid)
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120
+        && data.authorRole in ['admin', 'prensa']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
     // --- Collection 1: /users/{userId} (PII isolated to owner or admin) ---
@@ -1116,6 +1175,46 @@ service cloud.firestore {
       allow delete: if isValidId(photoId)
         && isVerified()
         && (isAdmin() || (isPhotographer() && existing().photographerUid == request.auth.uid));
+    }
+
+    // --- Collection 12: /news/{newsId} (Championship News & Featured Announcements - Press & Admin) ---
+    match /news/{newsId} {
+      allow get: if isValidId(newsId) && (existing().published == true || isPress());
+      allow list: if resource.data.published == true || isPress();
+
+      allow create: if isVerified()
+        && isValidId(newsId)
+        && isValidNewsArticle(incoming())
+        && incoming().id == newsId
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isPress();
+
+      allow update: if isVerified()
+        && isValidId(newsId)
+        && isValidNewsArticle(incoming())
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title',
+          'summary',
+          'content',
+          'category',
+          'disciplineId',
+          'coverImageUrl',
+          'featured',
+          'published',
+          'aiGenerated',
+          'authorName',
+          'authorRole',
+          'updatedAt'
+        ])
+        && isPress();
+
+      allow delete: if isValidId(newsId) && isPress();
     }
   }
 }

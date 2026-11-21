@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, Award, Calendar, ChevronRight, Lock, MapPin, Star } from 'lucide-react';
+import {
+  ArrowRight,
+  Award,
+  Calendar,
+  ChevronRight,
+  Lock,
+  MapPin,
+  Newspaper,
+  Sparkles,
+  Star,
+} from 'lucide-react';
 import {
   DISCIPLINES,
   DISCIPLINE_MAP,
@@ -7,6 +17,12 @@ import {
   LOGO_LIGHT_SVG,
 } from '../data/ufroSeed';
 import {
+  NEWS_CATEGORY_META,
+  sanitizeSafeNewsUrl,
+  sortNewsForHomepage,
+} from '../domain/newsFormatter';
+import {
+  canManageNews,
   canRefereeMatches,
   canVoteMatchMvp,
   computeMatchMvpStandings,
@@ -14,7 +30,14 @@ import {
 } from '../domain/rbacEngine';
 import { computeStandings } from '../domain/tournamentEngine';
 import type { Editorial2025Photos } from '../services/googleDrive';
-import type { AppUserProfile, DisciplineId, Match, Player, TournamentState } from '../types/tournament';
+import type {
+  AppUserProfile,
+  DisciplineId,
+  Match,
+  NewsArticle,
+  Player,
+  TournamentState,
+} from '../types/tournament';
 import type { NavSection } from './Navbar';
 
 interface HomeViewProps {
@@ -28,8 +51,16 @@ interface HomeViewProps {
   onInspectTeam: (teamId: string) => void;
   onOpenMatchModal: (match: Match) => void;
   onOpenMatchInReferee: (matchId: string) => void;
+  onOpenNewsArticle: (article: NewsArticle) => void;
+  onOpenNewsManager: () => void;
   onToggleFavoriteTeam: (teamId: string) => void;
   onOpenAuth: () => void;
+}
+
+function formatNewsDateEs(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  return date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function HomeView({
@@ -43,6 +74,8 @@ export function HomeView({
   onInspectTeam,
   onOpenMatchModal,
   onOpenMatchInReferee,
+  onOpenNewsArticle,
+  onOpenNewsManager,
   onToggleFavoriteTeam,
   onOpenAuth,
 }: HomeViewProps) {
@@ -95,9 +128,16 @@ export function HomeView({
   }, [state.players, selectedDiscipline, activeDisciplineMeta.sportType]);
 
   const isOfficial = canRefereeMatches(currentUser);
+  const canEditNews = canManageNews(currentUser);
   const featuredVoteCount = featuredMatch
     ? computeMatchMvpStandings(featuredMatch.id, state.mvpVotes).totalVotes
     : 0;
+
+  const {
+    primary: leadNews,
+    secondary: secondaryNews,
+    allPublished: publishedNews,
+  } = useMemo(() => sortNewsForHomepage(state.news), [state.news]);
 
   return (
     <div className="bg-white text-[#0d0d0d]">
@@ -340,6 +380,210 @@ export function HomeView({
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Section 1B: Noticias del Campeonato (Anuncios Destacados y Sala de Prensa) */}
+      <section
+        aria-labelledby="home-news-heading"
+        className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-14 border-b border-neutral-200"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+          <div>
+            <p className="text-xs font-medium text-[#707ef9] uppercase tracking-widest">
+              Sala de Prensa UFRO · Comunicados Oficiales
+            </p>
+            <h2
+              id="home-news-heading"
+              className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight text-[#0d0d0d] mt-1"
+            >
+              Noticias del Campeonato
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {publishedNews.length > 0 && (
+              <span className="text-xs text-neutral-500 tabular-nums">
+                {publishedNews.length}{' '}
+                {publishedNews.length === 1 ? 'anuncio publicado' : 'anuncios publicados'}
+              </span>
+            )}
+            {canEditNews && (
+              <button
+                type="button"
+                onClick={onOpenNewsManager}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+              >
+                <Newspaper className="w-3.5 h-3.5" />
+                <span>Gestionar noticias</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {!leadNews ? (
+          <div className="border border-neutral-200 bg-[#f5f6f8] p-8 sm:p-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <p className="text-xs font-bold uppercase tracking-widest text-neutral-500 flex items-center gap-2">
+                <Newspaper className="w-4 h-4 text-[#707ef9]" />
+                <span>Boletín Oficial Temporada {state.temporada}</span>
+              </p>
+              <h3 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                Próximos anuncios destacados del campeonato
+              </h3>
+              <p className="text-sm text-neutral-600 leading-relaxed">
+                Aquí se publicarán los comunicados oficiales de la Dirección de Deportes UFRO,
+                crónicas de cada fecha, aperturas de inscripción y novedades de playoffs redactadas
+                por Prensa Oficial y Administración.
+              </p>
+            </div>
+            {canEditNews && (
+              <button
+                type="button"
+                onClick={onOpenNewsManager}
+                className="px-5 py-3 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors whitespace-nowrap self-start md:self-auto cursor-pointer"
+              >
+                Publicar primer anuncio →
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Lead Featured Announcement */}
+            {(() => {
+              const cat = NEWS_CATEGORY_META[leadNews.category];
+              const safeLeadCover = leadNews.coverImageUrl
+                ? sanitizeSafeNewsUrl(leadNews.coverImageUrl)
+                : null;
+              const discLabel =
+                leadNews.disciplineId && leadNews.disciplineId !== 'general'
+                  ? DISCIPLINE_MAP[leadNews.disciplineId]?.nombreCorto
+                  : 'Campeonato General';
+              return (
+                <article
+                  className={`${
+                    secondaryNews.length > 0 ? 'lg:col-span-7' : 'lg:col-span-12'
+                  } bg-[#0d0d0d] text-white border border-neutral-900 flex flex-col overflow-hidden group`}
+                >
+                  {safeLeadCover && (
+                    <div className="relative h-56 sm:h-64 w-full overflow-hidden border-b border-white/10">
+                      <img
+                        src={safeLeadCover}
+                        alt={leadNews.title}
+                        className="w-full h-full object-cover opacity-85 group-hover:scale-[1.02] transition-transform duration-300"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/30 to-transparent" />
+                    </div>
+                  )}
+
+                  <div className="p-6 sm:p-8 flex-1 flex flex-col justify-between gap-6">
+                    <div className="space-y-3.5">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span
+                          className={`px-2.5 py-1 font-display font-bold uppercase tracking-widest ${cat.badgeClass}`}
+                        >
+                          {cat.label}
+                        </span>
+                        {leadNews.featured && (
+                          <span className="px-2.5 py-1 bg-white/10 text-white font-display font-bold uppercase tracking-widest">
+                            Destacado
+                          </span>
+                        )}
+                        <span className="text-neutral-400">{discLabel}</span>
+                        <span aria-hidden="true" className="text-neutral-600">
+                          ·
+                        </span>
+                        <span className="text-neutral-400 tabular-nums">
+                          {formatNewsDateEs(leadNews.createdAt)}
+                        </span>
+                      </div>
+
+                      <h3 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight leading-[1.06] text-white">
+                        {leadNews.title}
+                      </h3>
+
+                      <p className="text-sm sm:text-base text-neutral-300 leading-relaxed line-clamp-3">
+                        {leadNews.summary}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-white/10">
+                      <span className="text-xs text-neutral-400 flex items-center gap-2">
+                        <span>
+                          {leadNews.authorName} ·{' '}
+                          {leadNews.authorRole === 'prensa' ? 'Prensa Oficial' : 'Dirección UFRO'}
+                        </span>
+                        {leadNews.aiGenerated && (
+                          <span className="inline-flex items-center gap-1 text-[#9ca7ff]">
+                            <Sparkles className="w-3 h-3" />
+                            <span>Breve</span>
+                          </span>
+                        )}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenNewsArticle(leadNews)}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+                      >
+                        <span>Leer noticia completa</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })()}
+
+            {/* Secondary Editorial Announcements List */}
+            {secondaryNews.length > 0 && (
+              <div className="lg:col-span-5 flex flex-col divide-y divide-neutral-200 border border-neutral-200 bg-white">
+                {secondaryNews.map((article) => {
+                  const cat = NEWS_CATEGORY_META[article.category];
+                  const discLabel =
+                    article.disciplineId && article.disciplineId !== 'general'
+                      ? DISCIPLINE_MAP[article.disciplineId]?.nombreCorto
+                      : 'General';
+                  return (
+                    <button
+                      key={article.id}
+                      type="button"
+                      onClick={() => onOpenNewsArticle(article)}
+                      className="w-full text-left p-5 hover:bg-[#f5f6f8] transition-colors flex flex-col justify-between gap-2.5 flex-1 cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`px-2 py-0.5 font-display font-bold uppercase tracking-wider shrink-0 ${cat.badgeClass}`}
+                          >
+                            {cat.label}
+                          </span>
+                          <span className="text-neutral-500 truncate">{discLabel}</span>
+                        </div>
+                        <span className="text-neutral-400 tabular-nums shrink-0">
+                          {formatNewsDateEs(article.createdAt)}
+                        </span>
+                      </div>
+
+                      <h3 className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors leading-snug">
+                        {article.title}
+                      </h3>
+
+                      <p className="text-xs text-neutral-600 line-clamp-2 leading-relaxed">
+                        {article.summary}
+                      </p>
+
+                      <span className="text-xs font-medium text-[#0d0d0d] group-hover:text-[#707ef9] inline-flex items-center gap-1 pt-1">
+                        <span>Leer comunicado</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Section 2: Match Center (Public Post-Match Results + Live-Hour MVP Voting) */}

@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardList,
+  Newspaper,
   Shield,
   Star,
   Upload,
@@ -107,7 +108,7 @@ export function AccountView({
           </h1>
           <p className="text-sm text-neutral-600">
             Guarda tus equipos favoritos para recibir notificaciones, vota por el MVP durante cada
-            partido o accede a herramientas de Jugador, Delegado, Árbitro, Fotógrafo o Administrador.
+            partido o accede a herramientas de Jugador, Delegado, Árbitro, Prensa Oficial, Fotógrafo o Administrador.
           </p>
           <button
             type="button"
@@ -225,13 +226,15 @@ export function AccountView({
                   Subir fotografías
                 </button>
               )}
-              {(currentUser.role === 'admin' || currentUser.role === 'arbitro') && (
+              {(currentUser.role === 'admin' ||
+                currentUser.role === 'arbitro' ||
+                currentUser.role === 'prensa') && (
                 <button
                   type="button"
                   onClick={() => onNavigate('panel')}
                   className="px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
                 >
-                  Ir a Panel Oficial
+                  {currentUser.role === 'prensa' ? 'Ir a Sala de Prensa' : 'Ir a Panel Oficial'}
                 </button>
               )}
             </div>
@@ -310,6 +313,33 @@ export function AccountView({
               className="px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer self-start md:self-auto"
             >
               Abrir Estudio Fotográfico →
+            </button>
+          </div>
+        )}
+
+        {currentUser.role === 'prensa' && (
+          <div className="border border-neutral-200 bg-[#f5f6f8] p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <Newspaper className="w-5 h-5 text-[#707ef9] shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs uppercase tracking-wider font-bold text-[#707ef9]">
+                  Perfil Prensa Oficial UFRO
+                </p>
+                <h2 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
+                  Sala de Prensa · Noticias del Campeonato
+                </h2>
+                <p className="text-xs text-neutral-600 mt-1">
+                  Tienes autorización para crear, editar y destacar anuncios oficiales en la página
+                  de inicio y generar noticias breves automáticamente.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('panel')}
+              className="px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer self-start md:self-auto"
+            >
+              Abrir Noticias del Campeonato →
             </button>
           </div>
         )}

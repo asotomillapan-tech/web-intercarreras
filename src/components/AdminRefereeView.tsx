@@ -20,12 +20,15 @@ import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   canAccessAdminPanel,
   canManageFormatAndSheets,
+  canManageNews,
   canManageRoles,
+  canRefereeMatches,
   ROLE_META,
   validateRoleChange,
 } from '../domain/rbacEngine';
 import { isVolleyballSetWon } from '../domain/tournamentEngine';
 import { getFirebaseIdToken } from '../services/firebaseAuth';
+import type { Editorial2025Photos } from '../services/googleDrive';
 import type { DeletedEntityIds, SheetImportDelta } from '../domain/sheetsMergeEngine';
 import type {
   AiScoresheetResult,
@@ -36,6 +39,7 @@ import type {
   MasterSheetsConfig,
   Match,
   MatchEvent,
+  NewsArticle,
   Player,
   Team,
   TournamentStage,
@@ -43,12 +47,14 @@ import type {
   UserRole,
 } from '../types/tournament';
 import { AdminMatchEditor } from './AdminMatchEditor';
+import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
 import { AdminTeamsManager } from './AdminTeamsManager';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 
 export type PanelSubTab =
   | 'arbitro'
+  | 'noticias'
   | 'partidos'
   | 'equipos'
   | 'jugadores'
@@ -59,6 +65,7 @@ export type PanelSubTab =
 interface AdminRefereeViewProps {
   state: TournamentState;
   currentUser: AppUserProfile | null;
+  editorialPhotos: Editorial2025Photos | null;
   initialSubTab?: PanelSubTab;
   focusedMatchId?: string | null;
   pendingSyncKeys: MasterSheetKey[];
@@ -72,6 +79,9 @@ interface AdminRefereeViewProps {
   onAddPlayer: (player: Player) => void;
   onUpdatePlayer: (player: Player) => void;
   onDeletePlayer: (player: Player) => void;
+  onAddNews: (article: NewsArticle) => Promise<void> | void;
+  onUpdateNews: (article: NewsArticle) => Promise<void> | void;
+  onDeleteNews: (article: NewsArticle) => Promise<void> | void;
   onUpdateConfig: (disciplineId: DisciplineId, config: DisciplineFormatConfig, rebuildGroups: boolean) => void;
   onSaveMasterSheets: (
     nextMasterSheets: MasterSheetsConfig,
@@ -179,6 +189,7 @@ function renderSampleScoresheetImage(params: {
 export function AdminRefereeView({
   state,
   currentUser,
+  editorialPhotos,
   initialSubTab = 'arbitro',
   focusedMatchId = null,
   pendingSyncKeys,
@@ -192,6 +203,9 @@ export function AdminRefereeView({
   onAddPlayer,
   onUpdatePlayer,
   onDeletePlayer,
+  onAddNews,
+  onUpdateNews,
+  onDeleteNews,
   onUpdateConfig,
   onSaveMasterSheets,
   onApproveAutoSyncSession,
@@ -205,9 +219,13 @@ export function AdminRefereeView({
 }: AdminRefereeViewProps) {
   const isAdmin = canManageRoles(currentUser);
   const canManageAdminTabs = canManageFormatAndSheets(currentUser);
-  const [subTab, setSubTab] = useState<PanelSubTab>(
-    isAdmin ? initialSubTab : 'arbitro'
-  );
+  const canEditNews = canManageNews(currentUser);
+  const canReferee = canRefereeMatches(currentUser);
+  const [subTab, setSubTab] = useState<PanelSubTab>(() => {
+    if (isAdmin) return initialSubTab;
+    if (canEditNews && !canReferee) return 'noticias';
+    return 'arbitro';
+  });
 
   // Admin User & Role Management State
   const [userSearch, setUserSearch] = useState('');
@@ -243,12 +261,14 @@ export function AdminRefereeView({
   const [configSavedMsg, setConfigSavedMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAdmin && initialSubTab !== 'arbitro') {
-      setSubTab('arbitro');
-    } else {
+    if (isAdmin) {
       setSubTab(initialSubTab);
+    } else if (canEditNews && !canReferee) {
+      setSubTab('noticias');
+    } else {
+      setSubTab('arbitro');
     }
-  }, [initialSubTab, isAdmin]);
+  }, [initialSubTab, isAdmin, canEditNews, canReferee]);
 
   useEffect(() => {
     if (focusedMatchId) {
@@ -734,7 +754,7 @@ export function AdminRefereeView({
     }
   };
 
-  // RBAC Guard: Panel Oficial is exclusively for Árbitro Oficial and Administrador UFRO
+  // RBAC Guard: Panel Oficial is exclusively for Árbitro Oficial, Prensa Oficial and Administrador UFRO
   if (!canAccessAdminPanel(currentUser)) {
     return (
       <div className="bg-white min-h-[75vh]">
@@ -744,7 +764,7 @@ export function AdminRefereeView({
               Acceso Restringido · Dirección de Deportes UFRO
             </p>
             <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight mt-2">
-              Panel Oficial de Arbitraje y Administración
+              Panel Oficial de Arbitraje, Prensa y Administración
             </h1>
           </div>
         </div>
@@ -754,23 +774,23 @@ export function AdminRefereeView({
             <div className="flex items-center gap-2.5 text-[#0d0d0d]">
               <Lock className="w-5 h-5 text-[#707ef9]" />
               <h2 className="font-display text-2xl font-bold uppercase tracking-wide">
-                Sección exclusiva para Árbitros y Administradores
+                Sección exclusiva para Árbitros, Prensa y Administradores
               </h2>
             </div>
             <p className="text-sm text-neutral-700 leading-relaxed">
               {currentUser ? (
                 <>
                   Tu sesión actual corresponde al rol{' '}
-                  <strong>{ROLE_META[currentUser.role].label}</strong>. La Mesa Arbitral, gestión de
-                  roles de usuario, formato anual y sincronización con Google Sheets requieren
-                  acreditación de <strong>Árbitro Oficial</strong> o{' '}
-                  <strong>Administrador UFRO</strong>.
+                  <strong>{ROLE_META[currentUser.role].label}</strong>. La Mesa Arbitral, Sala de
+                  Prensa, gestión de roles de usuario, formato anual y sincronización con Google
+                  Sheets requieren acreditación de <strong>Árbitro Oficial</strong>,{' '}
+                  <strong>Prensa Oficial</strong> o <strong>Administrador UFRO</strong>.
                 </>
               ) : (
                 <>
                   Debes iniciar sesión con una cuenta acreditada de{' '}
-                  <strong>Árbitro Oficial</strong> o <strong>Administrador UFRO</strong> para operar
-                  en el Panel Oficial.
+                  <strong>Árbitro Oficial</strong>, <strong>Prensa Oficial</strong> o{' '}
+                  <strong>Administrador UFRO</strong> para operar en el Panel Oficial.
                 </>
               )}
             </p>
@@ -787,7 +807,11 @@ export function AdminRefereeView({
     );
   }
 
-  const effectiveSubTab: PanelSubTab = isAdmin ? subTab : 'arbitro';
+  const effectiveSubTab: PanelSubTab = isAdmin
+    ? subTab
+    : canEditNews && !canReferee
+    ? 'noticias'
+    : 'arbitro';
 
   return (
     <div className="bg-white min-h-[75vh]">
@@ -801,28 +825,47 @@ export function AdminRefereeView({
             <div>
               <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight">
                 {isAdmin
-                  ? 'Panel Oficial de Arbitraje y Administración'
+                  ? 'Panel Oficial de Arbitraje, Prensa y Administración'
+                  : currentUser?.role === 'prensa'
+                  ? 'Sala de Prensa · Noticias del Campeonato'
                   : 'Consola Privada de Mesa Arbitral'}
               </h1>
               <p className="text-sm text-neutral-400 mt-2 max-w-2xl">
                 {isAdmin
-                  ? 'Control de marcadores en mesa arbitral, asignación exclusiva de roles de usuario, validación de planillas con IA, formato anual y Google Sheets.'
+                  ? 'Control de marcadores en mesa arbitral, publicación de noticias destacadas, asignación de roles de usuario, formato anual y Google Sheets.'
+                  : currentUser?.role === 'prensa'
+                  ? 'Publicación y edición de anuncios destacados en portada, gestión de borradores y generación automática de noticias breves del campeonato.'
                   : 'Control privado de marcadores por disciplina, validación de planillas físicas con IA y cierre oficial para publicación de resultados.'}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-1 bg-white/5 p-1 self-start lg:self-auto">
-              <button
-                type="button"
-                onClick={() => setSubTab('arbitro')}
-                className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
-                  effectiveSubTab === 'arbitro'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                Mesa Arbitral
-              </button>
+              {canReferee && (
+                <button
+                  type="button"
+                  onClick={() => setSubTab('arbitro')}
+                  className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                    effectiveSubTab === 'arbitro'
+                      ? 'bg-[#707ef9] text-white'
+                      : 'text-neutral-300 hover:text-white'
+                  }`}
+                >
+                  Mesa Arbitral
+                </button>
+              )}
+              {canEditNews && (
+                <button
+                  type="button"
+                  onClick={() => setSubTab('noticias')}
+                  className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                    effectiveSubTab === 'noticias'
+                      ? 'bg-[#707ef9] text-white'
+                      : 'text-neutral-300 hover:text-white'
+                  }`}
+                >
+                  Noticias ({state.news.length})
+                </button>
+              )}
               {isAdmin && (
                 <>
                   <button
@@ -904,7 +947,7 @@ export function AdminRefereeView({
 
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* TAB 1: REFEREE CONSOLE & AI SCORESHEET VALIDATION */}
-        {effectiveSubTab === 'arbitro' && (
+        {effectiveSubTab === 'arbitro' && canReferee && (
           <div className="space-y-8">
             {/* Referee Profile Selector */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2101,6 +2144,18 @@ export function AdminRefereeView({
             onClearDeletedTombstones={onClearDeletedTombstones}
             onApplySheetImports={onApplySheetImports}
             onMarkSynced={onMarkSynced}
+          />
+        )}
+
+        {/* TAB 5: NOTICIAS DEL CAMPEONATO (ADMIN & PRENSA OFICIAL) */}
+        {effectiveSubTab === 'noticias' && canEditNews && currentUser && (
+          <AdminNewsManager
+            state={state}
+            currentUser={currentUser}
+            editorialPhotos={editorialPhotos}
+            onAddNews={onAddNews}
+            onUpdateNews={onUpdateNews}
+            onDeleteNews={onDeleteNews}
           />
         )}
       </div>

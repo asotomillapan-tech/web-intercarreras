@@ -22,17 +22,20 @@ import {
 import {
   adminUpdateFirestoreUserRole,
   deleteFirestoreMatchesForDiscipline,
+  deleteFirestoreNewsArticle,
   deleteFirestorePhoto,
   deleteFirestorePlayer,
   deleteFirestoreTeam,
   ensureAllConfigsInFirestore,
   executeFirestoreTransfer,
+  listAllFirestoreNews,
   listFirestoreUsers,
   loadAuthorizedPlayerPrivateMap,
   loadPublicTournamentState,
   saveFirestoreDisciplineConfig,
   saveFirestoreMatch,
   saveFirestoreMvpVote,
+  saveFirestoreNewsArticle,
   saveFirestorePhoto,
   saveFirestorePlayer,
   saveFirestoreSettings,
@@ -54,6 +57,7 @@ import { GalleryView } from './components/GalleryView';
 import { HomeView } from './components/HomeView';
 import { MatchMvpModal } from './components/MatchMvpModal';
 import { Navbar, type NavSection } from './components/Navbar';
+import { NewsArticleModal } from './components/NewsArticleModal';
 import { PlayersView } from './components/PlayersView';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { RegistrationView } from './components/RegistrationView';
@@ -68,6 +72,7 @@ import type {
   MasterSheetsConfig,
   Match,
   MvpVoteRecord,
+  NewsArticle,
   PhotoEntry,
   Player,
   Team,
@@ -105,6 +110,7 @@ function AppContent() {
   const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [activeMatchModalId, setActiveMatchModalId] = useState<string | null>(null);
+  const [activeNewsArticle, setActiveNewsArticle] = useState<NewsArticle | null>(null);
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
@@ -167,6 +173,7 @@ function AppContent() {
           transfers: cloud.transfers ?? prev.transfers,
           mvpVotes: cloud.mvpVotes ?? prev.mvpVotes,
           photos: cloud.photos ?? prev.photos,
+          news: cloud.news ?? prev.news,
         }));
       })
       .catch((err) => {
@@ -213,6 +220,16 @@ function AppContent() {
           }
         } catch (err) {
           console.error('Error hidratando datos privados de jugadores:', err);
+        }
+      }
+
+      // If signed-in user is Admin or Prensa Oficial, load all news (including unpublished drafts)
+      if (profile.role === 'admin' || profile.role === 'prensa') {
+        try {
+          const allNews = await listAllFirestoreNews();
+          setState((prev) => ({ ...prev, news: allNews }));
+        } catch (err) {
+          console.error('Error cargando borradores de noticias:', err);
         }
       }
 
@@ -277,6 +294,7 @@ function AppContent() {
               transfers: freshPublic.transfers ?? prev.transfers,
               mvpVotes: freshPublic.mvpVotes ?? prev.mvpVotes,
               photos: freshPublic.photos ?? prev.photos,
+              news: freshPublic.news ?? prev.news,
             }));
           }
 
@@ -287,10 +305,11 @@ function AppContent() {
       },
       () => {
         setCurrentUserUid(null);
-        // Strip isolated PII from memory on sign-out
+        // Strip isolated PII and unpublished news drafts from memory on sign-out
         setState((prev) => ({
           ...prev,
           users: [],
+          news: prev.news.filter((n) => n.published),
           players: prev.players.map((p) => ({
             ...p,
             rut: '',
@@ -729,6 +748,39 @@ function AppContent() {
     }));
   };
 
+  const handleAddNews = async (article: NewsArticle) => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    await saveFirestoreNewsArticle(article, true);
+    setState((prev) => ({
+      ...prev,
+      news: [article, ...prev.news],
+    }));
+  };
+
+  const handleUpdateNews = async (article: NewsArticle) => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    await saveFirestoreNewsArticle(article, false);
+    setState((prev) => ({
+      ...prev,
+      news: prev.news.map((n) => (n.id === article.id ? article : n)),
+    }));
+    if (activeNewsArticle?.id === article.id) {
+      setActiveNewsArticle(article);
+    }
+  };
+
+  const handleDeleteNews = async (article: NewsArticle) => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    await deleteFirestoreNewsArticle(article.id);
+    setState((prev) => ({
+      ...prev,
+      news: prev.news.filter((n) => n.id !== article.id),
+    }));
+    if (activeNewsArticle?.id === article.id) {
+      setActiveNewsArticle(null);
+    }
+  };
+
   const handleSaveDriveRootFolder = async (folderId: string, folderName: string) => {
     await saveFirestoreSettings({
       temporada: state.temporada,
@@ -804,6 +856,12 @@ function AppContent() {
 
   const handleOpenSheetsSync = () => {
     setPanelInitialSubTab('sheets');
+    setActiveSection('panel');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenNewsManager = () => {
+    setPanelInitialSubTab('noticias');
     setActiveSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1076,6 +1134,8 @@ function AppContent() {
             onInspectTeam={setInspectedTeamId}
             onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
             onOpenMatchInReferee={handleOpenMatchInReferee}
+            onOpenNewsArticle={setActiveNewsArticle}
+            onOpenNewsManager={handleOpenNewsManager}
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
             onOpenAuth={() => setAuthModalOpen(true)}
           />
@@ -1156,6 +1216,7 @@ function AppContent() {
           <AdminRefereeView
             state={state}
             currentUser={currentUser}
+            editorialPhotos={editorialPhotos}
             initialSubTab={panelInitialSubTab}
             focusedMatchId={focusedMatchId}
             pendingSyncKeys={pendingSyncKeys}
@@ -1169,6 +1230,9 @@ function AppContent() {
             onAddPlayer={handleAddPlayerToTeam}
             onUpdatePlayer={handleUpdatePlayer}
             onDeletePlayer={handleDeletePlayer}
+            onAddNews={handleAddNews}
+            onUpdateNews={handleUpdateNews}
+            onDeleteNews={handleDeleteNews}
             onUpdateConfig={handleUpdateConfig}
             onSaveMasterSheets={handleSaveMasterSheets}
             onApproveAutoSyncSession={setAutoSyncSessionApproved}
@@ -1188,6 +1252,11 @@ function AppContent() {
       </main>
 
       <Footer onNavigate={handleNavigate} />
+
+      <NewsArticleModal
+        article={activeNewsArticle}
+        onClose={() => setActiveNewsArticle(null)}
+      />
 
       <TeamProfileModal
         team={inspectedTeam}

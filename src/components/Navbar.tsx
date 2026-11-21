@@ -238,7 +238,7 @@ export function Navbar({
                   }`}
                 >
                   <Shield className="w-3.5 h-3.5" />
-                  <span>Panel Oficial</span>
+                  <span>{currentUser.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}</span>
                 </button>
               )}
             </>
@@ -324,12 +324,12 @@ export function Navbar({
             )}
 
             {hasOfficialAccess && (
-              <button
+                <button
                 type="button"
                 onClick={() => handleSelect('panel')}
                 className="w-full py-3 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-sm"
               >
-                Panel Oficial
+                {currentUser?.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}
               </button>
             )}
           </div>

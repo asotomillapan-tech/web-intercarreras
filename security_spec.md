@@ -10,11 +10,12 @@
 7. **Jugador Self-Edit Guard**: A `jugador` may edit ONLY their linked `/players/{playerId}` and `/player_private/{playerId}`, and CANNOT alter `teamId`, `disciplineId`, `esSeleccionadoUfro`, or `stats`.
 8. **Referee Stats & Scoreboard Guard**: An `arbitro` may update non-finalized `/matches/{matchId}` (score/periods/events/status/validation) and ONLY `stats` + `updatedAt` on `/players/{playerId}`.
 9. **Photographer Scope**: Only `fotografo` or `admin` can create, update, or delete `/photos/{photoId}` records.
-10. **Strict Timestamps & Schema Validation**: Every write validates `isValidId()` on single-doc targets, `isValid[Entity](incoming())`, `hasAll`/`hasOnly` keys, string `.size()` limits, bounded arrays, and `request.time` for `createdAt`/`updatedAt`.
+10. **Press / Newsroom Scope**: Only `prensa` or `admin` can create, update, publish, delete, or read unpublished drafts in `/news/{newsId}`. Public visitors may only read `/news` documents where `published == true`.
+11. **Strict Timestamps & Schema Validation**: Every write validates `isValidId()` on single-doc targets, `isValid[Entity](incoming())`, `hasAll`/`hasOnly` keys, string `.size()` limits, bounded arrays, and `request.time` for `createdAt`/`updatedAt`.
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
 1. **Self-Admin Escalation on Create**: `POST /users/{uid}` with `role: 'admin'` by non-bootstrapped user -> DENIED.
-2. **Role Escalation on Update**: `PATCH /users/{uid}` changing `role` from `'tradicional'` to `'fotografo'` or `'admin'` by owner -> DENIED.
+2. **Role Escalation on Update**: `PATCH /users/{uid}` changing `role` from `'tradicional'` to `'prensa'`, `'fotografo'` or `'admin'` by owner -> DENIED.
 3. **Email Spoofing Without Verification**: Auth token with `email == 'a.sotomillapan@gmail.com'` and `email_verified == false` -> DENIED.
 4. **Shadow Field Injection on Team**: `POST /teams/{id}` with ghost field `isOfficial: true` -> DENIED (`hasOnly` check).
 5. **Public Student PII Scraping**: Unauthenticated or `tradicional` user calling `GET /player_private/PL-001` -> DENIED.
@@ -23,5 +24,5 @@
 8. **Referee Post-Finalization Tampering**: `arbitro` updating `homeScore` on a match whose existing `status == 'FINALIZADO'` -> DENIED (Terminal State Lock).
 9. **Registration While Closed**: `delegado` creating `/teams/T-NEW` when `/configs/{disciplineId}.inscripcionesAbiertas == false` -> DENIED.
 10. **Transfer While Closed**: `delegado` creating `/transfers/TR-1` when `/configs/{disciplineId}.transferenciasAbiertas == false` -> DENIED.
-11. **MVP Vote Identity Spoofing**: User A creating `/mvp_votes/M1_userB` with `voterUid: 'userB'` -> DENIED.
-12. **Resource Poisoning / Oversized ID**: Creating `/photos/{200-char-id}` or `title` > 160 chars -> DENIED (`isValidId` + `.size()`).
+11. **Unauthorized News Publishing / Draft Leak**: `tradicional`, `jugador`, `delegado`, or `arbitro` creating/updating `/news/{id}` or reading `/news/{draftId}` (`published == false`) -> DENIED.
+12. **Resource Poisoning / Oversized ID**: Creating `/photos/{200-char-id}` or `/news/{id}` with `content` > 12000 chars -> DENIED (`isValidId` + `.size()`).

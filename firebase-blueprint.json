@@ -26,7 +26,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["tradicional", "jugador", "delegado", "arbitro", "fotografo", "admin"]
+          "enum": ["tradicional", "jugador", "delegado", "arbitro", "fotografo", "prensa", "admin"]
         },
         "favoriteTeamIds": {
           "type": "array",
@@ -701,6 +701,90 @@
         }
       },
       "required": ["id", "title", "disciplineId", "matchLabel", "season", "source", "imageUrl", "photographerUid", "photographerName", "createdAt"]
+    },
+    "NewsArticle": {
+      "title": "NewsArticle",
+      "description": "Noticia o anuncio destacado del Campeonato Intercarreras UFRO gestionado por Prensa Oficial y Administradores.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 360
+        },
+        "content": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 12000
+        },
+        "category": {
+          "type": "string",
+          "enum": ["ANUNCIO", "RESULTADOS", "DESTACADO", "CONVOCATORIA", "PLAYOFFS"]
+        },
+        "disciplineId": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "coverImageUrl": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "featured": {
+          "type": "boolean"
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "aiGenerated": {
+          "type": "boolean"
+        },
+        "authorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "authorRole": {
+          "type": "string",
+          "enum": ["admin", "prensa"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "summary",
+        "content",
+        "category",
+        "featured",
+        "published",
+        "authorUid",
+        "authorName",
+        "authorRole",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -747,6 +831,10 @@
     "/photos/{photoId}": {
       "schema": { "$ref": "#/entities/PhotoEntry" },
       "description": "Índice fotográfico oficial conectado a Google Drive y subidas de prensa UFRO."
+    },
+    "/news/{newsId}": {
+      "schema": { "$ref": "#/entities/NewsArticle" },
+      "description": "Noticias del Campeonato y anuncios destacados gestionados por Prensa Oficial y Administradores."
     }
   }
 }

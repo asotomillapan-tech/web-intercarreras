@@ -314,6 +314,7 @@ export function createInitialTournamentState(): TournamentState {
     users: [],
     mvpVotes: [],
     photos: [],
+    news: [],
     masterSheets: { ...DEFAULT_MASTER_SHEETS },
     autoSyncSheetsEnabled: false,
     lastSyncedSpreadsheetId: DEFAULT_FUTBOL_HOMBRES_MASTER_SHEET_ID,

@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   buildFavoriteNotifications,
+  canAccessAdminPanel,
   canDeletePhoto,
   canEditPlayerProfile,
+  canManageNews,
   canManageRegistrationsAndTransfers,
   canManageRoles,
   canRefereeMatches,
@@ -126,6 +128,19 @@ test('role capabilities match UFRO requirements per profile', () => {
   assert.equal(canRefereeMatches(referee), true);
   assert.equal(canRefereeMatches(admin), true);
   assert.equal(canRefereeMatches(traditional), false);
+
+  // Prensa role: manages championship news & enters Panel Oficial, but cannot manage roles or referee matches
+  const press = makeUser({ uid: 'prs-1', role: 'prensa' });
+  assert.equal(canManageNews(press), true);
+  assert.equal(canManageNews(admin), true);
+  assert.equal(canManageNews(referee), false);
+  assert.equal(canManageNews(photographer), false);
+  assert.equal(canManageNews(traditional), false);
+  assert.equal(canAccessAdminPanel(press), true);
+  assert.equal(canRefereeMatches(press), false);
+  assert.equal(canManageRoles(press), false);
+  assert.equal(validateRoleChange(admin, traditional, 'prensa').allowed, true);
+  assert.equal(validateRoleChange(press, traditional, 'prensa').allowed, false);
 });
 
 test('public match data is hidden until finished while MVP voting is open during scheduled match hour', () => {

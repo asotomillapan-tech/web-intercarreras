@@ -16,6 +16,7 @@ export const ALL_USER_ROLES: UserRole[] = [
   'delegado',
   'arbitro',
   'fotografo',
+  'prensa',
   'admin',
 ];
 
@@ -83,14 +84,25 @@ export const ROLE_META: Record<
       'Administrar sus propias publicaciones en la galería',
     ],
   },
+  prensa: {
+    label: 'Prensa Oficial',
+    shortLabel: 'Prensa',
+    description:
+      'Equipo de comunicaciones acreditado para redactar, editar, publicar anuncios destacados y generar noticias breves del campeonato.',
+    permissions: [
+      'Crear, editar y publicar anuncios y noticias destacadas en la portada',
+      'Generar borradores de noticias breves automáticas a partir de los resultados',
+      'Gestionar el módulo de Noticias del Campeonato en el Panel Oficial',
+    ],
+  },
   admin: {
     label: 'Administrador UFRO',
     shortLabel: 'Admin',
     description:
-      'Control total del campeonato: revisión y modificación de datos, perfiles, formato anual, Google Sheets y asignación exclusiva de roles.',
+      'Control total del campeonato: revisión y modificación de datos, perfiles, noticias, formato anual, Google Sheets y asignación exclusiva de roles.',
     permissions: [
-      'Cambiar el rol de cualquier usuario (incluyendo Fotógrafo y Árbitro)',
-      'Revisar y editar cualquier perfil, equipo, partido o fotografía',
+      'Cambiar el rol de cualquier usuario (incluyendo Prensa, Fotógrafo y Árbitro)',
+      'Revisar y editar cualquier perfil, equipo, partido, noticia o fotografía',
       'Configurar formato anual, cupos, ventanas y sincronización Google Sheets',
     ],
   },
@@ -100,8 +112,12 @@ export function canManageRoles(user: AppUserProfile | null): boolean {
   return user?.role === 'admin';
 }
 
+export function canManageNews(user: AppUserProfile | null): boolean {
+  return user?.role === 'admin' || user?.role === 'prensa';
+}
+
 export function canAccessAdminPanel(user: AppUserProfile | null): boolean {
-  return user?.role === 'admin' || user?.role === 'arbitro';
+  return user?.role === 'admin' || user?.role === 'arbitro' || user?.role === 'prensa';
 }
 
 export function canRefereeMatches(user: AppUserProfile | null): boolean {

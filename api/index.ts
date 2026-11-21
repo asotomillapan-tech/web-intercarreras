@@ -652,6 +652,131 @@ export function createApiApp(): express.Express {
     }
   });
 
+  // Protected Server-Side Automatic News Brief Generator (Requires Verified Firebase Auth ID Token)
+  app.post('/api/ai/generate-news-brief', requireFirebaseAuth, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as {
+        mode?: string;
+        topic?: string;
+        disciplineName?: string;
+        tone?: string;
+        tournamentContext?: string;
+      };
+
+      const mode = body.mode === 'topic' ? 'topic' : 'recap';
+      const topic = typeof body.topic === 'string' ? body.topic.trim().slice(0, 500) : '';
+      const disciplineName =
+        typeof body.disciplineName === 'string' && body.disciplineName.trim()
+          ? body.disciplineName.trim().slice(0, 120)
+          : 'Todas las disciplinas';
+      const tone =
+        body.tone === 'urgente' || body.tone === 'cronica' || body.tone === 'oficial'
+          ? body.tone
+          : 'oficial';
+      const tournamentContext =
+        typeof body.tournamentContext === 'string'
+          ? body.tournamentContext.trim().slice(0, 4000)
+          : '';
+
+      if (mode === 'topic' && topic.length < 5) {
+        res.status(400).json({
+          error: 'Describe brevemente el tema o pauta del anuncio (mínimo 5 caracteres).',
+        });
+        return;
+      }
+
+      const toneInstruction =
+        tone === 'urgente'
+          ? 'Tono de comunicado oficial urgente, directo y sumamente claro para estudiantes y delegados.'
+          : tone === 'cronica'
+          ? 'Tono de crónica deportiva universitaria ágil, entusiasta y respetuosa (estilo prensa deportiva chilena).'
+          : 'Tono institucional y periodístico oficial de la Dirección de Deportes de la Universidad de La Frontera (UFRO, Temuco).';
+
+      const promptText = [
+        'Eres periodista deportivo del equipo de Prensa Oficial del Campeonato Intercarreras de la Universidad de La Frontera (UFRO, Temuco, Chile).',
+        toneInstruction,
+        `Disciplina o foco: ${disciplineName}.`,
+        mode === 'topic'
+          ? `Pauta solicitada por el editor de prensa: "${topic}"`
+          : 'Objetivo: Redacta una noticia breve automática resumiendo lo más relevante del estado actual del campeonato según los datos oficiales adjuntos.',
+        tournamentContext
+          ? `\nDatos oficiales actuales del campeonato:\n${tournamentContext}`
+          : '\nNota: Todavía no hay resultados cargados en el sistema; redacta una nota breve de convocatoria/arranque de temporada sin inventar marcadores ni jugadores ficticios.',
+        '',
+        'Reglas editoriales estrictas:',
+        '1. Nunca inventes marcadores, fechas ni nombres de estudiantes que no aparezcan en los datos proporcionados.',
+        '2. Responde exclusivamente en español de Chile natural y profesional.',
+        '3. El campo "title" debe ser un titular atractivo y conciso (máx. 110 caracteres).',
+        '4. El campo "summary" debe ser una bajada breve de 1 o 2 frases (máx. 260 caracteres).',
+        '5. El campo "content" debe ser una nota breve bien estructurada (120 a 220 palabras) en texto simple compatible con nuestro editor: usa párrafos separados por línea en blanco, **negritas** para datos clave, opcionalmente un subtítulo "## ..." y/o una lista "- ..." de máximo 3 puntos.',
+        '6. El campo "category" debe ser exactamente uno de: ANUNCIO, RESULTADOS, DESTACADO, CONVOCATORIA, PLAYOFFS.',
+      ].join('\n');
+
+      const ai = createGeminiClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: promptText,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: {
+                type: Type.STRING,
+                description: 'Titular periodístico breve (máximo 110 caracteres).',
+              },
+              summary: {
+                type: Type.STRING,
+                description: 'Bajada o resumen corto para la portada (máximo 260 caracteres).',
+              },
+              content: {
+                type: Type.STRING,
+                description: 'Cuerpo breve formateado con párrafos, **negrita**, ## subtítulo y listas -.',
+              },
+              category: {
+                type: Type.STRING,
+                description: 'Categoría sugerida: ANUNCIO, RESULTADOS, DESTACADO, CONVOCATORIA o PLAYOFFS.',
+              },
+            },
+          },
+        },
+      });
+
+      const rawJson = (response.text ?? '{}').trim();
+      const parsed = JSON.parse(rawJson) as {
+        title?: string;
+        summary?: string;
+        content?: string;
+        category?: string;
+      };
+
+      const validCategories = ['ANUNCIO', 'RESULTADOS', 'DESTACADO', 'CONVOCATORIA', 'PLAYOFFS'] as const;
+      const category = validCategories.includes(parsed.category as (typeof validCategories)[number])
+        ? (parsed.category as (typeof validCategories)[number])
+        : mode === 'recap'
+        ? 'RESULTADOS'
+        : 'ANUNCIO';
+
+      const title = (parsed.title || 'Actualidad del Campeonato Intercarreras UFRO').trim().slice(0, 150);
+      const summary = (parsed.summary || title).trim().slice(0, 340);
+      const content = (parsed.content || summary).trim().slice(0, 11500);
+
+      res.json({
+        title,
+        summary,
+        content,
+        category,
+      });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Error inesperado generando la noticia breve.';
+      console.error('News brief AI generation error:', err);
+      res.status(500).json({
+        error: `No se pudo generar la noticia breve automáticamente: ${message}`,
+      });
+    }
+  });
+
   // Return clean JSON 404 for unknown /api/* paths
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Ruta de API no encontrada.' });

@@ -234,6 +234,7 @@ export type UserRole =
   | 'delegado'
   | 'arbitro'
   | 'fotografo'
+  | 'prensa'
   | 'admin';
 
 export interface AppUserProfile {
@@ -314,6 +315,31 @@ export type MasterSheetKey =
 
 export type MasterSheetsConfig = Partial<Record<MasterSheetKey, string>>;
 
+export type NewsCategory =
+  | 'ANUNCIO'
+  | 'RESULTADOS'
+  | 'DESTACADO'
+  | 'CONVOCATORIA'
+  | 'PLAYOFFS';
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  category: NewsCategory;
+  disciplineId?: DisciplineId | 'general';
+  coverImageUrl?: string;
+  featured: boolean;
+  published: boolean;
+  aiGenerated?: boolean;
+  authorUid: string;
+  authorName: string;
+  authorRole: 'admin' | 'prensa';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TournamentState {
   temporada: string;
   configs: Record<DisciplineId, DisciplineFormatConfig>;
@@ -325,6 +351,7 @@ export interface TournamentState {
   users: AppUserProfile[];
   mvpVotes: MvpVoteRecord[];
   photos: PhotoEntry[];
+  news: NewsArticle[];
   driveUploadRootFolderId?: string;
   driveUploadRootFolderName?: string;
   masterSheets: MasterSheetsConfig;

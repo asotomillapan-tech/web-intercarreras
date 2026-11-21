@@ -23,6 +23,8 @@ import type {
   MasterSheetsConfig,
   Match,
   MvpVoteRecord,
+  NewsArticle,
+  NewsCategory,
   PhotoEntry,
   Player,
   PlayerStats,
@@ -91,17 +93,27 @@ function sanitizeStats(raw: Partial<PlayerStats> | undefined): PlayerStats {
 // ---------------------------------------------------------------------------
 
 export async function loadPublicTournamentState(): Promise<Partial<TournamentState>> {
-  const [settingsRes, configsRes, teamsRes, playersRes, matchesRes, transfersRes, votesRes, photosRes] =
-    await Promise.allSettled([
-      getDoc(doc(db, 'settings', 'tournament')),
-      getDocs(query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-      getDocs(query(collection(db, 'teams'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-      getDocs(query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-      getDocs(query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-      getDocs(query(collection(db, 'transfers'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-      getDocs(query(collection(db, 'mvp_votes'), where('matchId', '>=', ''))),
-      getDocs(query(collection(db, 'photos'), where('season', '>=', ''))),
-    ]);
+  const [
+    settingsRes,
+    configsRes,
+    teamsRes,
+    playersRes,
+    matchesRes,
+    transfersRes,
+    votesRes,
+    photosRes,
+    newsRes,
+  ] = await Promise.allSettled([
+    getDoc(doc(db, 'settings', 'tournament')),
+    getDocs(query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'teams'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'transfers'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'mvp_votes'), where('matchId', '>=', ''))),
+    getDocs(query(collection(db, 'photos'), where('season', '>=', ''))),
+    getDocs(query(collection(db, 'news'), where('published', '==', true))),
+  ]);
 
   const result: Partial<TournamentState> = {};
 
@@ -317,7 +329,45 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  if (newsRes.status === 'fulfilled') {
+    result.news = newsRes.value.docs
+      .map((d) => mapNewsDoc(d.id, d.data()))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   return result;
+}
+
+function mapNewsDoc(docId: string, data: Record<string, unknown>): NewsArticle {
+  const validCategories: NewsCategory[] = [
+    'ANUNCIO',
+    'RESULTADOS',
+    'DESTACADO',
+    'CONVOCATORIA',
+    'PLAYOFFS',
+  ];
+  const rawCategory = String(data.category || 'ANUNCIO') as NewsCategory;
+  const category: NewsCategory = validCategories.includes(rawCategory) ? rawCategory : 'ANUNCIO';
+  return {
+    id: String(data.id || docId),
+    title: String(data.title || ''),
+    summary: String(data.summary || ''),
+    content: String(data.content || ''),
+    category,
+    disciplineId:
+      typeof data.disciplineId === 'string' && data.disciplineId
+        ? (data.disciplineId as DisciplineId | 'general')
+        : 'general',
+    coverImageUrl: typeof data.coverImageUrl === 'string' ? data.coverImageUrl : undefined,
+    featured: Boolean(data.featured),
+    published: Boolean(data.published),
+    aiGenerated: Boolean(data.aiGenerated),
+    authorUid: String(data.authorUid || ''),
+    authorName: String(data.authorName || 'Prensa Oficial UFRO'),
+    authorRole: data.authorRole === 'prensa' ? 'prensa' : 'admin',
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
 }
 
 /**
@@ -1102,6 +1152,87 @@ export async function deleteFirestorePhoto(photoId: string): Promise<void> {
   const path = `photos/${photoId}`;
   try {
     await deleteDoc(doc(db, 'photos', photoId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Championship News & Announcements (Prensa Oficial + Admin)
+// ---------------------------------------------------------------------------
+
+export async function listAllFirestoreNews(): Promise<NewsArticle[]> {
+  const path = 'news';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs
+      .map((d) => mapNewsDoc(d.id, d.data()))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function saveFirestoreNewsArticle(
+  article: NewsArticle,
+  isNew: boolean
+): Promise<void> {
+  const path = `news/${article.id}`;
+  try {
+    const ref = doc(db, 'news', article.id);
+    const sanitizedTitle = article.title.trim().slice(0, 160);
+    const sanitizedSummary = article.summary.trim().slice(0, 360);
+    const sanitizedContent = article.content.trim().slice(0, 12000);
+    const sanitizedDiscipline = (article.disciplineId || 'general').slice(0, 40);
+    const sanitizedCover = article.coverImageUrl ? article.coverImageUrl.trim().slice(0, 1000) : '';
+
+    if (isNew) {
+      const payload: Record<string, unknown> = {
+        id: article.id,
+        title: sanitizedTitle,
+        summary: sanitizedSummary,
+        content: sanitizedContent,
+        category: article.category,
+        disciplineId: sanitizedDiscipline,
+        featured: Boolean(article.featured),
+        published: Boolean(article.published),
+        aiGenerated: Boolean(article.aiGenerated),
+        authorUid: article.authorUid,
+        authorName: article.authorName.trim().slice(0, 120) || 'Prensa Oficial UFRO',
+        authorRole: article.authorRole === 'prensa' ? 'prensa' : 'admin',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      if (sanitizedCover) {
+        payload.coverImageUrl = sanitizedCover;
+      }
+      await setDoc(ref, payload);
+    } else {
+      const updatePayload: Record<string, unknown> = {
+        title: sanitizedTitle,
+        summary: sanitizedSummary,
+        content: sanitizedContent,
+        category: article.category,
+        disciplineId: sanitizedDiscipline,
+        coverImageUrl: sanitizedCover,
+        featured: Boolean(article.featured),
+        published: Boolean(article.published),
+        aiGenerated: Boolean(article.aiGenerated),
+        authorName: article.authorName.trim().slice(0, 120) || 'Prensa Oficial UFRO',
+        authorRole: article.authorRole === 'prensa' ? 'prensa' : 'admin',
+        updatedAt: serverTimestamp(),
+      };
+      await updateDoc(ref, updatePayload);
+    }
+  } catch (error) {
+    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteFirestoreNewsArticle(newsId: string): Promise<void> {
+  const path = `news/${newsId}`;
+  try {
+    await deleteDoc(doc(db, 'news', newsId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
