@@ -102,6 +102,14 @@
           "type": "string",
           "maxLength": 160
         },
+        "masterSheets": {
+          "type": "object",
+          "description": "Mapa de IDs de Google Sheets Master por grupo disciplinario (ej. futbol_hombres, futbol_mujeres, basquet_hombres, etc.)."
+        },
+        "autoSyncSheetsEnabled": {
+          "type": "boolean",
+          "description": "Indica si la sincronización automática hacia los Google Sheets Master está habilitada para administradores con sesión Google activa."
+        },
         "lastSyncedSpreadsheetId": {
           "type": "string",
           "maxLength": 128

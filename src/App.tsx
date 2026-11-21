@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, X } from 'lucide-react';
 import { createInitialTournamentState, DISCIPLINE_MAP } from './data/ufroSeed';
 import { validateRoleChange } from './domain/rbacEngine';
 import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tournamentEngine';
 import {
+  getGoogleAccessToken,
   initGoogleAuth,
   signInWithGoogleWorkspace,
   signOutGoogle,
 } from './services/firebaseAuth';
+import {
+  getMasterKeyForDiscipline,
+  MASTER_SHEET_GROUP_MAP,
+  syncMultipleMasterSheets,
+} from './services/googleSheets';
 import {
   adminUpdateFirestoreUserRole,
   deleteFirestoreMatchesForDiscipline,
@@ -45,6 +51,8 @@ import type {
   AppUserProfile,
   DisciplineFormatConfig,
   DisciplineId,
+  MasterSheetKey,
+  MasterSheetsConfig,
   Match,
   MvpVoteRecord,
   PhotoEntry,
@@ -54,6 +62,7 @@ import type {
   TransferRecord,
   UserRole,
 } from './types/tournament';
+import type { AutoSyncStatusInfo } from './components/MasterSheetsPanel';
 
 function AppContent() {
   const [state, setState] = useState<TournamentState>(() => createInitialTournamentState());
@@ -70,6 +79,27 @@ function AppContent() {
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+
+  // Master Google Sheets Auto-Sync Engine (requires explicit session confirmation via ConfirmDialog)
+  const [autoSyncSessionApproved, setAutoSyncSessionApproved] = useState(false);
+  const [pendingSyncKeys, setPendingSyncKeys] = useState<MasterSheetKey[]>([]);
+  const [autoSyncState, setAutoSyncState] = useState<AutoSyncStatusInfo>({ status: 'idle' });
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  const queueMasterSyncForDiscipline = useCallback((disciplineId: DisciplineId) => {
+    const primaryKey = getMasterKeyForDiscipline(disciplineId);
+    setPendingSyncKeys((prev) => {
+      const next = new Set<MasterSheetKey>(prev);
+      next.add(primaryKey);
+      if (stateRef.current.masterSheets.consolidado) {
+        next.add('consolidado');
+      }
+      return Array.from(next);
+    });
+  }, []);
 
   const reportCloudError = useCallback((context: string, err: unknown) => {
     const detail = err instanceof Error ? err.message : 'Error de sincronización con Firestore.';
@@ -88,6 +118,8 @@ function AppContent() {
           temporada: cloud.temporada ?? prev.temporada,
           driveUploadRootFolderId: cloud.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
           driveUploadRootFolderName: cloud.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
+          masterSheets: cloud.masterSheets ?? prev.masterSheets,
+          autoSyncSheetsEnabled: cloud.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
           lastSyncedSpreadsheetId: cloud.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
           lastSyncedAt: cloud.lastSyncedAt ?? prev.lastSyncedAt,
           configs: cloud.configs ?? prev.configs,
@@ -181,6 +213,8 @@ function AppContent() {
               temporada: freshPublic.temporada ?? prev.temporada,
               driveUploadRootFolderId: freshPublic.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
               driveUploadRootFolderName: freshPublic.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
+              masterSheets: freshPublic.masterSheets ?? prev.masterSheets,
+              autoSyncSheetsEnabled: freshPublic.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
               lastSyncedSpreadsheetId: freshPublic.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
               lastSyncedAt: freshPublic.lastSyncedAt ?? prev.lastSyncedAt,
               configs: freshPublic.configs ?? prev.configs,
@@ -221,6 +255,91 @@ function AppContent() {
     if (!currentUserUid) return null;
     return state.users.find((u) => u.uid === currentUserUid) ?? null;
   }, [currentUserUid, state.users]);
+
+  // Debounced Automatic Master Sheets Sync (runs ONLY after explicit session approval by an Admin)
+  useEffect(() => {
+    if (
+      pendingSyncKeys.length === 0 ||
+      !autoSyncSessionApproved ||
+      !state.autoSyncSheetsEnabled ||
+      currentUser?.role !== 'admin'
+    ) {
+      return;
+    }
+
+    const token = getGoogleAccessToken();
+    if (!token) {
+      setAutoSyncState({
+        status: 'idle',
+        message: 'Reconecta Google Workspace en Panel → Google Sheets para aplicar los cambios pendientes.',
+      });
+      return;
+    }
+
+    const keysSnapshot = [...pendingSyncKeys];
+    const timer = window.setTimeout(async () => {
+      setAutoSyncState({
+        status: 'syncing',
+        message: `Sincronizando automáticamente: ${keysSnapshot
+          .map((k) => MASTER_SHEET_GROUP_MAP[k].shortLabel)
+          .join(', ')}...`,
+      });
+      try {
+        const { succeeded, failed } = await syncMultipleMasterSheets(
+          token,
+          stateRef.current,
+          keysSnapshot
+        );
+        if (succeeded.length > 0) {
+          const syncedKeys = new Set(
+            succeeded.map((s) => s.masterKey).filter((k): k is MasterSheetKey => Boolean(k))
+          );
+          setPendingSyncKeys((prev) => prev.filter((k) => !syncedKeys.has(k)));
+          const syncedAt = new Date().toISOString();
+          const lastId = succeeded[0].spreadsheetId;
+          setState((prev) => ({
+            ...prev,
+            lastSyncedSpreadsheetId: lastId,
+            lastSyncedAt: syncedAt,
+          }));
+          void saveFirestoreSettings({
+            temporada: stateRef.current.temporada,
+            driveUploadRootFolderId: stateRef.current.driveUploadRootFolderId,
+            driveUploadRootFolderName: stateRef.current.driveUploadRootFolderName,
+            masterSheets: stateRef.current.masterSheets,
+            autoSyncSheetsEnabled: stateRef.current.autoSyncSheetsEnabled,
+            lastSyncedSpreadsheetId: lastId,
+            lastSyncedAt: syncedAt,
+          }).catch(() => undefined);
+        }
+        if (failed.length > 0) {
+          setAutoSyncState({
+            status: 'error',
+            message: `Error en auto-sync (${failed.map((f) => `${f.label}: ${f.error}`).join(' | ')})`,
+          });
+        } else if (succeeded.length > 0) {
+          setAutoSyncState({
+            status: 'synced',
+            lastSyncedAt: new Date().toISOString(),
+            message: `Auto-sincronizado (${new Date().toLocaleTimeString('es-CL')}): ${succeeded
+              .map((s) => `${s.masterLabel || s.spreadsheetId} (${s.totalRowsWritten} filas)`)
+              .join(' · ')}`,
+          });
+        } else {
+          // Changed discipline had no Master Sheet ID linked yet
+          setPendingSyncKeys((prev) => prev.filter((k) => !keysSnapshot.includes(k)));
+          setAutoSyncState({ status: 'idle' });
+        }
+      } catch (err: unknown) {
+        setAutoSyncState({
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Error en sincronización automática.',
+        });
+      }
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingSyncKeys, autoSyncSessionApproved, state.autoSyncSheetsEnabled, currentUser?.role]);
 
   const activeModalMatch: Match | null = useMemo(() => {
     if (!activeMatchModalId) return null;
@@ -268,6 +387,7 @@ function AppContent() {
     } catch {
       // Ignore if already signed out
     }
+    setAutoSyncSessionApproved(false);
     setCurrentUserUid(null);
   };
 
@@ -366,6 +486,7 @@ function AppContent() {
       ...prev,
       players: prev.players.map((p) => (p.id === updatedPlayer.id ? updatedPlayer : p)),
     }));
+    queueMasterSyncForDiscipline(updatedPlayer.disciplineId);
     void saveFirestorePlayer(updatedPlayer, false, currentUser.role).catch((err) =>
       reportCloudError('Error actualizando ficha del estudiante', err)
     );
@@ -374,6 +495,7 @@ function AppContent() {
   const handleAddPlayerToTeam = (newPlayer: Player) => {
     if (!currentUser) return;
     setState((prev) => ({ ...prev, players: [newPlayer, ...prev.players] }));
+    queueMasterSyncForDiscipline(newPlayer.disciplineId);
     void saveFirestorePlayer(newPlayer, true, currentUser.role).catch((err) =>
       reportCloudError('Error registrando estudiante en Firestore', err)
     );
@@ -397,6 +519,8 @@ function AppContent() {
       temporada: state.temporada,
       driveUploadRootFolderId: folderId,
       driveUploadRootFolderName: folderName,
+      masterSheets: state.masterSheets,
+      autoSyncSheetsEnabled: state.autoSyncSheetsEnabled,
       lastSyncedSpreadsheetId: state.lastSyncedSpreadsheetId,
       lastSyncedAt: state.lastSyncedAt,
     });
@@ -511,6 +635,8 @@ function AppContent() {
       };
     });
 
+    queueMasterSyncForDiscipline(updatedMatch.disciplineId);
+
     void saveFirestoreMatch(updatedMatch, false, currentUser.role).catch((err) =>
       reportCloudError('Error actualizando marcador en Firestore', err)
     );
@@ -529,6 +655,7 @@ function AppContent() {
       teams: [...prev.teams, team],
       players: [...roster, ...prev.players],
     }));
+    queueMasterSyncForDiscipline(team.disciplineId);
 
     void (async () => {
       try {
@@ -550,6 +677,7 @@ function AppContent() {
       ),
       transfers: [enrichedTransfer, ...prev.transfers],
     }));
+    queueMasterSyncForDiscipline(enrichedTransfer.disciplineId);
 
     void executeFirestoreTransfer(enrichedTransfer, currentUser.uid).catch((err) =>
       reportCloudError('Error registrando transferencia en Firestore', err)
@@ -607,6 +735,7 @@ function AppContent() {
       teams: nextTeams,
       matches: nextMatches,
     }));
+    queueMasterSyncForDiscipline(disciplineId);
 
     void (async () => {
       try {
@@ -628,6 +757,33 @@ function AppContent() {
     })();
   };
 
+  const handleSaveMasterSheets = async (
+    nextMasterSheets: MasterSheetsConfig,
+    nextAutoSyncEnabled?: boolean
+  ) => {
+    const resolvedAutoSync =
+      nextAutoSyncEnabled !== undefined ? nextAutoSyncEnabled : state.autoSyncSheetsEnabled;
+    await saveFirestoreSettings({
+      temporada: state.temporada,
+      driveUploadRootFolderId: state.driveUploadRootFolderId,
+      driveUploadRootFolderName: state.driveUploadRootFolderName,
+      masterSheets: nextMasterSheets,
+      autoSyncSheetsEnabled: resolvedAutoSync,
+      lastSyncedSpreadsheetId: state.lastSyncedSpreadsheetId,
+      lastSyncedAt: state.lastSyncedAt,
+    });
+    setState((prev) => ({
+      ...prev,
+      masterSheets: nextMasterSheets,
+      autoSyncSheetsEnabled: resolvedAutoSync,
+    }));
+  };
+
+  const handleClearPendingSyncKeys = (keys: MasterSheetKey[]) => {
+    const cleared = new Set(keys);
+    setPendingSyncKeys((prev) => prev.filter((k) => !cleared.has(k)));
+  };
+
   const handleMarkSynced = (spreadsheetId: string) => {
     const syncedAt = new Date().toISOString();
     setState((prev) => ({
@@ -639,6 +795,8 @@ function AppContent() {
       temporada: state.temporada,
       driveUploadRootFolderId: state.driveUploadRootFolderId,
       driveUploadRootFolderName: state.driveUploadRootFolderName,
+      masterSheets: state.masterSheets,
+      autoSyncSheetsEnabled: state.autoSyncSheetsEnabled,
       lastSyncedSpreadsheetId: spreadsheetId,
       lastSyncedAt: syncedAt,
     }).catch((err) => reportCloudError('Error guardando ID de Google Sheets', err));
@@ -767,8 +925,14 @@ function AppContent() {
             currentUser={currentUser}
             initialSubTab={panelInitialSubTab}
             focusedMatchId={focusedMatchId}
+            pendingSyncKeys={pendingSyncKeys}
+            autoSyncSessionApproved={autoSyncSessionApproved}
+            autoSyncState={autoSyncState}
             onUpdateMatch={handleUpdateMatch}
             onUpdateConfig={handleUpdateConfig}
+            onSaveMasterSheets={handleSaveMasterSheets}
+            onApproveAutoSyncSession={setAutoSyncSessionApproved}
+            onClearPendingSyncKeys={handleClearPendingSyncKeys}
             onMarkSynced={handleMarkSynced}
             onAdminChangeUserRole={handleAdminChangeUserRole}
             onRefreshUsers={handleRefreshUsers}

@@ -3,7 +3,6 @@ import {
   AlertCircle,
   Camera,
   CheckCircle2,
-  Download,
   FileSpreadsheet,
   Lock,
   Play,
@@ -15,7 +14,6 @@ import {
   Upload,
   UserCog,
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   ALL_USER_ROLES,
@@ -27,33 +25,21 @@ import {
   validateRoleChange,
 } from '../domain/rbacEngine';
 import { isVolleyballSetWon } from '../domain/tournamentEngine';
-import {
-  getFirebaseIdToken,
-  getGoogleAccessToken,
-  initGoogleAuth,
-  signInWithGoogleSheets,
-  signOutGoogle,
-} from '../services/firebaseAuth';
-import {
-  TEMPLATE_TABS,
-  buildTemplateSheetPayloads,
-  createMasterGoogleSheet,
-  downloadTemplateCsv,
-  syncStateToExistingSpreadsheet,
-  type SheetSyncSummary,
-} from '../services/googleSheets';
+import { getFirebaseIdToken } from '../services/firebaseAuth';
 import type {
   AiScoresheetResult,
   AppUserProfile,
   DisciplineFormatConfig,
   DisciplineId,
+  MasterSheetKey,
+  MasterSheetsConfig,
   Match,
   MatchEvent,
   TournamentStage,
   TournamentState,
   UserRole,
 } from '../types/tournament';
-import { ConfirmDialog } from './ConfirmDialog';
+import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 
 export type PanelSubTab = 'arbitro' | 'usuarios' | 'formato' | 'sheets';
 
@@ -62,8 +48,17 @@ interface AdminRefereeViewProps {
   currentUser: AppUserProfile | null;
   initialSubTab?: PanelSubTab;
   focusedMatchId?: string | null;
+  pendingSyncKeys: MasterSheetKey[];
+  autoSyncSessionApproved: boolean;
+  autoSyncState: AutoSyncStatusInfo;
   onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: Partial<{ goles: number; tarjetasAmarillas: number; tarjetasRojas: number; puntos: number; triples: number; faltas: number; aces: number; bloqueos: number }>) => void;
   onUpdateConfig: (disciplineId: DisciplineId, config: DisciplineFormatConfig, rebuildGroups: boolean) => void;
+  onSaveMasterSheets: (
+    nextMasterSheets: MasterSheetsConfig,
+    nextAutoSyncEnabled?: boolean
+  ) => Promise<void>;
+  onApproveAutoSyncSession: (approved: boolean) => void;
+  onClearPendingSyncKeys: (keys: MasterSheetKey[]) => void;
   onMarkSynced: (spreadsheetId: string) => void;
   onAdminChangeUserRole: (
     targetUid: string,
@@ -164,8 +159,14 @@ export function AdminRefereeView({
   currentUser,
   initialSubTab = 'arbitro',
   focusedMatchId = null,
+  pendingSyncKeys,
+  autoSyncSessionApproved,
+  autoSyncState,
   onUpdateMatch,
   onUpdateConfig,
+  onSaveMasterSheets,
+  onApproveAutoSyncSession,
+  onClearPendingSyncKeys,
   onMarkSynced,
   onAdminChangeUserRole,
   onRefreshUsers,
@@ -210,20 +211,6 @@ export function AdminRefereeView({
   const [draftConfig, setDraftConfig] = useState<DisciplineFormatConfig>(state.configs['f7-h-1']);
   const [configSavedMsg, setConfigSavedMsg] = useState<string | null>(null);
 
-  // Google Sheets Auth & Sync State
-  const [googleUser, setGoogleUser] = useState<User | null>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(getGoogleAccessToken());
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [targetSpreadsheetId, setTargetSpreadsheetId] = useState<string>(
-    state.lastSyncedSpreadsheetId ?? ''
-  );
-  const [previewTab, setPreviewTab] = useState<(typeof TEMPLATE_TABS)[number]>('Jugadores_Plantilla');
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncResult, setSyncResult] = useState<SheetSyncSummary | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [confirmMode, setConfirmMode] = useState<'create' | 'update' | null>(null);
-
   useEffect(() => {
     if (!isAdmin && initialSubTab !== 'arbitro') {
       setSubTab('arbitro');
@@ -255,20 +242,6 @@ export function AdminRefereeView({
   useEffect(() => {
     setConfigSavedMsg(null);
   }, [configDiscId]);
-
-  useEffect(() => {
-    const unsub = initGoogleAuth(
-      (u, tok) => {
-        setGoogleUser(u);
-        setGoogleToken(tok);
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => unsub();
-  }, []);
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
   const activeReferee = state.referees.find((r) => r.id === selectedRefId) ?? state.referees[0];
@@ -662,48 +635,6 @@ export function AdminRefereeView({
         : `Encuentro cerrado mediante Validación Manual del Árbitro ${activeReferee.nombre} (${finalHome} - ${finalAway}). Tablas actualizadas.`
     );
   };
-
-  // Google Sheets handlers
-  const handleGoogleSignIn = async () => {
-    setAuthLoading(true);
-    setAuthError(null);
-    try {
-      const res = await signInWithGoogleSheets();
-      setGoogleUser(res.user);
-      setGoogleToken(res.accessToken);
-    } catch (err: unknown) {
-      setAuthError(
-        err instanceof Error
-          ? err.message
-          : 'No se pudo iniciar sesión con Google. Verifica que las ventanas emergentes estén habilitadas.'
-      );
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const executeConfirmedSheetsSync = async () => {
-    if (!googleToken || !confirmMode) return;
-    setSyncLoading(true);
-    setSyncError(null);
-    try {
-      const summary =
-        confirmMode === 'create'
-          ? await createMasterGoogleSheet(googleToken, state)
-          : await syncStateToExistingSpreadsheet(googleToken, targetSpreadsheetId.trim(), state);
-      setSyncResult(summary);
-      setTargetSpreadsheetId(summary.spreadsheetId);
-      onMarkSynced(summary.spreadsheetId);
-      setConfirmMode(null);
-    } catch (err: unknown) {
-      setSyncError(err instanceof Error ? err.message : 'Error sincronizando con Google Sheets.');
-      setConfirmMode(null);
-    } finally {
-      setSyncLoading(false);
-    }
-  };
-
-  const sheetPayloads = useMemo(() => buildTemplateSheetPayloads(state), [state]);
 
   const sortedTeams = useMemo(
     () => [...state.teams].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
@@ -1887,232 +1818,20 @@ export function AdminRefereeView({
           </div>
         )}
 
-        {/* TAB 4: REAL GOOGLE SHEETS WORKSPACE INTEGRATION */}
+        {/* TAB 4: MULTI-MASTER GOOGLE SHEETS WORKSPACE INTEGRATION */}
         {effectiveSubTab === 'sheets' && canManageAdminTabs && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* Connection & Sync Actions */}
-              <div className="lg:col-span-5 border border-neutral-200 p-6 space-y-6">
-                <div className="flex items-center gap-3 border-b border-neutral-200 pb-4">
-                  <FileSpreadsheet className="w-5 h-5 text-[#707ef9]" />
-                  <div>
-                    <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                      Plantillas Google Sheets
-                    </h2>
-                    <p className="text-xs text-neutral-500">
-                      Sincronización directa con tu cuenta de Google Workspace.
-                    </p>
-                  </div>
-                </div>
-
-                {authError && (
-                  <div role="alert" className="bg-red-50 border border-red-300 p-3.5 text-xs text-red-900">
-                    {authError}
-                  </div>
-                )}
-
-                {syncError && (
-                  <div role="alert" className="bg-red-50 border border-red-300 p-3.5 text-xs text-red-900">
-                    {syncError}
-                  </div>
-                )}
-
-                {syncResult && (
-                  <div role="status" className="bg-emerald-50 border border-emerald-300 p-4 space-y-2 text-xs text-emerald-950">
-                    <p className="font-bold uppercase">Sincronización completada con éxito</p>
-                    <p>
-                      {syncResult.totalRowsWritten} filas escritas en {syncResult.tabsUpdated.length}{' '}
-                      pestañas ({syncResult.tabsUpdated.join(', ')}).
-                    </p>
-                    <a
-                      href={syncResult.spreadsheetUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-block font-bold text-[#707ef9] underline"
-                    >
-                      Abrir planilla en Google Sheets →
-                    </a>
-                  </div>
-                )}
-
-                {!googleToken ? (
-                  <div className="space-y-4">
-                    <p className="text-sm text-neutral-700 leading-relaxed">
-                      Conecta tu cuenta de Google para crear o actualizar automáticamente las 5
-                      pestañas oficiales del Campeonato Intercarreras UFRO en Google Sheets.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleGoogleSignIn}
-                      disabled={authLoading}
-                      className="gsi-material-button w-full"
-                    >
-                      <div className="gsi-material-button-icon">
-                        <svg viewBox="0 0 48 48" style={{ display: 'block' }}>
-                          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                        </svg>
-                      </div>
-                      <span>{authLoading ? 'Conectando...' : 'Sign in with Google'}</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    <div className="bg-[#f5f6f8] border border-neutral-200 p-3.5 flex items-center justify-between gap-3 text-xs">
-                      <div className="truncate">
-                        <p className="font-bold text-[#0d0d0d] truncate">
-                          {googleUser?.displayName || googleUser?.email || 'Cuenta conectada'}
-                        </p>
-                        <p className="text-neutral-500 truncate">{googleUser?.email}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => signOutGoogle()}
-                        className="text-neutral-600 hover:text-red-600 underline shrink-0 cursor-pointer"
-                      >
-                        Desconectar
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setConfirmMode('create')}
-                      className="w-full py-3 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer"
-                    >
-                      Crear nueva planilla maestra en Google Sheets
-                    </button>
-
-                    <div className="pt-4 border-t border-neutral-200 space-y-2.5">
-                      <label htmlFor="sheets-id" className="block text-xs font-medium text-neutral-700">
-                        O actualizar una planilla existente (Spreadsheet ID)
-                      </label>
-                      <input
-                        id="sheets-id"
-                        type="text"
-                        value={targetSpreadsheetId}
-                        onChange={(e) => setTargetSpreadsheetId(e.target.value)}
-                        placeholder="Ej: 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-                        className="w-full border border-neutral-300 px-3 py-2 text-xs font-mono"
-                      />
-                      <button
-                        type="button"
-                        disabled={!targetSpreadsheetId.trim()}
-                        onClick={() => setConfirmMode('update')}
-                        className="w-full py-2.5 bg-[#0d0d0d] hover:bg-neutral-800 text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer disabled:opacity-50"
-                      >
-                        Sobrescribir y sincronizar pestañas
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Offline CSV Template Downloads */}
-                <div className="pt-4 border-t border-neutral-200 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                    Descarga directa de plantillas (CSV para Google Sheets)
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {TEMPLATE_TABS.map((tab) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => downloadTemplateCsv(tab, state)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#f5f6f8] hover:bg-neutral-200 text-xs font-medium text-[#0d0d0d] cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5 text-[#707ef9]" />
-                        <span>{tab}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Live Template Data Preview */}
-              <div className="lg:col-span-7 border border-neutral-200 p-6 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="font-display text-lg font-bold uppercase tracking-wide text-[#0d0d0d]">
-                    Vista previa de estructura de planilla
-                  </h3>
-                  <div className="flex flex-wrap gap-1">
-                    {TEMPLATE_TABS.map((tab) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setPreviewTab(tab)}
-                        className={`px-2.5 py-1.5 text-xs font-medium cursor-pointer ${
-                          previewTab === tab
-                            ? 'bg-[#0d0d0d] text-white'
-                            : 'bg-[#f5f6f8] text-neutral-600 hover:text-[#0d0d0d]'
-                        }`}
-                      >
-                        {tab} ({sheetPayloads[tab].length - 1})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="border border-neutral-200 overflow-x-auto max-h-[420px]">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead className="sticky top-0 bg-[#f5f6f8] border-b border-neutral-200">
-                      <tr>
-                        {sheetPayloads[previewTab][0].slice(0, 8).map((col, idx) => (
-                          <th key={idx} className="py-2.5 px-3 font-bold text-[#0d0d0d] whitespace-nowrap">
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-200">
-                      {sheetPayloads[previewTab].slice(1, 13).map((row, rIdx) => (
-                        <tr key={rIdx} className="hover:bg-[#f9fafb]">
-                          {row.slice(0, 8).map((cell, cIdx) => (
-                            <td key={cIdx} className="py-2 px-3 text-neutral-700 whitespace-nowrap max-w-[180px] truncate tabular-nums">
-                              {cell}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  Se muestran las primeras 8 columnas y 12 filas de muestra. Al sincronizar o
-                  exportar se incluyen todas las columnas completas (incluidos los 12 campos de
-                  estudiantes).
-                </p>
-              </div>
-            </div>
-          </div>
+          <MasterSheetsPanel
+            state={state}
+            pendingSyncKeys={pendingSyncKeys}
+            autoSyncSessionApproved={autoSyncSessionApproved}
+            autoSyncState={autoSyncState}
+            onSaveMasterSheets={onSaveMasterSheets}
+            onApproveAutoSyncSession={onApproveAutoSyncSession}
+            onClearPendingSyncKeys={onClearPendingSyncKeys}
+            onMarkSynced={onMarkSynced}
+          />
         )}
       </div>
-
-      {/* Mandatory User Confirmation Dialog for Google Sheets Write Operations */}
-      <ConfirmDialog
-        open={confirmMode !== null}
-        title={
-          confirmMode === 'create'
-            ? 'Crear nueva planilla en Google Sheets'
-            : 'Actualizar planilla existente en Google Sheets'
-        }
-        description={
-          confirmMode === 'create'
-            ? 'Esta acción creará una nueva hoja de cálculo en tu cuenta de Google con las 5 pestañas oficiales del Campeonato Intercarreras UFRO.'
-            : `Esta acción sobrescribirá los rangos de datos en la hoja de cálculo ID "${targetSpreadsheetId.trim()}" con el estado actual del campeonato.`
-        }
-        details={[
-          `Equipos: ${state.teams.length} registros`,
-          `Jugadores_Plantilla (12 campos UFRO): ${state.players.length} registros`,
-          `Resultados_Partidos: ${state.matches.length} registros`,
-          `Transferencias: ${state.transfers.length} registros`,
-          `Configuracion_Formato: ${Object.keys(state.configs).length} disciplinas`,
-        ]}
-        confirmLabel={confirmMode === 'create' ? 'Crear y escribir planilla' : 'Sobrescribir datos'}
-        loading={syncLoading}
-        onConfirm={executeConfirmedSheetsSync}
-        onCancel={() => setConfirmMode(null)}
-      />
     </div>
   );
 }

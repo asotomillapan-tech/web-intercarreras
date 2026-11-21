@@ -148,6 +148,26 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidMasterSheetsMap(ms) {
+      return ms is map
+        && ms.keys().hasOnly([
+          'futbol_hombres',
+          'futbol_mujeres',
+          'basquet_hombres',
+          'basquet_3x3_mujeres',
+          'voley_mujeres',
+          'voley_hombres',
+          'consolidado'
+        ])
+        && (!('futbol_hombres' in ms) || (ms.futbol_hombres is string && ms.futbol_hombres.size() <= 128))
+        && (!('futbol_mujeres' in ms) || (ms.futbol_mujeres is string && ms.futbol_mujeres.size() <= 128))
+        && (!('basquet_hombres' in ms) || (ms.basquet_hombres is string && ms.basquet_hombres.size() <= 128))
+        && (!('basquet_3x3_mujeres' in ms) || (ms.basquet_3x3_mujeres is string && ms.basquet_3x3_mujeres.size() <= 128))
+        && (!('voley_mujeres' in ms) || (ms.voley_mujeres is string && ms.voley_mujeres.size() <= 128))
+        && (!('voley_hombres' in ms) || (ms.voley_hombres is string && ms.voley_hombres.size() <= 128))
+        && (!('consolidado' in ms) || (ms.consolidado is string && ms.consolidado.size() <= 128));
+    }
+
     function isValidTournamentSettings(data) {
       return data.keys().hasAll(['temporada', 'updatedAt'])
         && data.keys().hasOnly([
@@ -155,6 +175,8 @@ service cloud.firestore {
           'drive2025FolderId',
           'driveUploadRootFolderId',
           'driveUploadRootFolderName',
+          'masterSheets',
+          'autoSyncSheetsEnabled',
           'lastSyncedSpreadsheetId',
           'lastSyncedAt',
           'updatedAt'
@@ -163,6 +185,8 @@ service cloud.firestore {
         && (!('drive2025FolderId' in data) || (data.drive2025FolderId is string && data.drive2025FolderId.size() <= 128))
         && (!('driveUploadRootFolderId' in data) || (data.driveUploadRootFolderId is string && data.driveUploadRootFolderId.size() <= 128))
         && (!('driveUploadRootFolderName' in data) || (data.driveUploadRootFolderName is string && data.driveUploadRootFolderName.size() <= 160))
+        && (!('masterSheets' in data) || isValidMasterSheetsMap(data.masterSheets))
+        && (!('autoSyncSheetsEnabled' in data) || data.autoSyncSheetsEnabled is bool)
         && (!('lastSyncedSpreadsheetId' in data) || (data.lastSyncedSpreadsheetId is string && data.lastSyncedSpreadsheetId.size() <= 128))
         && (!('lastSyncedAt' in data) || (data.lastSyncedAt is string && data.lastSyncedAt.size() <= 64))
         && data.updatedAt is timestamp;
@@ -656,6 +680,8 @@ service cloud.firestore {
           'drive2025FolderId',
           'driveUploadRootFolderId',
           'driveUploadRootFolderName',
+          'masterSheets',
+          'autoSyncSheetsEnabled',
           'lastSyncedSpreadsheetId',
           'lastSyncedAt',
           'updatedAt'

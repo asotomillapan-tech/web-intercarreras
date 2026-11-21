@@ -12,13 +12,15 @@ import {
   where,
   type Timestamp,
 } from 'firebase/firestore';
-import { INITIAL_CONFIGS } from '../data/ufroSeed';
+import { DEFAULT_MASTER_SHEETS, INITIAL_CONFIGS } from '../data/ufroSeed';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
 import type {
   AcademicLevel,
   AppUserProfile,
   DisciplineFormatConfig,
   DisciplineId,
+  MasterSheetKey,
+  MasterSheetsConfig,
   Match,
   MvpVoteRecord,
   PhotoEntry,
@@ -111,6 +113,32 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     }
     if (typeof s.driveUploadRootFolderName === 'string') {
       result.driveUploadRootFolderName = s.driveUploadRootFolderName;
+    }
+    if (s.masterSheets && typeof s.masterSheets === 'object') {
+      const merged: MasterSheetsConfig = { ...DEFAULT_MASTER_SHEETS };
+      const allowedKeys: MasterSheetKey[] = [
+        'futbol_hombres',
+        'futbol_mujeres',
+        'basquet_hombres',
+        'basquet_3x3_mujeres',
+        'voley_mujeres',
+        'voley_hombres',
+        'consolidado',
+      ];
+      for (const key of allowedKeys) {
+        const val = (s.masterSheets as Record<string, unknown>)[key];
+        if (typeof val === 'string') {
+          if (val.trim()) {
+            merged[key] = val.trim().slice(0, 128);
+          } else if (key !== 'futbol_hombres') {
+            delete merged[key];
+          }
+        }
+      }
+      result.masterSheets = merged;
+    }
+    if (typeof s.autoSyncSheetsEnabled === 'boolean') {
+      result.autoSyncSheetsEnabled = s.autoSyncSheetsEnabled;
     }
     if (typeof s.lastSyncedSpreadsheetId === 'string') {
       result.lastSyncedSpreadsheetId = s.lastSyncedSpreadsheetId;
@@ -600,6 +628,8 @@ export async function saveFirestoreSettings(settings: {
   drive2025FolderId?: string;
   driveUploadRootFolderId?: string;
   driveUploadRootFolderName?: string;
+  masterSheets?: MasterSheetsConfig;
+  autoSyncSheetsEnabled?: boolean;
   lastSyncedSpreadsheetId?: string;
   lastSyncedAt?: string;
 }): Promise<void> {
@@ -613,6 +643,28 @@ export async function saveFirestoreSettings(settings: {
     if (settings.drive2025FolderId) payload.drive2025FolderId = settings.drive2025FolderId.slice(0, 128);
     if (settings.driveUploadRootFolderId) payload.driveUploadRootFolderId = settings.driveUploadRootFolderId.slice(0, 128);
     if (settings.driveUploadRootFolderName) payload.driveUploadRootFolderName = settings.driveUploadRootFolderName.slice(0, 160);
+    if (settings.masterSheets) {
+      const sanitized: Record<string, string> = {};
+      const allowedKeys: MasterSheetKey[] = [
+        'futbol_hombres',
+        'futbol_mujeres',
+        'basquet_hombres',
+        'basquet_3x3_mujeres',
+        'voley_mujeres',
+        'voley_hombres',
+        'consolidado',
+      ];
+      for (const key of allowedKeys) {
+        const raw = settings.masterSheets[key];
+        if (typeof raw === 'string' && raw.trim()) {
+          sanitized[key] = raw.trim().slice(0, 128);
+        }
+      }
+      payload.masterSheets = sanitized;
+    }
+    if (typeof settings.autoSyncSheetsEnabled === 'boolean') {
+      payload.autoSyncSheetsEnabled = settings.autoSyncSheetsEnabled;
+    }
     if (settings.lastSyncedSpreadsheetId) payload.lastSyncedSpreadsheetId = settings.lastSyncedSpreadsheetId.slice(0, 128);
     if (settings.lastSyncedAt) payload.lastSyncedAt = settings.lastSyncedAt.slice(0, 64);
 

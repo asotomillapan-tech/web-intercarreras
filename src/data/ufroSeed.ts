@@ -296,6 +296,13 @@ export const INITIAL_REFEREES: RefereeProfile[] = [
   },
 ];
 
+export const DEFAULT_FUTBOL_HOMBRES_MASTER_SHEET_ID =
+  '1zsed8CNdRY5-XmPUi0Wt--oiC_IhQ8y13UoXU8SNh2c';
+
+export const DEFAULT_MASTER_SHEETS = {
+  futbol_hombres: DEFAULT_FUTBOL_HOMBRES_MASTER_SHEET_ID,
+} as const;
+
 /**
  * Clean production initial state: zero demo users, zero fake matches, zero fake players,
  * zero demo photos, zero fake MVP votes. All real season data loads from Firestore.
@@ -312,5 +319,8 @@ export function createInitialTournamentState(): TournamentState {
     users: [],
     mvpVotes: [],
     photos: [],
+    masterSheets: { ...DEFAULT_MASTER_SHEETS },
+    autoSyncSheetsEnabled: false,
+    lastSyncedSpreadsheetId: DEFAULT_FUTBOL_HOMBRES_MASTER_SHEET_ID,
   };
 }

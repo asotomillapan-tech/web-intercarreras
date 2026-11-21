@@ -303,6 +303,17 @@ export interface UserNotification {
   isLiveMvp?: boolean;
 }
 
+export type MasterSheetKey =
+  | 'futbol_hombres'
+  | 'futbol_mujeres'
+  | 'basquet_hombres'
+  | 'basquet_3x3_mujeres'
+  | 'voley_mujeres'
+  | 'voley_hombres'
+  | 'consolidado';
+
+export type MasterSheetsConfig = Partial<Record<MasterSheetKey, string>>;
+
 export interface TournamentState {
   temporada: string;
   configs: Record<DisciplineId, DisciplineFormatConfig>;
@@ -316,6 +327,8 @@ export interface TournamentState {
   photos: PhotoEntry[];
   driveUploadRootFolderId?: string;
   driveUploadRootFolderName?: string;
+  masterSheets: MasterSheetsConfig;
+  autoSyncSheetsEnabled?: boolean;
   lastSyncedSpreadsheetId?: string;
   lastSyncedAt?: string;
 }
