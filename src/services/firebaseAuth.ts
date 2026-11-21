@@ -22,8 +22,16 @@ export const GOOGLE_WORKSPACE_SCOPES = [
 // Backward-compatible export alias
 export const GOOGLE_SHEETS_SCOPES = GOOGLE_WORKSPACE_SCOPES;
 
-const provider = new GoogleAuthProvider();
-GOOGLE_WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
+// Basic Firebase Auth provider (openid/email/profile only — no sensitive Drive/Sheets scopes)
+// Used for all regular student, player, delegate, and referee sign-ins.
+const basicProvider = new GoogleAuthProvider();
+basicProvider.setCustomParameters({ prompt: 'select_account' });
+
+// Elevated Google Workspace provider (Drive + Sheets scopes)
+// Requested strictly on-demand by Admins (Sheets sync) or Photographers/Admins (Drive upload).
+const workspaceProvider = new GoogleAuthProvider();
+GOOGLE_WORKSPACE_SCOPES.forEach((scope) => workspaceProvider.addScope(scope));
+workspaceProvider.setCustomParameters({ prompt: 'select_account' });
 
 let isSigningIn = false;
 // Strict in-memory OAuth access token cache (never localStorage or sessionStorage)
@@ -108,13 +116,31 @@ export function initGoogleAuth(
   });
 }
 
+/**
+ * Standard Google Sign-In for all championship users (students, players, delegates, referees).
+ * Requests ONLY basic identity (name, email, avatar) — never triggers sensitive Drive/Sheets prompts.
+ */
+export async function signInWithGoogleBasic(): Promise<{ user: User }> {
+  isSigningIn = true;
+  try {
+    const result = await signInWithPopup(auth, basicProvider);
+    return { user: result.user };
+  } finally {
+    isSigningIn = false;
+  }
+}
+
+/**
+ * Incremental elevated Google Workspace authorization for Admins (Master Sheets sync)
+ * and Photographers/Admins (direct Google Drive gallery uploads).
+ */
 export async function signInWithGoogleWorkspace(): Promise<{ user: User; accessToken: string }> {
   isSigningIn = true;
   try {
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, workspaceProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('No se pudo obtener el token de acceso de Google.');
+      throw new Error('No se pudo obtener el token de acceso de Google Workspace.');
     }
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };

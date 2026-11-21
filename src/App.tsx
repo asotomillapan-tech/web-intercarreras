@@ -6,7 +6,7 @@ import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tou
 import {
   getGoogleAccessToken,
   initGoogleAuth,
-  signInWithGoogleWorkspace,
+  signInWithGoogleBasic,
   signOutGoogle,
 } from './services/firebaseAuth';
 import {
@@ -468,7 +468,7 @@ function AppContent() {
     setGoogleAuthLoading(true);
     setGoogleAuthError(null);
     try {
-      const { user } = await signInWithGoogleWorkspace();
+      const { user } = await signInWithGoogleBasic();
       const profile = await syncGoogleUserToFirestore(user);
       setState((prev) => {
         const exists = prev.users.some((u) => u.uid === profile.uid);
