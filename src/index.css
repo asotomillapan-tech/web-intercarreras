@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Oswald", sans-serif;
+  --font-sans: "Roboto", system-ui, -apple-system, sans-serif;
+  --color-ufro-blue: #707ef9;
+  --color-ufro-blue-dark: #5766eb;
+  --color-ufro-carbon: #0d0d0d;
+  --color-ufro-slate: #16161a;
+  --color-ufro-mist: #f5f6f8;
+}
+
+@layer base {
+  html {
+    font-family: "Roboto", system-ui, -apple-system, sans-serif;
+    color: #0d0d0d;
+    background-color: #ffffff;
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: "Oswald", sans-serif;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Official Google Sign-In button styling */
+.gsi-material-button {
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  color: #1f1f1f;
+  cursor: pointer;
+  font-family: "Roboto", arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  height: 40px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.gsi-material-button:hover:not(:disabled) {
+  background-color: #f8f9fa;
+  border-color: #9ca3af;
+}
+
+.gsi-material-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gsi-material-button-icon {
+  height: 18px;
+  width: 18px;
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

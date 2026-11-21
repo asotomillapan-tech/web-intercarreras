@@ -1,0 +1,8 @@
+{
+  "name": "Campeonato Intercarreras UFRO",
+  "description": "Plataforma oficial del Campeonato Intercarreras de la Universidad de La Frontera: marcadores en vivo, tablas de posiciones, perfiles de jugadores, arbitraje con validación IA de planillas, inscripciones, transferencias y sincronización con Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

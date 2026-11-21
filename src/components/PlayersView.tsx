@@ -1,0 +1,752 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Award, CheckCircle2, Edit3, Search, X } from 'lucide-react';
+import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
+import { canEditPlayerProfile } from '../domain/rbacEngine';
+import { formatRut, validateRut, validateUfroEmail } from '../domain/tournamentEngine';
+import type {
+  AcademicLevel,
+  AppUserProfile,
+  DisciplineId,
+  Player,
+  TournamentState,
+} from '../types/tournament';
+
+interface PlayersViewProps {
+  state: TournamentState;
+  currentUser: AppUserProfile | null;
+  selectedPlayer: Player | null;
+  onSelectPlayer: (player: Player | null) => void;
+  onUpdatePlayer: (updated: Player) => void;
+}
+
+export function PlayersView({
+  state,
+  currentUser,
+  selectedPlayer,
+  onSelectPlayer,
+  onUpdatePlayer,
+}: PlayersViewProps) {
+  const [query, setQuery] = useState('');
+  const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
+  const [facultyFilter, setFacultyFilter] = useState<string>('ALL');
+  const [levelFilter, setLevelFilter] = useState<'ALL' | AcademicLevel>('ALL');
+  const [onlySelectedUfro, setOnlySelectedUfro] = useState(false);
+
+  // Inline edit state for authorized roles (admin, delegate of same team, or player editing self)
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<Player | null>(null);
+  const [editErrors, setEditErrors] = useState<string[]>([]);
+  const [editSaved, setEditSaved] = useState<string | null>(null);
+
+  const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
+
+  const liveSelectedPlayer = useMemo(() => {
+    if (!selectedPlayer) return null;
+    return state.players.find((p) => p.id === selectedPlayer.id) ?? selectedPlayer;
+  }, [selectedPlayer, state.players]);
+
+  useEffect(() => {
+    setIsEditing(false);
+    setDraft(liveSelectedPlayer);
+    setEditErrors([]);
+    setEditSaved(null);
+  }, [liveSelectedPlayer?.id]);
+
+  const canEditSelected = liveSelectedPlayer
+    ? canEditPlayerProfile(currentUser, liveSelectedPlayer)
+    : false;
+
+  const handleSaveEdit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!draft) return;
+    const errs: string[] = [];
+    if (!draft.nombre.trim()) errs.push('Falta el Nombre.');
+    if (!draft.apellidoPaterno.trim()) errs.push('Falta el Apellido Paterno.');
+    if (!draft.apellidoMaterno.trim()) errs.push('Falta el Apellido Materno.');
+    if (!validateRut(draft.rut)) errs.push('El RUT ingresado no es válido.');
+    if (!draft.numeroMatricula.trim()) errs.push('Falta el Número de Matrícula.');
+    if (!validateUfroEmail(draft.correoInstitucional)) {
+      errs.push('El correo institucional debe ser @ufromail.cl o @ufrontera.cl.');
+    }
+    if (!draft.fechaNacimiento) errs.push('Falta la Fecha de Nacimiento.');
+
+    if (errs.length > 0) {
+      setEditErrors(errs);
+      return;
+    }
+
+    const cleaned: Player = {
+      ...draft,
+      nombre: draft.nombre.trim(),
+      apellidoPaterno: draft.apellidoPaterno.trim(),
+      apellidoMaterno: draft.apellidoMaterno.trim(),
+      rut: formatRut(draft.rut),
+      numeroMatricula: draft.numeroMatricula.trim(),
+      correoInstitucional: draft.correoInstitucional.trim().toLowerCase(),
+    };
+    onUpdatePlayer(cleaned);
+    onSelectPlayer(cleaned);
+    setEditErrors([]);
+    setIsEditing(false);
+    setEditSaved('Ficha oficial actualizada correctamente.');
+  };
+
+  const filteredPlayers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return state.players
+      .filter((p) => {
+        if (disciplineFilter !== 'ALL' && p.disciplineId !== disciplineFilter) return false;
+        if (facultyFilter !== 'ALL' && p.facultad !== facultyFilter) return false;
+        if (levelFilter !== 'ALL' && p.nivelAcademico !== levelFilter) return false;
+        if (onlySelectedUfro && !p.esSeleccionadoUfro) return false;
+        if (!q) return true;
+        const teamName = teamMap.get(p.teamId)?.nombre ?? '';
+        const fullName = `${p.nombre} ${p.apellidoPaterno} ${p.apellidoMaterno}`.toLowerCase();
+        return (
+          fullName.includes(q) ||
+          p.rut.toLowerCase().includes(q) ||
+          p.carrera.toLowerCase().includes(q) ||
+          teamName.toLowerCase().includes(q) ||
+          p.numeroMatricula.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 60);
+  }, [state.players, query, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro, teamMap]);
+
+  const getInitials = (p: Player) =>
+    `${p.nombre[0] ?? ''}${p.apellidoPaterno[0] ?? ''}`.toUpperCase();
+
+  return (
+    <div className="bg-white min-h-[75vh]">
+      {/* Dark Header */}
+      <div className="bg-[#0d0d0d] text-white border-b border-white/10">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+            Registro oficial estudiantil · UFRO
+          </p>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight mt-2">
+            Perfiles de Jugadores y Estadísticas
+          </h1>
+          <p className="text-sm text-neutral-400 mt-2 max-w-2xl">
+            Consulta el padrón verificado de deportistas de pregrado y postgrado, su rendimiento
+            por disciplina y condición de seleccionado universitario UFRO.
+          </p>
+        </div>
+      </div>
+
+      {/* Filters Toolbar */}
+      <div className="border-b border-neutral-200 bg-[#f5f6f8]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-center">
+          <div className="lg:col-span-4 relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por nombre, RUT, matrícula, equipo o carrera..."
+              aria-label="Buscar jugadores"
+              className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+            />
+          </div>
+
+          <div className="lg:col-span-3">
+            <select
+              value={disciplineFilter}
+              onChange={(e) => setDisciplineFilter(e.target.value as 'ALL' | DisciplineId)}
+              aria-label="Filtrar por disciplina"
+              className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+            >
+              <option value="ALL">Todas las disciplinas</option>
+              {DISCIPLINES.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <select
+              value={facultyFilter}
+              onChange={(e) => setFacultyFilter(e.target.value)}
+              aria-label="Filtrar por facultad"
+              className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+            >
+              <option value="ALL">Todas las facultades</option>
+              {UFRO_FACULTIES.map((fac) => (
+                <option key={fac} value={fac}>
+                  {fac}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-1">
+            <select
+              value={levelFilter}
+              onChange={(e) => setLevelFilter(e.target.value as 'ALL' | AcademicLevel)}
+              aria-label="Filtrar por nivel académico"
+              className="w-full bg-white border border-neutral-300 px-2 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+            >
+              <option value="ALL">Nivel</option>
+              <option value="Pregrado">Pregrado</option>
+              <option value="Postgrado">Postgrado</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-2 flex items-center justify-end">
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-[#0d0d0d] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={onlySelectedUfro}
+                onChange={(e) => setOnlySelectedUfro(e.target.checked)}
+                className="accent-[#707ef9] w-4 h-4"
+              />
+              <span>Solo Seleccionado UFRO</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Directory Table */}
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex items-center justify-between text-xs text-neutral-500 mb-4">
+          <span className="tabular-nums">
+            Mostrando {filteredPlayers.length} de {state.players.length} estudiantes registrados
+          </span>
+          <span>Haz clic en un jugador para abrir su ficha completa UFRO</span>
+        </div>
+
+        {filteredPlayers.length === 0 ? (
+          <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-3">
+            <p className="font-display text-xl uppercase text-[#0d0d0d]">
+              {state.players.length === 0
+                ? `Aún no hay estudiantes inscritos en la temporada ${state.temporada}`
+                : 'No se encontraron jugadores con los filtros aplicados'}
+            </p>
+            {state.players.length === 0 ? (
+              <p className="text-xs text-neutral-600 max-w-md mx-auto">
+                Las fichas estudiantiles aparecerán aquí automáticamente conforme los Delegados de
+                Equipo y Administradores registren los planteles oficiales en Inscripciones.
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setDisciplineFilter('ALL');
+                  setFacultyFilter('ALL');
+                  setLevelFilter('ALL');
+                  setOnlySelectedUfro(false);
+                }}
+                className="px-4 py-2 text-xs font-display uppercase tracking-widest bg-[#0d0d0d] text-white cursor-pointer"
+              >
+                Limpiar filtros
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="border border-neutral-200 overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="bg-[#f5f6f8] border-b border-neutral-200 text-xs text-neutral-500 uppercase">
+                  <th className="py-3 px-4 font-medium">Estudiante</th>
+                  <th className="py-3 px-3 font-medium">Equipo y Disciplina</th>
+                  <th className="py-3 px-3 hidden md:table-cell font-medium">Carrera / Nivel</th>
+                  <th className="py-3 px-3 hidden lg:table-cell font-medium">RUT</th>
+                  <th className="py-3 px-3 text-right font-medium tabular-nums">PJ</th>
+                  <th className="py-3 px-3 text-right font-medium tabular-nums">Rendimiento</th>
+                  <th className="py-3 px-4 text-right font-medium">Ficha</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200">
+                {filteredPlayers.map((player) => {
+                  const team = teamMap.get(player.teamId);
+                  const disc = DISCIPLINE_MAP[player.disciplineId];
+                  const statLabel =
+                    disc.sportType === 'futbol7'
+                      ? `${player.stats.goles}G / ${player.stats.asistencias}A`
+                      : disc.sportType === 'voleibol'
+                      ? `${player.stats.puntos} Pts / ${player.stats.aces} Aces`
+                      : `${player.stats.puntos} Pts / ${player.stats.rebotes} Reb`;
+
+                  return (
+                    <tr
+                      key={player.id}
+                      className="hover:bg-[#f9fafb] transition-colors"
+                    >
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-3">
+                          {player.fotografia ? (
+                            <img
+                              src={player.fotografia}
+                              alt={`${player.nombre} ${player.apellidoPaterno}`}
+                              className="w-9 h-9 object-cover border border-neutral-200 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 bg-[#0d0d0d] text-white font-display text-xs font-bold flex items-center justify-center shrink-0">
+                              {getInitials(player)}
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-bold text-[#0d0d0d]">
+                              {player.nombre} {player.apellidoPaterno} {player.apellidoMaterno}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              #{player.dorsal} · {player.posicion}
+                              {player.esSeleccionadoUfro && (
+                                <span className="text-[#707ef9] font-medium"> · Seleccionado UFRO</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <p className="font-medium text-[#0d0d0d]">{team?.nombre ?? player.teamId}</p>
+                        <p className="text-xs text-neutral-500">{disc.nombreCorto}</p>
+                      </td>
+                      <td className="py-3.5 px-3 hidden md:table-cell">
+                        <p className="text-xs text-[#0d0d0d]">{player.carrera}</p>
+                        <p className="text-xs text-neutral-500">{player.nivelAcademico}</p>
+                      </td>
+                      <td className="py-3.5 px-3 hidden lg:table-cell text-xs tabular-nums text-neutral-600">
+                        {player.rut || 'Reservado'}
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular-nums text-neutral-700">
+                        {player.stats.partidosJugados}
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular-nums font-medium text-[#0d0d0d]">
+                        {statLabel}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onSelectPlayer(player)}
+                          className="text-xs font-display font-bold uppercase tracking-wider text-[#707ef9] hover:text-[#0d0d0d] cursor-pointer"
+                        >
+                          Ver perfil
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Detailed Player Profile Modal with all 12 official UFRO fields */}
+      {liveSelectedPlayer && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="player-profile-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 overflow-y-auto"
+        >
+          <div className="bg-white w-full max-w-2xl border border-neutral-200 shadow-2xl my-8 overflow-hidden">
+            {/* Dark Editorial Header */}
+            <div className="bg-[#0d0d0d] text-white p-6 flex items-start justify-between gap-4">
+              <div className="flex items-center gap-5">
+                {liveSelectedPlayer.fotografia ? (
+                  <img
+                    src={liveSelectedPlayer.fotografia}
+                    alt={`${liveSelectedPlayer.nombre} ${liveSelectedPlayer.apellidoPaterno}`}
+                    className="w-20 h-20 object-cover border border-white/20 shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-20 h-20 bg-[#1c1c22] border border-white/15 flex flex-col items-center justify-center shrink-0">
+                    <span className="font-display text-2xl font-bold text-[#707ef9]">
+                      {getInitials(liveSelectedPlayer)}
+                    </span>
+                    <span className="text-[11px] text-neutral-400 tabular-nums">
+                      #{liveSelectedPlayer.dorsal}
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+                    {DISCIPLINE_MAP[liveSelectedPlayer.disciplineId].nombre}
+                  </p>
+                  <h2
+                    id="player-profile-title"
+                    className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-tight mt-1"
+                  >
+                    {liveSelectedPlayer.nombre} {liveSelectedPlayer.apellidoPaterno}{' '}
+                    {liveSelectedPlayer.apellidoMaterno}
+                  </h2>
+                  <p className="text-xs text-neutral-300 mt-1">
+                    {teamMap.get(liveSelectedPlayer.teamId)?.nombre} · {liveSelectedPlayer.posicion} · Dorsal #{liveSelectedPlayer.dorsal}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onSelectPlayer(null)}
+                aria-label="Cerrar perfil de jugador"
+                className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Official 12-field UFRO Registration Sheet */}
+            <div className="p-6 space-y-6">
+              {editSaved && (
+                <div
+                  role="status"
+                  className="bg-emerald-50 border border-emerald-300 p-3 text-xs text-emerald-950 flex items-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>{editSaved}</span>
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-2 mb-4">
+                  <h3 className="font-display text-sm font-bold uppercase tracking-widest text-neutral-500">
+                    Ficha Estudiantil Oficial (Plantilla Google Sheets UFRO)
+                  </h3>
+                  {canEditSelected && !isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(liveSelectedPlayer);
+                        setEditErrors([]);
+                        setEditSaved(null);
+                        setIsEditing(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Editar ficha oficial</span>
+                    </button>
+                  )}
+                </div>
+
+                {isEditing && draft ? (
+                  <form onSubmit={handleSaveEdit} className="space-y-4">
+                    {editErrors.length > 0 && (
+                      <div role="alert" className="bg-red-50 border border-red-300 p-3 text-xs text-red-900 space-y-1">
+                        {editErrors.map((err, i) => (
+                          <p key={i}>{err}</p>
+                        ))}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <label htmlFor="ed-nombre" className="block text-xs text-neutral-500 mb-1">
+                          Nombre
+                        </label>
+                        <input
+                          id="ed-nombre"
+                          type="text"
+                          value={draft.nombre}
+                          onChange={(e) => setDraft({ ...draft, nombre: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-app" className="block text-xs text-neutral-500 mb-1">
+                          Apellido Paterno
+                        </label>
+                        <input
+                          id="ed-app"
+                          type="text"
+                          value={draft.apellidoPaterno}
+                          onChange={(e) => setDraft({ ...draft, apellidoPaterno: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-apm" className="block text-xs text-neutral-500 mb-1">
+                          Apellido Materno
+                        </label>
+                        <input
+                          id="ed-apm"
+                          type="text"
+                          value={draft.apellidoMaterno}
+                          onChange={(e) => setDraft({ ...draft, apellidoMaterno: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-carrera" className="block text-xs text-neutral-500 mb-1">
+                          Carrera
+                        </label>
+                        <select
+                          id="ed-carrera"
+                          value={draft.carrera}
+                          onChange={(e) => {
+                            const found = UFRO_CAREERS.find((c) => c.carrera === e.target.value);
+                            setDraft({
+                              ...draft,
+                              carrera: e.target.value,
+                              facultad: found?.facultad ?? draft.facultad,
+                            });
+                          }}
+                          className="w-full border border-neutral-300 bg-white px-2.5 py-1.5 text-sm"
+                        >
+                          {UFRO_CAREERS.map((c) => (
+                            <option key={c.carrera} value={c.carrera}>
+                              {c.carrera}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="ed-rut" className="block text-xs text-neutral-500 mb-1">
+                          RUT
+                        </label>
+                        <input
+                          id="ed-rut"
+                          type="text"
+                          value={draft.rut}
+                          onChange={(e) => setDraft({ ...draft, rut: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm tabular-nums"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-mat" className="block text-xs text-neutral-500 mb-1">
+                          Número de matrícula
+                        </label>
+                        <input
+                          id="ed-mat"
+                          type="text"
+                          value={draft.numeroMatricula}
+                          onChange={(e) => setDraft({ ...draft, numeroMatricula: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm tabular-nums"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-email" className="block text-xs text-neutral-500 mb-1">
+                          Correo institucional
+                        </label>
+                        <input
+                          id="ed-email"
+                          type="email"
+                          value={draft.correoInstitucional}
+                          onChange={(e) =>
+                            setDraft({ ...draft, correoInstitucional: e.target.value })
+                          }
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="ed-nivel" className="block text-xs text-neutral-500 mb-1">
+                          Nivel académico
+                        </label>
+                        <select
+                          id="ed-nivel"
+                          value={draft.nivelAcademico}
+                          onChange={(e) =>
+                            setDraft({ ...draft, nivelAcademico: e.target.value as AcademicLevel })
+                          }
+                          className="w-full border border-neutral-300 bg-white px-2.5 py-1.5 text-sm"
+                        >
+                          <option value="Pregrado">Pregrado</option>
+                          <option value="Postgrado">Postgrado</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="ed-dob" className="block text-xs text-neutral-500 mb-1">
+                          Fecha de nacimiento
+                        </label>
+                        <input
+                          id="ed-dob"
+                          type="date"
+                          value={draft.fechaNacimiento}
+                          onChange={(e) => setDraft({ ...draft, fechaNacimiento: e.target.value })}
+                          className="w-full border border-neutral-300 px-2.5 py-1.5 text-sm tabular-nums"
+                        />
+                      </div>
+                      <div className="flex items-end pb-1">
+                        <label className="inline-flex items-center gap-2 text-xs font-medium text-[#0d0d0d] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={draft.esSeleccionadoUfro}
+                            onChange={(e) =>
+                              setDraft({ ...draft, esSeleccionadoUfro: e.target.checked })
+                            }
+                            className="accent-[#707ef9] w-4 h-4"
+                          />
+                          <span>Seleccionado Oficial UFRO</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditing(false);
+                          setEditErrors([]);
+                        }}
+                        className="px-4 py-2 border border-neutral-300 text-xs font-medium text-neutral-700 cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                      >
+                        Guardar cambios
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+                    <div>
+                      <dt className="text-xs text-neutral-500">Nombre</dt>
+                      <dd className="font-medium text-[#0d0d0d]">{liveSelectedPlayer.nombre}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Apellidos (Paterno / Materno)</dt>
+                      <dd className="font-medium text-[#0d0d0d]">
+                        {liveSelectedPlayer.apellidoPaterno} {liveSelectedPlayer.apellidoMaterno}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Carrera</dt>
+                      <dd className="font-medium text-[#0d0d0d]">{liveSelectedPlayer.carrera}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Facultad</dt>
+                      <dd className="font-medium text-[#0d0d0d]">{liveSelectedPlayer.facultad}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">RUT</dt>
+                      <dd className="font-medium tabular-nums text-[#0d0d0d]">
+                        {liveSelectedPlayer.rut || 'Reservado (Solo Admin/Delegado)'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Número de matrícula</dt>
+                      <dd className="font-medium tabular-nums text-[#0d0d0d]">
+                        {liveSelectedPlayer.numeroMatricula || 'Reservado (Solo Admin/Delegado)'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Correo electrónico institucional</dt>
+                      <dd className="font-medium text-[#0d0d0d] break-all">
+                        {liveSelectedPlayer.correoInstitucional || 'Reservado (Solo Admin/Delegado)'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Nivel académico</dt>
+                      <dd className="font-medium text-[#0d0d0d]">{liveSelectedPlayer.nivelAcademico}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Fecha de nacimiento</dt>
+                      <dd className="font-medium tabular-nums text-[#0d0d0d]">
+                        {liveSelectedPlayer.fechaNacimiento || 'Reservado (Solo Admin/Delegado)'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-neutral-500">Seleccionado Universidad UFRO</dt>
+                      <dd className="font-medium text-[#0d0d0d] flex items-center gap-1.5">
+                        {liveSelectedPlayer.esSeleccionadoUfro ? (
+                          <>
+                            <Award className="w-4 h-4 text-[#707ef9]" />
+                            <span className="text-[#707ef9] font-bold">Sí — Seleccionado Oficial UFRO</span>
+                          </>
+                        ) : (
+                          <span>No</span>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
+              </div>
+
+              {/* Discipline Stats Grid */}
+              <div>
+                <h3 className="font-display text-sm font-bold uppercase tracking-widest text-neutral-500 border-b border-neutral-200 pb-2 mb-4">
+                  Estadísticas Temporada {state.temporada}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#f5f6f8] p-4 border border-neutral-200">
+                  <div>
+                    <p className="text-xs text-neutral-500">Partidos jugados</p>
+                    <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                      {liveSelectedPlayer.stats.partidosJugados}
+                    </p>
+                  </div>
+                  {DISCIPLINE_MAP[liveSelectedPlayer.disciplineId].sportType === 'futbol7' && (
+                    <>
+                      <div>
+                        <p className="text-xs text-neutral-500">Goles</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#707ef9]">
+                          {liveSelectedPlayer.stats.goles}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Asistencias</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.asistencias}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Tarjetas (A / R)</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.tarjetasAmarillas} / {liveSelectedPlayer.stats.tarjetasRojas}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {(DISCIPLINE_MAP[liveSelectedPlayer.disciplineId].sportType === 'basquetbol' ||
+                    DISCIPLINE_MAP[liveSelectedPlayer.disciplineId].sportType === 'basquetbol3x3') && (
+                    <>
+                      <div>
+                        <p className="text-xs text-neutral-500">Puntos</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#707ef9]">
+                          {liveSelectedPlayer.stats.puntos}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Rebotes / Triples</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.rebotes} / {liveSelectedPlayer.stats.triples}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Faltas personales</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.faltas}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {DISCIPLINE_MAP[liveSelectedPlayer.disciplineId].sportType === 'voleibol' && (
+                    <>
+                      <div>
+                        <p className="text-xs text-neutral-500">Puntos totales</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#707ef9]">
+                          {liveSelectedPlayer.stats.puntos}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Aces</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.aces}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-neutral-500">Bloqueos</p>
+                        <p className="font-display text-2xl font-bold tabular-nums text-[#0d0d0d]">
+                          {liveSelectedPlayer.stats.bloqueos}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

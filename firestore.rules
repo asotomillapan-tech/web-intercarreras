@@ -1,0 +1,1094 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified()
+        && request.auth.token.email == 'a.sotomillapan@gmail.com';
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        isBootstrappedAdmin()
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        )
+      );
+    }
+
+    function isReferee() {
+      return isVerified() && (
+        isAdmin()
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'arbitro'
+        )
+      );
+    }
+
+    function isPhotographer() {
+      return isVerified() && (
+        isAdmin()
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'fotografo'
+        )
+      );
+    }
+
+    function isDelegado() {
+      return isVerified()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'delegado';
+    }
+
+    function isDelegadoOf(teamId) {
+      return isDelegado()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.delegatedTeamId == teamId;
+    }
+
+    function isLinkedPlayer(playerId) {
+      return isVerified()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'jugador'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.linkedPlayerId == playerId;
+    }
+
+    function isValidRole(role) {
+      return role in ['tradicional', 'jugador', 'delegado', 'arbitro', 'fotografo', 'admin'];
+    }
+
+    function isValidDiscipline(d) {
+      return d in ['f7-h-1', 'f7-h-2', 'f7-h-3', 'f7-m', 'basquet-h', 'basquet-3x3-m', 'voley-m', 'voley-h'];
+    }
+
+    function isValidFavoriteList(favs) {
+      return favs is list
+        && favs.size() <= 20
+        && (favs.size() == 0 || (favs[0] is string && favs[0].size() >= 1 && favs[0].size() <= 128));
+    }
+
+    // --- Entity Validation Blueprints (Anti-Update-Gap) ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'displayName',
+          'email',
+          'role',
+          'favoriteTeamIds',
+          'notificationsEnabled',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'email',
+          'photoURL',
+          'role',
+          'favoriteTeamIds',
+          'linkedPlayerId',
+          'delegatedTeamId',
+          'notificationsEnabled',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && isValidRole(data.role)
+        && isValidFavoriteList(data.favoriteTeamIds)
+        && (!('linkedPlayerId' in data) || (data.linkedPlayerId is string && data.linkedPlayerId.size() <= 128))
+        && (!('delegatedTeamId' in data) || (data.delegatedTeamId is string && data.delegatedTeamId.size() <= 128))
+        && data.notificationsEnabled is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'grantedBy', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'grantedBy', 'createdAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && isValidId(data.grantedBy)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTournamentSettings(data) {
+      return data.keys().hasAll(['temporada', 'updatedAt'])
+        && data.keys().hasOnly([
+          'temporada',
+          'drive2025FolderId',
+          'driveUploadRootFolderId',
+          'driveUploadRootFolderName',
+          'lastSyncedSpreadsheetId',
+          'lastSyncedAt',
+          'updatedAt'
+        ])
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && (!('drive2025FolderId' in data) || (data.drive2025FolderId is string && data.drive2025FolderId.size() <= 128))
+        && (!('driveUploadRootFolderId' in data) || (data.driveUploadRootFolderId is string && data.driveUploadRootFolderId.size() <= 128))
+        && (!('driveUploadRootFolderName' in data) || (data.driveUploadRootFolderName is string && data.driveUploadRootFolderName.size() <= 160))
+        && (!('lastSyncedSpreadsheetId' in data) || (data.lastSyncedSpreadsheetId is string && data.lastSyncedSpreadsheetId.size() <= 128))
+        && (!('lastSyncedAt' in data) || (data.lastSyncedAt is string && data.lastSyncedAt.size() <= 64))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDisciplineConfig(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'maxCupos',
+          'numGrupos',
+          'clasificadosPorGrupo',
+          'formatoPlayoff',
+          'inscripcionesAbiertas',
+          'transferenciasAbiertas',
+          'maxTransferenciasPorEquipo',
+          'faseActual',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'maxCupos',
+          'numGrupos',
+          'clasificadosPorGrupo',
+          'formatoPlayoff',
+          'inscripcionesAbiertas',
+          'transferenciasAbiertas',
+          'maxTransferenciasPorEquipo',
+          'faseActual',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && data.maxCupos is int && data.maxCupos >= 2 && data.maxCupos <= 128
+        && data.numGrupos is int && data.numGrupos >= 1 && data.numGrupos <= 16
+        && data.clasificadosPorGrupo is int && data.clasificadosPorGrupo >= 1 && data.clasificadosPorGrupo <= 8
+        && data.formatoPlayoff in [4, 8, 16]
+        && data.inscripcionesAbiertas is bool
+        && data.transferenciasAbiertas is bool
+        && data.maxTransferenciasPorEquipo is int && data.maxTransferenciasPorEquipo >= 0 && data.maxTransferenciasPorEquipo <= 10
+        && data.faseActual in ['INSCRIPCIONES', 'FASE_GRUPOS', 'TRANSFERENCIAS', 'PLAYOFFS']
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTeam(data) {
+      return data.keys().hasAll([
+          'id',
+          'nombre',
+          'sigla',
+          'disciplineId',
+          'carrera',
+          'facultad',
+          'groupName',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'nombre',
+          'sigla',
+          'disciplineId',
+          'carrera',
+          'facultad',
+          'groupName',
+          'logrosAnteriores',
+          'createdByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.nombre is string && data.nombre.size() >= 2 && data.nombre.size() <= 120
+        && data.sigla is string && data.sigla.size() >= 2 && data.sigla.size() <= 8
+        && isValidDiscipline(data.disciplineId)
+        && data.carrera is string && data.carrera.size() >= 2 && data.carrera.size() <= 140
+        && data.facultad is string && data.facultad.size() >= 2 && data.facultad.size() <= 140
+        && data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 40
+        && (!('logrosAnteriores' in data) || (data.logrosAnteriores is string && data.logrosAnteriores.size() <= 160))
+        && (!('createdByUid' in data) || isValidId(data.createdByUid))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPlayerStats(stats) {
+      return stats is map
+        && stats.keys().hasOnly([
+          'partidosJugados',
+          'goles',
+          'asistencias',
+          'tarjetasAmarillas',
+          'tarjetasRojas',
+          'puntos',
+          'rebotes',
+          'triples',
+          'faltas',
+          'aces',
+          'bloqueos'
+        ])
+        && stats.partidosJugados is int && stats.partidosJugados >= 0 && stats.partidosJugados <= 200
+        && stats.goles is int && stats.goles >= 0 && stats.goles <= 500
+        && stats.asistencias is int && stats.asistencias >= 0 && stats.asistencias <= 500
+        && stats.tarjetasAmarillas is int && stats.tarjetasAmarillas >= 0 && stats.tarjetasAmarillas <= 100
+        && stats.tarjetasRojas is int && stats.tarjetasRojas >= 0 && stats.tarjetasRojas <= 50
+        && stats.puntos is int && stats.puntos >= 0 && stats.puntos <= 5000
+        && stats.rebotes is int && stats.rebotes >= 0 && stats.rebotes <= 2000
+        && stats.triples is int && stats.triples >= 0 && stats.triples <= 1000
+        && stats.faltas is int && stats.faltas >= 0 && stats.faltas <= 500
+        && stats.aces is int && stats.aces >= 0 && stats.aces <= 1000
+        && stats.bloqueos is int && stats.bloqueos >= 0 && stats.bloqueos <= 1000;
+    }
+
+    function isValidPlayerPublic(data) {
+      return data.keys().hasAll([
+          'id',
+          'teamId',
+          'disciplineId',
+          'dorsal',
+          'posicion',
+          'nombre',
+          'apellidoPaterno',
+          'apellidoMaterno',
+          'carrera',
+          'facultad',
+          'nivelAcademico',
+          'fotografia',
+          'esSeleccionadoUfro',
+          'stats',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'teamId',
+          'disciplineId',
+          'dorsal',
+          'posicion',
+          'nombre',
+          'apellidoPaterno',
+          'apellidoMaterno',
+          'carrera',
+          'facultad',
+          'nivelAcademico',
+          'fotografia',
+          'esSeleccionadoUfro',
+          'stats',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.teamId)
+        && isValidDiscipline(data.disciplineId)
+        && data.dorsal is int && data.dorsal >= 0 && data.dorsal <= 99
+        && data.posicion is string && data.posicion.size() >= 1 && data.posicion.size() <= 60
+        && data.nombre is string && data.nombre.size() >= 1 && data.nombre.size() <= 80
+        && data.apellidoPaterno is string && data.apellidoPaterno.size() >= 1 && data.apellidoPaterno.size() <= 80
+        && data.apellidoMaterno is string && data.apellidoMaterno.size() >= 1 && data.apellidoMaterno.size() <= 80
+        && data.carrera is string && data.carrera.size() >= 2 && data.carrera.size() <= 140
+        && data.facultad is string && data.facultad.size() >= 2 && data.facultad.size() <= 140
+        && data.nivelAcademico in ['Pregrado', 'Postgrado']
+        && data.fotografia is string && data.fotografia.size() <= 160000
+        && data.esSeleccionadoUfro is bool
+        && isValidPlayerStats(data.stats)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPlayerPrivate(data) {
+      return data.keys().hasAll([
+          'playerId',
+          'teamId',
+          'rut',
+          'numeroMatricula',
+          'correoInstitucional',
+          'fechaNacimiento',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'playerId',
+          'teamId',
+          'rut',
+          'numeroMatricula',
+          'correoInstitucional',
+          'fechaNacimiento',
+          'updatedAt'
+        ])
+        && isValidId(data.playerId)
+        && isValidId(data.teamId)
+        && data.rut is string && data.rut.size() >= 7 && data.rut.size() <= 20
+        && data.numeroMatricula is string && data.numeroMatricula.size() >= 4 && data.numeroMatricula.size() <= 30
+        && data.correoInstitucional is string && data.correoInstitucional.size() >= 5 && data.correoInstitucional.size() <= 160
+        && data.fechaNacimiento is string && data.fechaNacimiento.size() >= 8 && data.fechaNacimiento.size() <= 20
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMatch(data) {
+      return data.keys().hasAll([
+          'id',
+          'disciplineId',
+          'groupName',
+          'fase',
+          'jornada',
+          'fecha',
+          'hora',
+          'cancha',
+          'homeTeamId',
+          'awayTeamId',
+          'homeScore',
+          'awayScore',
+          'status',
+          'periodLabel',
+          'clock',
+          'periods',
+          'fouls',
+          'timeouts',
+          'events',
+          'refereeId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'disciplineId',
+          'groupName',
+          'fase',
+          'jornada',
+          'fecha',
+          'hora',
+          'cancha',
+          'homeTeamId',
+          'awayTeamId',
+          'homeScore',
+          'awayScore',
+          'status',
+          'periodLabel',
+          'clock',
+          'periods',
+          'fouls',
+          'timeouts',
+          'events',
+          'refereeId',
+          'scoresheetValidation',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidDiscipline(data.disciplineId)
+        && data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 40
+        && data.fase in ['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Final']
+        && data.jornada is int && data.jornada >= 1 && data.jornada <= 50
+        && data.fecha is string && data.fecha.size() >= 8 && data.fecha.size() <= 20
+        && data.hora is string && data.hora.size() >= 4 && data.hora.size() <= 12
+        && data.cancha is string && data.cancha.size() >= 2 && data.cancha.size() <= 120
+        && isValidId(data.homeTeamId)
+        && isValidId(data.awayTeamId)
+        && data.homeTeamId != data.awayTeamId
+        && data.homeScore is int && data.homeScore >= 0 && data.homeScore <= 300
+        && data.awayScore is int && data.awayScore >= 0 && data.awayScore <= 300
+        && data.status in ['PROGRAMADO', 'EN_VIVO', 'FINALIZADO']
+        && data.periodLabel is string && data.periodLabel.size() <= 60
+        && data.clock is string && data.clock.size() <= 24
+        && data.periods is list && data.periods.size() <= 10
+        && data.fouls is map && data.fouls.keys().hasOnly(['home', 'away'])
+        && data.timeouts is map && data.timeouts.keys().hasOnly(['home', 'away'])
+        && data.events is list && data.events.size() <= 120
+        && data.refereeId is string && data.refereeId.size() <= 128
+        && (!('scoresheetValidation' in data) || data.scoresheetValidation is map)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransfer(data) {
+      return data.keys().hasAll([
+          'id',
+          'disciplineId',
+          'playerId',
+          'playerName',
+          'fromTeamId',
+          'fromTeamName',
+          'toTeamId',
+          'toTeamName',
+          'fecha',
+          'motivo',
+          'estado',
+          'createdByUid',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'disciplineId',
+          'playerId',
+          'playerName',
+          'fromTeamId',
+          'fromTeamName',
+          'toTeamId',
+          'toTeamName',
+          'fecha',
+          'motivo',
+          'estado',
+          'createdByUid',
+          'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidDiscipline(data.disciplineId)
+        && isValidId(data.playerId)
+        && data.playerName is string && data.playerName.size() >= 2 && data.playerName.size() <= 140
+        && isValidId(data.fromTeamId)
+        && data.fromTeamName is string && data.fromTeamName.size() >= 2 && data.fromTeamName.size() <= 120
+        && isValidId(data.toTeamId)
+        && data.fromTeamId != data.toTeamId
+        && data.toTeamName is string && data.toTeamName.size() >= 2 && data.toTeamName.size() <= 120
+        && data.fecha is string && data.fecha.size() >= 8 && data.fecha.size() <= 20
+        && data.motivo is string && data.motivo.size() >= 3 && data.motivo.size() <= 300
+        && data.estado in ['APROBADA', 'PENDIENTE', 'RECHAZADA']
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidMvpVote(data) {
+      return data.keys().hasAll([
+          'matchId',
+          'disciplineId',
+          'playerId',
+          'playerName',
+          'teamId',
+          'voterUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'matchId',
+          'disciplineId',
+          'playerId',
+          'playerName',
+          'teamId',
+          'voterUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.matchId)
+        && isValidDiscipline(data.disciplineId)
+        && isValidId(data.playerId)
+        && data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 120
+        && isValidId(data.teamId)
+        && isValidId(data.voterUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPhotoEntry(data) {
+      return data.keys().hasAll([
+          'id',
+          'title',
+          'disciplineId',
+          'matchLabel',
+          'season',
+          'source',
+          'imageUrl',
+          'photographerUid',
+          'photographerName',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'title',
+          'disciplineId',
+          'stageLabel',
+          'matchLabel',
+          'season',
+          'source',
+          'imageUrl',
+          'thumbnailUrl',
+          'driveFileId',
+          'driveWebViewLink',
+          'driveFolderPath',
+          'photographerUid',
+          'photographerName',
+          'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.disciplineId is string && data.disciplineId.size() >= 2 && data.disciplineId.size() <= 40
+        && (!('stageLabel' in data) || (data.stageLabel is string && data.stageLabel.size() <= 80))
+        && data.matchLabel is string && data.matchLabel.size() >= 1 && data.matchLabel.size() <= 160
+        && data.season is string && data.season.size() >= 4 && data.season.size() <= 16
+        && data.source in ['upload', 'drive']
+        && data.imageUrl is string && data.imageUrl.size() >= 5 && data.imageUrl.size() <= 200000
+        && (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000))
+        && (!('driveFileId' in data) || (data.driveFileId is string && data.driveFileId.size() <= 128))
+        && (!('driveWebViewLink' in data) || (data.driveWebViewLink is string && data.driveWebViewLink.size() <= 500))
+        && (!('driveFolderPath' in data) || (data.driveFolderPath is string && data.driveFolderPath.size() <= 300))
+        && isValidId(data.photographerUid)
+        && data.photographerName is string && data.photographerName.size() >= 1 && data.photographerName.size() <= 120
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection 1: /users/{userId} (PII isolated to owner or admin) ---
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerified()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isOwner(userId)
+            && incoming().uid == request.auth.uid
+            && (
+              incoming().role == 'tradicional'
+              || (isBootstrappedAdmin() && incoming().role == 'admin')
+            )
+            && !('delegatedTeamId' in incoming())
+            && !('linkedPlayerId' in incoming())
+          )
+          || isAdmin()
+        );
+
+      allow update: if isVerified()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'role',
+              'linkedPlayerId',
+              'delegatedTeamId',
+              'displayName',
+              'photoURL',
+              'favoriteTeamIds',
+              'notificationsEnabled',
+              'updatedAt'
+            ])
+          )
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName',
+              'photoURL',
+              'favoriteTeamIds',
+              'notificationsEnabled',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin() && userId != request.auth.uid;
+    }
+
+    // --- Collection 2: /admins/{userId} (Exclusive Admin Registry & Delegation) ---
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isVerified()
+        && isValidId(userId)
+        && isValidAdminRecord(incoming())
+        && incoming().uid == userId
+        && incoming().grantedBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && isAdmin();
+      allow update: if false;
+      allow delete: if isValidId(userId)
+        && isAdmin()
+        && userId != request.auth.uid
+        && existing().email != 'a.sotomillapan@gmail.com';
+    }
+
+    // --- Collection 3: /settings/{settingId} (Global Tournament & Drive 2026 Config) ---
+    match /settings/{settingId} {
+      allow get: if settingId == 'tournament';
+      allow list: if false;
+      allow create: if isVerified()
+        && settingId == 'tournament'
+        && isValidTournamentSettings(incoming())
+        && incoming().updatedAt == request.time
+        && isAdmin();
+      allow update: if isVerified()
+        && settingId == 'tournament'
+        && isValidTournamentSettings(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'temporada',
+          'drive2025FolderId',
+          'driveUploadRootFolderId',
+          'driveUploadRootFolderName',
+          'lastSyncedSpreadsheetId',
+          'lastSyncedAt',
+          'updatedAt'
+        ])
+        && isAdmin();
+      allow delete: if false;
+    }
+
+    // --- Collection 4: /configs/{disciplineId} (Annual Format, Quotas & Windows) ---
+    match /configs/{disciplineId} {
+      allow get: if isValidDiscipline(disciplineId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isValidDisciplineConfig(incoming())
+        && incoming().disciplineId == disciplineId
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isValidDisciplineConfig(incoming())
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'temporada',
+          'maxCupos',
+          'numGrupos',
+          'clasificadosPorGrupo',
+          'formatoPlayoff',
+          'inscripcionesAbiertas',
+          'transferenciasAbiertas',
+          'maxTransferenciasPorEquipo',
+          'faseActual',
+          'updatedAt'
+        ])
+        && isAdmin();
+
+      allow delete: if isValidDiscipline(disciplineId) && isAdmin();
+    }
+
+    // --- Collection 5: /teams/{teamId} (Registered Teams) ---
+    match /teams/{teamId} {
+      allow get: if isValidId(teamId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(teamId)
+        && isValidTeam(incoming())
+        && incoming().id == teamId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isDelegado()
+            && incoming().createdByUid == request.auth.uid
+            && exists(/databases/$(database)/documents/configs/$(incoming().disciplineId))
+            && get(/databases/$(database)/documents/configs/$(incoming().disciplineId)).data.inscripcionesAbiertas == true
+          )
+        );
+
+      allow update: if isVerified()
+        && isValidId(teamId)
+        && isValidTeam(incoming())
+        && incoming().id == existing().id
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'nombre',
+              'sigla',
+              'carrera',
+              'facultad',
+              'groupName',
+              'logrosAnteriores',
+              'updatedAt'
+            ])
+          )
+          || (
+            isDelegadoOf(teamId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'nombre',
+              'sigla',
+              'logrosAnteriores',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(teamId) && isAdmin();
+    }
+
+    // --- Collection 6: /players/{playerId} (Public Sports Profile - No Student PII) ---
+    match /players/{playerId} {
+      allow get: if isValidId(playerId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(playerId)
+        && isValidPlayerPublic(incoming())
+        && incoming().id == playerId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isDelegado()
+            && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
+            && (
+              isDelegadoOf(incoming().teamId)
+              || get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.createdByUid == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isVerified()
+        && isValidId(playerId)
+        && isValidPlayerPublic(incoming())
+        && incoming().id == existing().id
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Tier 1: Admin full edit
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'teamId',
+              'dorsal',
+              'posicion',
+              'nombre',
+              'apellidoPaterno',
+              'apellidoMaterno',
+              'carrera',
+              'facultad',
+              'nivelAcademico',
+              'fotografia',
+              'esSeleccionadoUfro',
+              'stats',
+              'updatedAt'
+            ])
+          )
+          // Tier 2A: Delegado roster edit on assigned team
+          || (
+            isDelegadoOf(existing().teamId)
+            && incoming().teamId == existing().teamId
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'dorsal',
+              'posicion',
+              'nombre',
+              'apellidoPaterno',
+              'apellidoMaterno',
+              'carrera',
+              'facultad',
+              'nivelAcademico',
+              'fotografia',
+              'esSeleccionadoUfro',
+              'updatedAt'
+            ])
+          )
+          // Tier 2B: Delegado transfer execution when transfer window is open
+          || (
+            isDelegado()
+            && (isDelegadoOf(existing().teamId) || isDelegadoOf(incoming().teamId))
+            && exists(/databases/$(database)/documents/configs/$(existing().disciplineId))
+            && get(/databases/$(database)/documents/configs/$(existing().disciplineId)).data.transferenciasAbiertas == true
+            && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['teamId', 'updatedAt'])
+          )
+          // Tier 3: Jugador self-edit of own profile (cannot modify teamId, esSeleccionadoUfro, or stats)
+          || (
+            isLinkedPlayer(playerId)
+            && incoming().teamId == existing().teamId
+            && incoming().esSeleccionadoUfro == existing().esSeleccionadoUfro
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'dorsal',
+              'posicion',
+              'nombre',
+              'apellidoPaterno',
+              'apellidoMaterno',
+              'carrera',
+              'facultad',
+              'nivelAcademico',
+              'fotografia',
+              'updatedAt'
+            ])
+          )
+          // Tier 4: Arbitro updating match statistics only
+          || (
+            isReferee()
+            && incoming().teamId == existing().teamId
+            && incoming().diff(existing()).affectedKeys().hasOnly(['stats', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(playerId) && isAdmin();
+    }
+
+    // --- Collection 7: /player_private/{playerId} (Isolated UFRO Student PII) ---
+    match /player_private/{playerId} {
+      allow get: if isVerified()
+        && isValidId(playerId)
+        && (
+          isAdmin()
+          || isLinkedPlayer(playerId)
+          || isDelegadoOf(existing().teamId)
+        );
+      allow list: if isAdmin();
+
+      allow create: if isVerified()
+        && isValidId(playerId)
+        && isValidPlayerPrivate(incoming())
+        && incoming().playerId == playerId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isDelegado()
+            && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
+            && (
+              isDelegadoOf(incoming().teamId)
+              || get(/databases/$(database)/documents/teams/$(incoming().teamId)).data.createdByUid == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isVerified()
+        && isValidId(playerId)
+        && isValidPlayerPrivate(incoming())
+        && incoming().playerId == existing().playerId
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'teamId',
+              'rut',
+              'numeroMatricula',
+              'correoInstitucional',
+              'fechaNacimiento',
+              'updatedAt'
+            ])
+          )
+          || (
+            isDelegadoOf(existing().teamId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'teamId',
+              'rut',
+              'numeroMatricula',
+              'correoInstitucional',
+              'fechaNacimiento',
+              'updatedAt'
+            ])
+          )
+          || (
+            isLinkedPlayer(playerId)
+            && incoming().teamId == existing().teamId
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'rut',
+              'numeroMatricula',
+              'correoInstitucional',
+              'fechaNacimiento',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(playerId) && isAdmin();
+    }
+
+    // --- Collection 8: /matches/{matchId} (Matches with Terminal State Lock) ---
+    match /matches/{matchId} {
+      allow get: if isValidId(matchId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(matchId)
+        && isValidMatch(incoming())
+        && incoming().id == matchId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerified()
+        && isValidId(matchId)
+        && isValidMatch(incoming())
+        && incoming().id == existing().id
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Tier 1: Admin override (can edit scheduled, live, or correct finalized matches)
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'groupName',
+              'fase',
+              'jornada',
+              'fecha',
+              'hora',
+              'cancha',
+              'homeTeamId',
+              'awayTeamId',
+              'homeScore',
+              'awayScore',
+              'status',
+              'periodLabel',
+              'clock',
+              'periods',
+              'fouls',
+              'timeouts',
+              'events',
+              'refereeId',
+              'scoresheetValidation',
+              'updatedAt'
+            ])
+          )
+          // Tier 2: Referee live scoreboard & finalization (Terminal State Locked once FINALIZADO)
+          || (
+            isReferee()
+            && existing().status != 'FINALIZADO'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'homeScore',
+              'awayScore',
+              'status',
+              'periodLabel',
+              'clock',
+              'periods',
+              'fouls',
+              'timeouts',
+              'events',
+              'scoresheetValidation',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(matchId) && isAdmin();
+    }
+
+    // --- Collection 9: /transfers/{transferId} (Post-Group Transfers) ---
+    match /transfers/{transferId} {
+      allow get: if isValidId(transferId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(transferId)
+        && isValidTransfer(incoming())
+        && incoming().id == transferId
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          isAdmin()
+          || (
+            isDelegado()
+            && (isDelegadoOf(incoming().fromTeamId) || isDelegadoOf(incoming().toTeamId))
+            && exists(/databases/$(database)/documents/configs/$(incoming().disciplineId))
+            && get(/databases/$(database)/documents/configs/$(incoming().disciplineId)).data.transferenciasAbiertas == true
+          )
+        );
+
+      allow update: if isVerified()
+        && isValidId(transferId)
+        && isValidTransfer(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'motivo'])
+        && isAdmin();
+
+      allow delete: if isValidId(transferId) && isAdmin();
+    }
+
+    // --- Collection 10: /mvp_votes/{voteId} (Live-Hour MVP Voting for All Roles) ---
+    match /mvp_votes/{voteId} {
+      allow get: if isValidId(voteId);
+      allow list: if resource.data.matchId is string && resource.data.matchId.size() <= 128;
+
+      allow create: if isVerified()
+        && isValidId(voteId)
+        && isValidMvpVote(incoming())
+        && incoming().voterUid == request.auth.uid
+        && voteId == incoming().matchId + '_' + request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(voteId)
+        && isValidMvpVote(incoming())
+        && incoming().voterUid == existing().voterUid
+        && incoming().matchId == existing().matchId
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().voterUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['playerId', 'playerName', 'teamId', 'updatedAt'])
+          )
+          || isAdmin()
+        );
+
+      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+    }
+
+    // --- Collection 11: /photos/{photoId} (Official Photography Index + Drive Links) ---
+    match /photos/{photoId} {
+      allow get: if isValidId(photoId);
+      allow list: if resource.data.season is string && resource.data.season.size() <= 16;
+
+      allow create: if isVerified()
+        && isValidId(photoId)
+        && isValidPhotoEntry(incoming())
+        && incoming().id == photoId
+        && incoming().photographerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && isPhotographer();
+
+      allow update: if isVerified()
+        && isValidId(photoId)
+        && isValidPhotoEntry(incoming())
+        && incoming().id == existing().id
+        && incoming().photographerUid == existing().photographerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'disciplineId', 'stageLabel', 'matchLabel', 'season'])
+        && (isAdmin() || (isPhotographer() && existing().photographerUid == request.auth.uid));
+
+      allow delete: if isValidId(photoId)
+        && isVerified()
+        && (isAdmin() || (isPhotographer() && existing().photographerUid == request.auth.uid));
+    }
+  }
+}

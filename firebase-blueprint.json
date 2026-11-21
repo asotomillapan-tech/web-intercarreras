@@ -1,0 +1,744 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuario autenticado con Google Sign-In del Campeonato Intercarreras UFRO con rol RBAC y equipos favoritos.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "enum": ["tradicional", "jugador", "delegado", "arbitro", "fotografo", "admin"]
+        },
+        "favoriteTeamIds": {
+          "type": "array",
+          "description": "Lista acotada de hasta 20 IDs de equipos favoritos para notificaciones."
+        },
+        "linkedPlayerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "delegatedTeamId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "notificationsEnabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "role", "favoriteTeamIds", "notificationsEnabled", "createdAt", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Registro confiable de administradores con privilegios de gestión de campeonato y designación de otros administradores.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "grantedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "grantedBy", "createdAt"]
+    },
+    "TournamentSettings": {
+      "title": "TournamentSettings",
+      "description": "Configuración global del campeonato, carpeta raíz de Google Drive para subida de fotos y estado de Google Sheets.",
+      "type": "object",
+      "properties": {
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "drive2025FolderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "driveUploadRootFolderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "driveUploadRootFolderName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "lastSyncedSpreadsheetId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "lastSyncedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["temporada", "updatedAt"]
+    },
+    "DisciplineConfig": {
+      "title": "DisciplineConfig",
+      "description": "Configuración anual de cupos, grupos, playoffs, inscripciones y transferencias por disciplina.",
+      "type": "object",
+      "properties": {
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "maxCupos": {
+          "type": "integer"
+        },
+        "numGrupos": {
+          "type": "integer"
+        },
+        "clasificadosPorGrupo": {
+          "type": "integer"
+        },
+        "formatoPlayoff": {
+          "type": "integer",
+          "enum": [4, 8, 16]
+        },
+        "inscripcionesAbiertas": {
+          "type": "boolean"
+        },
+        "transferenciasAbiertas": {
+          "type": "boolean"
+        },
+        "maxTransferenciasPorEquipo": {
+          "type": "integer"
+        },
+        "faseActual": {
+          "type": "string",
+          "enum": ["INSCRIPCIONES", "FASE_GRUPOS", "TRANSFERENCIAS", "PLAYOFFS"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "disciplineId",
+        "temporada",
+        "maxCupos",
+        "numGrupos",
+        "clasificadosPorGrupo",
+        "formatoPlayoff",
+        "inscripcionesAbiertas",
+        "transferenciasAbiertas",
+        "maxTransferenciasPorEquipo",
+        "faseActual",
+        "updatedAt"
+      ]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Equipo oficial inscrito en una de las 8 disciplinas del Campeonato Intercarreras UFRO.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nombre": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "sigla": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 8
+        },
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "carrera": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "facultad": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "logrosAnteriores": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "createdByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "nombre", "sigla", "disciplineId", "carrera", "facultad", "groupName", "createdAt", "updatedAt"]
+    },
+    "PlayerPublic": {
+      "title": "PlayerPublic",
+      "description": "Perfil deportivo público de un estudiante inscrito (sin datos PII como RUT, matrícula o correo).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "teamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "dorsal": {
+          "type": "integer"
+        },
+        "posicion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "nombre": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "apellidoPaterno": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "apellidoMaterno": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "carrera": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "facultad": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "nivelAcademico": {
+          "type": "string",
+          "enum": ["Pregrado", "Postgrado"]
+        },
+        "fotografia": {
+          "type": "string",
+          "maxLength": 160000
+        },
+        "esSeleccionadoUfro": {
+          "type": "boolean"
+        },
+        "stats": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "teamId",
+        "disciplineId",
+        "dorsal",
+        "posicion",
+        "nombre",
+        "apellidoPaterno",
+        "apellidoMaterno",
+        "carrera",
+        "facultad",
+        "nivelAcademico",
+        "fotografia",
+        "esSeleccionadoUfro",
+        "stats",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PlayerPrivate": {
+      "title": "PlayerPrivate",
+      "description": "Datos PII institucionales UFRO aislados (RUT, matrícula, correo institucional y fecha de nacimiento), accesibles solo por Admin, Delegado del equipo o el propio Jugador.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "teamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "rut": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 20
+        },
+        "numeroMatricula": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 30
+        },
+        "correoInstitucional": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "fechaNacimiento": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["playerId", "teamId", "rut", "numeroMatricula", "correoInstitucional", "fechaNacimiento", "updatedAt"]
+    },
+    "Match": {
+      "title": "Match",
+      "description": "Encuentro oficial del campeonato con estado, programación, parciales y validación de planilla.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "fase": {
+          "type": "string",
+          "enum": ["Grupos", "Octavos", "Cuartos", "Semifinal", "Final"]
+        },
+        "jornada": {
+          "type": "integer"
+        },
+        "fecha": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "hora": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 12
+        },
+        "cancha": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "homeTeamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "awayTeamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "homeScore": {
+          "type": "integer"
+        },
+        "awayScore": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PROGRAMADO", "EN_VIVO", "FINALIZADO"]
+        },
+        "periodLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "clock": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "periods": {
+          "type": "array"
+        },
+        "fouls": {
+          "type": "object"
+        },
+        "timeouts": {
+          "type": "object"
+        },
+        "events": {
+          "type": "array"
+        },
+        "refereeId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "scoresheetValidation": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "disciplineId",
+        "groupName",
+        "fase",
+        "jornada",
+        "fecha",
+        "hora",
+        "cancha",
+        "homeTeamId",
+        "awayTeamId",
+        "homeScore",
+        "awayScore",
+        "status",
+        "periodLabel",
+        "clock",
+        "periods",
+        "fouls",
+        "timeouts",
+        "events",
+        "refereeId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TransferRecord": {
+      "title": "TransferRecord",
+      "description": "Registro público de transferencia entre equipos habilitada tras la fase de grupos (sin RUT PII).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "playerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "fromTeamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fromTeamName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "toTeamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "toTeamName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "fecha": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "motivo": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300
+        },
+        "estado": {
+          "type": "string",
+          "enum": ["APROBADA", "PENDIENTE", "RECHAZADA"]
+        },
+        "createdByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "disciplineId",
+        "playerId",
+        "playerName",
+        "fromTeamId",
+        "fromTeamName",
+        "toTeamId",
+        "toTeamName",
+        "fecha",
+        "motivo",
+        "estado",
+        "createdByUid",
+        "createdAt"
+      ]
+    },
+    "MvpVote": {
+      "title": "MvpVote",
+      "description": "Voto de usuario por el Jugador Más Valioso (MVP) durante el horario programado del encuentro.",
+      "type": "object",
+      "properties": {
+        "matchId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "playerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "teamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "voterUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["matchId", "disciplineId", "playerId", "playerName", "teamId", "voterUid", "createdAt", "updatedAt"]
+    },
+    "PhotoEntry": {
+      "title": "PhotoEntry",
+      "description": "Metadatos de fotografía oficial subida directamente a Google Drive (estructura por disciplina/fase/encuentro).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "disciplineId": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "stageLabel": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "matchLabel": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "season": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "source": {
+          "type": "string",
+          "enum": ["upload", "drive"]
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "driveFileId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "driveWebViewLink": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "driveFolderPath": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "photographerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "photographerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "disciplineId", "matchLabel", "season", "source", "imageUrl", "photographerUid", "photographerName", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfiles de usuario con rol RBAC, favoritos y vínculo opcional a jugador o equipo."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Lista confiable de administradores con privilegios exclusivos de cambio de rol y designación de otros admins."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/TournamentSettings" },
+      "description": "Configuración global del campeonato (carpeta raíz Drive 2026 y sincronización Google Sheets)."
+    },
+    "/configs/{disciplineId}": {
+      "schema": { "$ref": "#/entities/DisciplineConfig" },
+      "description": "Configuración anual de cupos, grupos, playoffs, inscripciones y transferencias por disciplina."
+    },
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "Equipos oficiales inscritos por disciplina."
+    },
+    "/players/{playerId}": {
+      "schema": { "$ref": "#/entities/PlayerPublic" },
+      "description": "Perfiles deportivos públicos de jugadores (sin datos PII sensibles)."
+    },
+    "/player_private/{playerId}": {
+      "schema": { "$ref": "#/entities/PlayerPrivate" },
+      "description": "PII estudiantil UFRO aislado (RUT, matrícula, correo institucional, fecha nacimiento)."
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/Match" },
+      "description": "Encuentros oficiales con control arbitral y bloqueo de estado terminal al finalizar."
+    },
+    "/transfers/{transferId}": {
+      "schema": { "$ref": "#/entities/TransferRecord" },
+      "description": "Historial oficial de transferencias post-fase de grupos."
+    },
+    "/mvp_votes/{voteId}": {
+      "schema": { "$ref": "#/entities/MvpVote" },
+      "description": "Votos individuales de MVP por partido (un documento por combinación partido-usuario)."
+    },
+    "/photos/{photoId}": {
+      "schema": { "$ref": "#/entities/PhotoEntry" },
+      "description": "Índice fotográfico oficial conectado a Google Drive y subidas de prensa UFRO."
+    }
+  }
+}

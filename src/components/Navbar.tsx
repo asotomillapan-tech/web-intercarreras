@@ -1,0 +1,339 @@
+import { useMemo, useState } from 'react';
+import { Bell, LogIn, Menu, Shield, User, X } from 'lucide-react';
+import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
+import {
+  buildFavoriteNotifications,
+  canAccessAdminPanel,
+  ROLE_META,
+} from '../domain/rbacEngine';
+import type { AppUserProfile, Match, TournamentState } from '../types/tournament';
+
+export type NavSection =
+  | 'inicio'
+  | 'posiciones'
+  | 'jugadores'
+  | 'galeria'
+  | 'inscripciones'
+  | 'transferencias'
+  | 'cuenta'
+  | 'panel';
+
+interface NavbarProps {
+  activeSection: NavSection;
+  currentUser: AppUserProfile | null;
+  state: TournamentState;
+  onNavigate: (section: NavSection) => void;
+  onOpenAuth: () => void;
+  onOpenMatchModal: (match: Match) => void;
+}
+
+const NAV_ITEMS: Array<{ id: NavSection; label: string }> = [
+  { id: 'inicio', label: 'Inicio' },
+  { id: 'posiciones', label: 'Posiciones' },
+  { id: 'jugadores', label: 'Jugadores' },
+  { id: 'galeria', label: 'Galería' },
+  { id: 'inscripciones', label: 'Inscripciones' },
+  { id: 'transferencias', label: 'Transferencias' },
+];
+
+export function Navbar({
+  activeSection,
+  currentUser,
+  state,
+  onNavigate,
+  onOpenAuth,
+  onOpenMatchModal,
+}: NavbarProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const notifications = useMemo(
+    () => buildFavoriteNotifications(currentUser, state.matches, state.teams, state.mvpVotes),
+    [currentUser, state.matches, state.teams, state.mvpVotes]
+  );
+
+  const matchMap = useMemo(
+    () => new Map(state.matches.map((m) => [m.id, m])),
+    [state.matches]
+  );
+
+  const handleSelect = (section: NavSection) => {
+    onNavigate(section);
+    setMobileOpen(false);
+    setNotifOpen(false);
+  };
+
+  const hasOfficialAccess = canAccessAdminPanel(currentUser);
+
+  return (
+    <header className="sticky top-0 z-40 bg-[#0d0d0d] text-white border-b border-white/10">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 lg:gap-6">
+        {/* Zone 1: Single-line Brand Lockup */}
+        <button
+          type="button"
+          onClick={() => handleSelect('inicio')}
+          className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#707ef9]"
+        >
+          <img
+            src={LOGO_LIGHT_SVG}
+            alt="Isotipo Campeonato Intercarreras UFRO"
+            className="h-7 w-auto shrink-0"
+            referrerPolicy="no-referrer"
+          />
+          <span className="font-display text-base lg:text-lg font-bold tracking-wider uppercase text-white">
+            Intercarreras UFRO
+          </span>
+        </button>
+
+        {/* Zone 2: 6 concise single-line nav links */}
+        <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-6">
+          {NAV_ITEMS.map((item) => {
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSelect(item.id)}
+                className={`relative h-16 flex items-center text-sm font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
+                  isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                {item.label}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Medium desktop nav (compact spacing) */}
+        <nav aria-label="Navegación principal compacta" className="hidden lg:flex xl:hidden items-center gap-4">
+          {NAV_ITEMS.map((item) => {
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSelect(item.id)}
+                className={`relative h-16 flex items-center text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                {item.label}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Zone 3: Notifications + Account/Login + Panel Oficial */}
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          {/* Notifications Bell (visible when signed in) */}
+          {currentUser && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setNotifOpen((prev) => !prev)}
+                aria-label="Abrir notificaciones de equipos favoritos"
+                aria-expanded={notifOpen}
+                className="relative inline-flex items-center justify-center w-9 h-9 border border-white/15 hover:border-[#707ef9] text-neutral-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <Bell className="w-4 h-4" />
+                {notifications.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums flex items-center justify-center">
+                    {notifications.length}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white text-[#0d0d0d] border border-neutral-200 shadow-2xl z-50">
+                  <div className="bg-[#0d0d0d] text-white px-4 py-3 flex items-center justify-between border-b border-white/10">
+                    <span className="font-display text-xs font-bold uppercase tracking-widest">
+                      Notificaciones Favoritos ({notifications.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelect('cuenta')}
+                      className="text-[11px] text-[#707ef9] hover:underline cursor-pointer"
+                    >
+                      Gestionar
+                    </button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-neutral-200">
+                    {notifications.length === 0 ? (
+                      <p className="p-4 text-xs text-neutral-500">
+                        Guarda equipos en favoritos desde Mi Cuenta o Posiciones para recibir alertas.
+                      </p>
+                    ) : (
+                      notifications.slice(0, 6).map((n) => {
+                        const m = matchMap.get(n.matchId);
+                        return (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => {
+                              setNotifOpen(false);
+                              if (m) onOpenMatchModal(m);
+                            }}
+                            className="w-full text-left p-3.5 hover:bg-[#f5f6f8] transition-colors block cursor-pointer"
+                          >
+                            <p
+                              className={`text-[11px] font-bold uppercase tracking-wider ${
+                                n.isLiveMvp ? 'text-[#707ef9]' : 'text-[#0d0d0d]'
+                              }`}
+                            >
+                              {n.title}
+                            </p>
+                            <p className="text-xs text-neutral-600 mt-1 line-clamp-2">{n.detail}</p>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Account / Login & Official Panel CTAs */}
+          {currentUser ? (
+            <>
+              <button
+                type="button"
+                onClick={() => handleSelect('cuenta')}
+                className={`hidden sm:inline-flex items-center gap-2 px-3 py-2 border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeSection === 'cuenta'
+                    ? 'bg-white text-[#0d0d0d] border-white'
+                    : 'border-white/20 text-white hover:border-[#707ef9]'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                <span className="max-w-[110px] truncate">
+                  {currentUser.displayName.split(' ')[0]}
+                </span>
+                <span className="text-[10px] uppercase tracking-wider text-[#707ef9] font-display font-bold">
+                  {ROLE_META[currentUser.role].shortLabel}
+                </span>
+              </button>
+
+              {hasOfficialAccess && (
+                <button
+                  type="button"
+                  onClick={() => handleSelect('panel')}
+                  className={`hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    activeSection === 'panel'
+                      ? 'bg-white text-[#0d0d0d]'
+                      : 'bg-[#707ef9] text-white hover:bg-[#5766eb]'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Panel Oficial</span>
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenAuth}
+              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Iniciar Sesión</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setMobileOpen((prev) => !prev)}
+            aria-label={mobileOpen ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'}
+            aria-expanded={mobileOpen}
+            className="lg:hidden inline-flex items-center justify-center w-10 h-10 text-white hover:text-[#707ef9] transition-colors cursor-pointer"
+          >
+            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Navigation Drawer */}
+      {mobileOpen && (
+        <nav
+          aria-label="Navegación móvil"
+          className="lg:hidden bg-[#0d0d0d] border-t border-white/10 px-4 py-3 space-y-1"
+        >
+          {NAV_ITEMS.map((item) => {
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSelect(item.id)}
+                className={`w-full text-left px-3 py-3 text-sm font-medium transition-colors block cursor-pointer ${
+                  isActive
+                    ? 'text-white bg-white/5 border-b border-[#707ef9]'
+                    : 'text-neutral-300 hover:text-white'
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+          <div className="pt-2 space-y-2 border-t border-white/10">
+            {currentUser ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSelect('cuenta')}
+                  className="w-full py-2.5 px-3 border border-white/20 text-white text-left text-xs font-display font-bold uppercase tracking-widest flex items-center justify-between"
+                >
+                  <span>Mi Cuenta · {currentUser.displayName}</span>
+                  <span className="text-[#707ef9]">{ROLE_META[currentUser.role].shortLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    onOpenAuth();
+                  }}
+                  className="w-full py-2.5 px-3 bg-white/10 text-white font-display font-bold uppercase tracking-widest text-xs"
+                >
+                  Cambiar cuenta / Cerrar sesión
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileOpen(false);
+                  onOpenAuth();
+                }}
+                className="w-full py-3 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-sm"
+              >
+                Iniciar Sesión UFRO
+              </button>
+            )}
+
+            {hasOfficialAccess && (
+              <button
+                type="button"
+                onClick={() => handleSelect('panel')}
+                className="w-full py-3 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-sm"
+              >
+                Panel Oficial
+              </button>
+            )}
+          </div>
+        </nav>
+      )}
+    </header>
+  );
+}
