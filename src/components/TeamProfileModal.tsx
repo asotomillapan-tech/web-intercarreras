@@ -12,7 +12,11 @@ import {
 } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
 import { canRefereeMatches, shouldRevealPublicMatchData } from '../domain/rbacEngine';
-import { computeTeamHistoricalStats } from '../domain/tournamentEngine';
+import {
+  computeTeamHistoricalStats,
+  computeTeamMatchProgression,
+} from '../domain/tournamentEngine';
+import { TeamProgressionChart } from './TeamProgressionChart';
 import type {
   AppUserProfile,
   Match,
@@ -66,6 +70,11 @@ export function TeamProfileModal({
     if (!team || !disciplineMeta) return null;
     return computeTeamHistoricalStats(team, disciplineMeta.sportType, matches);
   }, [team, disciplineMeta, matches]);
+
+  const matchProgression = useMemo(() => {
+    if (!team) return [];
+    return computeTeamMatchProgression(team, matches, teamMap);
+  }, [team, matches, teamMap]);
 
   const mvpAwardsCount = useMemo(() => {
     if (!team || !historicalStats) return 0;
@@ -161,11 +170,11 @@ export function TeamProfileModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-end sm:self-start">
+          <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
             <button
               type="button"
               onClick={() => onToggleFavoriteTeam(team.id)}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display uppercase tracking-widest border transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display uppercase tracking-widest border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 isFavorite
                   ? 'bg-[#707ef9] border-[#707ef9] text-white'
                   : 'border-white/25 text-white hover:border-[#707ef9]'
@@ -305,6 +314,13 @@ export function TeamProfileModal({
               </div>
             </div>
           </section>
+
+          {/* COMPARATIVE PROGRESSION CHART (RECHARTS) */}
+          <TeamProgressionChart
+            progression={matchProgression}
+            sportType={disciplineMeta.sportType}
+            teamName={team.nombre}
+          />
 
           {/* COMPLETE MATCH HISTORY SECTION */}
           <section className="space-y-4">

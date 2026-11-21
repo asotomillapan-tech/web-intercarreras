@@ -4,6 +4,7 @@ import {
   compareScoresheetWithLive,
   computeStandings,
   computeTeamHistoricalStats,
+  computeTeamMatchProgression,
   formatRut,
   generateEquitableGroups,
   generatePlayoffBracket,
@@ -331,3 +332,90 @@ test('computeTeamHistoricalStats aggregates complete match history across groups
   assert.equal(stats.history[0].match.id, 'm4');
   assert.equal(stats.history[0].outcome, 'PROGRAMADO');
 });
+
+test('computeTeamMatchProgression returns chronological per-match and cumulative favor/contra series for finalized matches only', () => {
+  const teamA: Team = {
+    id: 'a',
+    nombre: 'Ingeniería FC',
+    sigla: 'ING',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ingeniería Civil',
+    facultad: 'FICA',
+    groupName: 'Grupo A',
+  };
+  const lookup = new Map<string, Pick<Team, 'nombre' | 'sigla'>>([
+    ['b', { nombre: 'Medicina FC', sigla: 'MED' }],
+    ['c', { nombre: 'Derecho FC', sigla: 'DER' }],
+    ['d', { nombre: 'Kinesiología FC', sigla: 'KIN' }],
+  ]);
+  const makeMatch = (overrides: Partial<Match>): Match => ({
+    id: 'm1',
+    disciplineId: 'f7-h-1',
+    groupName: 'Grupo A',
+    fase: 'Grupos',
+    jornada: 1,
+    fecha: '2026-10-01',
+    hora: '18:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a',
+    awayTeamId: 'b',
+    homeScore: 0,
+    awayScore: 0,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 0, away: 0 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+    ...overrides,
+  });
+
+  // Intentionally unsorted input with PROGRAMADO and EN_VIVO matches mixed in
+  const matches: Match[] = [
+    makeMatch({ id: 'm3', fase: 'Cuartos', jornada: 3, fecha: '2026-10-15', homeTeamId: 'a', awayTeamId: 'd', homeScore: 1, awayScore: 3 }),
+    makeMatch({ id: 'm4', jornada: 4, fecha: '2026-10-22', homeTeamId: 'a', awayTeamId: 'b', homeScore: 5, awayScore: 0, status: 'PROGRAMADO' }),
+    makeMatch({ id: 'm1', jornada: 1, fecha: '2026-10-01', homeTeamId: 'a', awayTeamId: 'b', homeScore: 4, awayScore: 1 }),
+    makeMatch({ id: 'm5', jornada: 5, fecha: '2026-10-29', homeTeamId: 'a', awayTeamId: 'c', homeScore: 1, awayScore: 0, status: 'EN_VIVO' }),
+    makeMatch({ id: 'm2', jornada: 2, fecha: '2026-10-08', homeTeamId: 'c', awayTeamId: 'a', homeScore: 2, awayScore: 2 }),
+  ];
+
+  const series = computeTeamMatchProgression(teamA, matches, lookup);
+  assert.equal(series.length, 3);
+
+  assert.equal(series[0].matchId, 'm1');
+  assert.equal(series[0].label, 'F1');
+  assert.equal(series[0].opponentName, 'Medicina FC');
+  assert.equal(series[0].favor, 4);
+  assert.equal(series[0].contra, 1);
+  assert.equal(series[0].acumuladoFavor, 4);
+  assert.equal(series[0].acumuladoContra, 1);
+  assert.equal(series[0].acumuladoDiferencia, 3);
+  assert.equal(series[0].outcome, 'G');
+
+  assert.equal(series[1].matchId, 'm2');
+  assert.equal(series[1].label, 'F2');
+  assert.equal(series[1].isHome, false);
+  assert.equal(series[1].favor, 2);
+  assert.equal(series[1].contra, 2);
+  assert.equal(series[1].acumuladoFavor, 6);
+  assert.equal(series[1].acumuladoContra, 3);
+  assert.equal(series[1].acumuladoDiferencia, 3);
+  assert.equal(series[1].outcome, 'E');
+
+  assert.equal(series[2].matchId, 'm3');
+  assert.equal(series[2].label, '4tos');
+  assert.equal(series[2].favor, 1);
+  assert.equal(series[2].contra, 3);
+  assert.equal(series[2].diferencia, -2);
+  assert.equal(series[2].acumuladoFavor, 7);
+  assert.equal(series[2].acumuladoContra, 6);
+  assert.equal(series[2].acumuladoDiferencia, 1);
+  assert.equal(series[2].outcome, 'P');
+
+  // Empty state when no finalized matches exist
+  const emptySeries = computeTeamMatchProgression(teamA, [matches[1], matches[3]], lookup);
+  assert.deepEqual(emptySeries, []);
+});
+

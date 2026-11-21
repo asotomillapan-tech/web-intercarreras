@@ -627,3 +627,102 @@ export function computeTeamHistoricalStats(
     history,
   };
 }
+
+export interface TeamProgressionPoint {
+  matchId: string;
+  index: number;
+  label: string;
+  fullLabel: string;
+  fecha: string;
+  fase: Match['fase'];
+  jornada: number;
+  opponentId: string;
+  opponentName: string;
+  opponentSigla: string;
+  isHome: boolean;
+  outcome: 'G' | 'E' | 'P';
+  favor: number;
+  contra: number;
+  diferencia: number;
+  acumuladoFavor: number;
+  acumuladoContra: number;
+  acumuladoDiferencia: number;
+}
+
+/**
+ * Computes chronological match-by-match and cumulative progression of goals/points/sets
+ * scored (a favor) vs conceded (en contra) across all finalized matches for a team.
+ */
+export function computeTeamMatchProgression(
+  team: Team,
+  allMatches: Match[],
+  teamLookup?: Map<string, Pick<Team, 'nombre' | 'sigla'>>
+): TeamProgressionPoint[] {
+  const finishedMatches = allMatches
+    .filter(
+      (m) =>
+        m.status === 'FINALIZADO' &&
+        (m.homeTeamId === team.id || m.awayTeamId === team.id)
+    )
+    .sort((a, b) => {
+      const aDateKey = `${a.fecha} ${a.hora}`;
+      const bDateKey = `${b.fecha} ${b.hora}`;
+      if (aDateKey !== bDateKey) return aDateKey.localeCompare(bDateKey);
+      if (a.jornada !== b.jornada) return a.jornada - b.jornada;
+      return a.id.localeCompare(b.id);
+    });
+
+  let acumuladoFavor = 0;
+  let acumuladoContra = 0;
+
+  return finishedMatches.map((match, idx) => {
+    const isHome = match.homeTeamId === team.id;
+    const opponentId = isHome ? match.awayTeamId : match.homeTeamId;
+    const opponentInfo = teamLookup?.get(opponentId);
+    const favor = isHome ? match.homeScore : match.awayScore;
+    const contra = isHome ? match.awayScore : match.homeScore;
+    const diferencia = favor - contra;
+
+    acumuladoFavor += favor;
+    acumuladoContra += contra;
+
+    const outcome: 'G' | 'E' | 'P' =
+      favor > contra ? 'G' : favor < contra ? 'P' : 'E';
+
+    const shortPhaseLabel =
+      match.fase === 'Grupos'
+        ? `F${match.jornada}`
+        : match.fase === 'Octavos'
+        ? '8vos'
+        : match.fase === 'Cuartos'
+        ? '4tos'
+        : match.fase === 'Semifinal'
+        ? 'Semi'
+        : 'Final';
+
+    return {
+      matchId: match.id,
+      index: idx + 1,
+      label: shortPhaseLabel,
+      fullLabel:
+        match.fase === 'Grupos'
+          ? `Fecha ${match.jornada} · ${match.groupName}`
+          : `${match.fase} · Jornada ${match.jornada}`,
+      fecha: match.fecha,
+      fase: match.fase,
+      jornada: match.jornada,
+      opponentId,
+      opponentName: opponentInfo?.nombre ?? opponentId,
+      opponentSigla: opponentInfo?.sigla ?? opponentId.slice(0, 3).toUpperCase(),
+      isHome,
+      outcome,
+      favor,
+      contra,
+      diferencia,
+      acumuladoFavor,
+      acumuladoContra,
+      acumuladoDiferencia: acumuladoFavor - acumuladoContra,
+    };
+  });
+}
+
