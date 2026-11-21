@@ -1,4 +1,14 @@
-import { DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  buildStandardSheetPayloads,
+  columnNumberToA1,
+  MANAGED_SHEET_TABS,
+  mergeTournamentWithSheets,
+  type DeletedEntityIds,
+  type ManagedSheetTabName,
+  type SheetImportDelta,
+  type SheetMergeStats,
+  type SheetTabRows,
+} from '../domain/sheetsMergeEngine';
 import type {
   DisciplineId,
   MasterSheetKey,
@@ -15,6 +25,9 @@ export interface SheetSyncSummary {
   tabsUpdated: string[];
   totalRowsWritten: number;
   syncedAt: string;
+  mode: 'bidirectional' | 'pull';
+  imports: SheetImportDelta;
+  mergeStats: SheetMergeStats;
 }
 
 export interface MasterSheetInspection {
@@ -100,20 +113,38 @@ export const MASTER_SHEET_GROUP_MAP: Record<MasterSheetKey, MasterSheetGroupMeta
     MasterSheetGroupMeta
   >;
 
-/**
- * Dedicated managed tab names prefixed with "Web_" so syncing into an existing Master Sheet
- * (such as the official Fútbol Hombres Master) NEVER overwrites or deletes the organizer's
- * own custom tabs, formulas, or historical sheets.
- */
-export const TEMPLATE_TABS = [
-  'Web_Equipos',
-  'Web_Jugadores',
-  'Web_Partidos',
-  'Web_Transferencias',
-  'Web_Formato',
-] as const;
+export const TEMPLATE_TABS = MANAGED_SHEET_TABS;
+export type TemplateTabName = ManagedSheetTabName;
 
-export type TemplateTabName = (typeof TEMPLATE_TABS)[number];
+// ---------------------------------------------------------------------------
+// Per-Spreadsheet 3-Way Sync Baseline Storage (localStorage)
+// ---------------------------------------------------------------------------
+
+const BASELINE_STORAGE_PREFIX = 'ufro_sheets_sync_baseline_v1_';
+
+function loadSyncBaseline(spreadsheetId: string): Partial<SheetTabRows> | undefined {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return undefined;
+    const raw = window.localStorage.getItem(`${BASELINE_STORAGE_PREFIX}${spreadsheetId}`);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<SheetTabRows>;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveSyncBaseline(spreadsheetId: string, mergedTabs: SheetTabRows): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(
+      `${BASELINE_STORAGE_PREFIX}${spreadsheetId}`,
+      JSON.stringify(mergedTabs)
+    );
+  } catch {
+    // Non-fatal if storage quota is full
+  }
+}
 
 /**
  * Extracts a clean Google Spreadsheet ID whether the user pastes a full URL or a bare ID.
@@ -142,7 +173,8 @@ export function getConfiguredMasterEntries(
   masterSheets: MasterSheetsConfig | undefined
 ): Array<{ key: MasterSheetKey; meta: MasterSheetGroupMeta; spreadsheetId: string }> {
   if (!masterSheets) return [];
-  const entries: Array<{ key: MasterSheetKey; meta: MasterSheetGroupMeta; spreadsheetId: string }> = [];
+  const entries: Array<{ key: MasterSheetKey; meta: MasterSheetGroupMeta; spreadsheetId: string }> =
+    [];
   for (const meta of MASTER_SHEET_GROUPS) {
     const id = extractSpreadsheetId(masterSheets[meta.key] ?? '');
     if (id) {
@@ -156,194 +188,7 @@ export function buildTemplateSheetPayloads(
   state: TournamentState,
   disciplineFilter?: DisciplineId[]
 ): Record<TemplateTabName, string[][]> {
-  const allowedSet = disciplineFilter ? new Set<DisciplineId>(disciplineFilter) : null;
-  const matchDiscipline = (d: DisciplineId) => !allowedSet || allowedSet.has(d);
-
-  const filteredTeams = state.teams.filter((t) => matchDiscipline(t.disciplineId));
-  const filteredPlayers = state.players.filter((p) => matchDiscipline(p.disciplineId));
-  const filteredMatches = state.matches.filter((m) => matchDiscipline(m.disciplineId));
-  const filteredTransfers = state.transfers.filter((tr) => matchDiscipline(tr.disciplineId));
-  const filteredConfigs = Object.values(state.configs).filter((cfg) =>
-    matchDiscipline(cfg.disciplineId)
-  );
-
-  const teamById = new Map(state.teams.map((t) => [t.id, t]));
-
-  const equiposRows: string[][] = [
-    [
-      'ID_Equipo',
-      'Disciplina',
-      'Grupo',
-      'Nombre_Equipo',
-      'Sigla',
-      'Carrera',
-      'Facultad',
-      'Correo_Capitan',
-      'Logros_Anteriores',
-    ],
-    ...filteredTeams.map((t) => [
-      t.id,
-      DISCIPLINE_MAP[t.disciplineId]?.nombre ?? t.disciplineId,
-      t.groupName,
-      t.nombre,
-      t.sigla,
-      t.carrera,
-      t.facultad,
-      t.capitanCorreo ?? '',
-      t.logrosAnteriores ?? '',
-    ]),
-  ];
-
-  // Exact 12 official UFRO fields + sports stats
-  const jugadoresRows: string[][] = [
-    [
-      'ID_Jugador',
-      'Disciplina',
-      'Equipo',
-      'Dorsal',
-      'Posicion',
-      'Nombre',
-      'Apellido_Paterno',
-      'Apellido_Materno',
-      'Carrera',
-      'Facultad',
-      'RUT',
-      'Numero_Matricula',
-      'Correo_Institucional',
-      'Nivel_Academico',
-      'Fecha_Nacimiento',
-      'Fotografia',
-      'Seleccionado_UFRO',
-      'PJ',
-      'Goles',
-      'Asistencias',
-      'Puntos',
-      'Aces',
-      'Bloqueos',
-    ],
-    ...filteredPlayers.map((p) => [
-      p.id,
-      DISCIPLINE_MAP[p.disciplineId]?.nombre ?? p.disciplineId,
-      teamById.get(p.teamId)?.nombre ?? p.teamId,
-      String(p.dorsal),
-      p.posicion,
-      p.nombre,
-      p.apellidoPaterno,
-      p.apellidoMaterno,
-      p.carrera,
-      p.facultad,
-      p.rut,
-      p.numeroMatricula,
-      p.correoInstitucional,
-      p.nivelAcademico,
-      p.fechaNacimiento,
-      p.fotografia
-        ? p.fotografia.startsWith('data:')
-          ? '[Imagen adjunta en web]'
-          : p.fotografia
-        : 'Sin foto',
-      p.esSeleccionadoUfro ? 'Sí' : 'No',
-      String(p.stats.partidosJugados),
-      String(p.stats.goles),
-      String(p.stats.asistencias),
-      String(p.stats.puntos),
-      String(p.stats.aces),
-      String(p.stats.bloqueos),
-    ]),
-  ];
-
-  const resultadosRows: string[][] = [
-    [
-      'ID_Partido',
-      'Disciplina',
-      'Fase',
-      'Grupo',
-      'Fecha',
-      'Hora',
-      'Cancha',
-      'Local',
-      'Marcador_Local',
-      'Marcador_Visita',
-      'Visita',
-      'Estado',
-      'Validacion_Planilla',
-    ],
-    ...filteredMatches.map((m) => [
-      m.id,
-      DISCIPLINE_MAP[m.disciplineId]?.nombre ?? m.disciplineId,
-      m.fase,
-      m.groupName,
-      m.fecha,
-      m.hora,
-      m.cancha,
-      teamById.get(m.homeTeamId)?.nombre ?? m.homeTeamId,
-      String(m.homeScore),
-      String(m.awayScore),
-      teamById.get(m.awayTeamId)?.nombre ?? m.awayTeamId,
-      m.status,
-      m.scoresheetValidation
-        ? `${m.scoresheetValidation.method} (${m.scoresheetValidation.refereeName})`
-        : 'Pendiente',
-    ]),
-  ];
-
-  const transferenciasRows: string[][] = [
-    [
-      'ID_Transferencia',
-      'Disciplina',
-      'Fecha',
-      'Jugador',
-      'RUT',
-      'Equipo_Origen',
-      'Equipo_Destino',
-      'Motivo',
-      'Estado',
-    ],
-    ...filteredTransfers.map((tr) => [
-      tr.id,
-      DISCIPLINE_MAP[tr.disciplineId]?.nombre ?? tr.disciplineId,
-      tr.fecha,
-      tr.playerName,
-      tr.playerRut ?? '',
-      tr.fromTeamName,
-      tr.toTeamName,
-      tr.motivo,
-      tr.estado,
-    ]),
-  ];
-
-  const configRows: string[][] = [
-    [
-      'Disciplina',
-      'Temporada',
-      'Cupos_Maximos',
-      'Num_Grupos',
-      'Clasificados_Por_Grupo',
-      'Formato_Playoff',
-      'Inscripciones_Abiertas',
-      'Transferencias_Abiertas',
-      'Fase_Actual',
-    ],
-    ...filteredConfigs.map((cfg) => [
-      DISCIPLINE_MAP[cfg.disciplineId]?.nombre ?? cfg.disciplineId,
-      cfg.temporada,
-      String(cfg.maxCupos),
-      String(cfg.numGrupos),
-      String(cfg.clasificadosPorGrupo),
-      `Top ${cfg.formatoPlayoff}`,
-      cfg.inscripcionesAbiertas ? 'Abiertas' : 'Cerradas',
-      cfg.transferenciasAbiertas ? 'Abiertas' : 'Cerradas',
-      cfg.faseActual,
-    ]),
-  ];
-
-  return {
-    Web_Equipos: equiposRows,
-    Web_Jugadores: jugadoresRows,
-    Web_Partidos: resultadosRows,
-    Web_Transferencias: transferenciasRows,
-    Web_Formato: configRows,
-  };
+  return buildStandardSheetPayloads(state, disciplineFilter);
 }
 
 /**
@@ -392,6 +237,54 @@ export async function inspectSpreadsheetMetadata(
 }
 
 /**
+ * Reads all existing managed Web_* tabs from Google Sheets (columns A:ZZ)
+ * so manual edits, Sheet-added rows, and extra user columns are NEVER overwritten.
+ */
+async function readManagedTabsFromSpreadsheet(
+  accessToken: string,
+  spreadsheetId: string,
+  existingTitles: Set<string>
+): Promise<Partial<SheetTabRows>> {
+  const presentTabs = TEMPLATE_TABS.filter((tab) => existingTitles.has(tab));
+  if (presentTabs.length === 0) {
+    return {};
+  }
+
+  const params = new URLSearchParams();
+  presentTabs.forEach((tab) => {
+    params.append('ranges', `'${tab}'!A:ZZ`);
+  });
+  params.set('valueRenderOption', 'FORMATTED_VALUE');
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Error leyendo datos actuales de Google Sheets (${res.status}): ${errText}`);
+  }
+
+  const data = (await res.json()) as {
+    valueRanges?: Array<{ range?: string; values?: string[][] }>;
+  };
+
+  const tabRows: Partial<SheetTabRows> = {};
+  (data.valueRanges ?? []).forEach((vr, index) => {
+    const tabName = presentTabs[index];
+    if (tabName) {
+      tabRows[tabName] = Array.isArray(vr.values)
+        ? vr.values.map((row) => row.map((cell) => String(cell ?? '')))
+        : [];
+    }
+  });
+
+  return tabRows;
+}
+
+/**
  * Creates a brand-new Master Google Sheet for a specific discipline group (or consolidated)
  * and immediately writes its managed Web_* tabs.
  */
@@ -422,12 +315,15 @@ export async function createMasterGoogleSheetForGroup(
   }
 
   const created = (await createRes.json()) as { spreadsheetId: string; spreadsheetUrl: string };
-  return syncMasterSheet(accessToken, masterKey, created.spreadsheetId, state, created.spreadsheetUrl);
+  return syncMasterSheet(
+    accessToken,
+    masterKey,
+    created.spreadsheetId,
+    state,
+    created.spreadsheetUrl
+  );
 }
 
-/**
- * Backward-compatible alias for creating a consolidated Master Sheet.
- */
 export async function createMasterGoogleSheet(
   accessToken: string,
   state: TournamentState
@@ -436,18 +332,65 @@ export async function createMasterGoogleSheet(
 }
 
 /**
- * Synchronizes a specific discipline group's Master Sheet.
- * - Fetches existing tabs first (never assumes hardcoded tab names).
- * - Creates missing Web_* tabs without touching the organizer's own custom tabs.
- * - Clears only the 5 managed Web_* tabs so deleted/edited records leave no stale rows.
- * - Writes filtered rows for the disciplines belonging to that Master Sheet.
+ * Read-Only Pull from Google Sheets -> Web/Firestore.
+ * Reads existing Web_* tabs and computes new/updated entities edited in Google Sheets
+ * WITHOUT modifying a single cell in Google Sheets.
+ */
+export async function pullChangesFromMasterSheet(
+  accessToken: string,
+  masterKey: MasterSheetKey,
+  spreadsheetId: string,
+  state: TournamentState
+): Promise<SheetSyncSummary> {
+  const cleanId = extractSpreadsheetId(spreadsheetId);
+  const metaGroup = MASTER_SHEET_GROUP_MAP[masterKey];
+  const info = await inspectSpreadsheetMetadata(accessToken, cleanId);
+  const existingTitles = new Set(info.existingTabs);
+
+  const sheetTabs = await readManagedTabsFromSpreadsheet(accessToken, cleanId, existingTitles);
+  const baselineTabs = loadSyncBaseline(cleanId);
+
+  const merged = mergeTournamentWithSheets({
+    webState: state,
+    sheetTabs,
+    baselineTabs,
+    disciplineFilter: metaGroup.disciplineIds,
+  });
+
+  // Update baseline to reflect the merged snapshot after pull
+  saveSyncBaseline(cleanId, merged.mergedTabs);
+
+  return {
+    masterKey,
+    masterLabel: metaGroup.label,
+    spreadsheetId: cleanId,
+    spreadsheetTitle: info.title,
+    spreadsheetUrl: info.spreadsheetUrl,
+    tabsUpdated: TEMPLATE_TABS.filter((t) => existingTitles.has(t)),
+    totalRowsWritten: 0,
+    syncedAt: new Date().toISOString(),
+    mode: 'pull',
+    imports: merged.imports,
+    mergeStats: merged.stats,
+  };
+}
+
+/**
+ * Bidirectional Non-Destructive Synchronization for a Master Sheet:
+ * 1. Reads current Web_* rows from Google Sheets BEFORE any write.
+ * 2. Performs a 3-way field merge preserving all edits made in Google Sheets,
+ *    rows added directly in Google Sheets, and any extra custom user columns.
+ * 3. Writes the merged table back to Sheets (clearing ONLY trailing excess rows
+ *    strictly below the merged row count, never wiping the whole tab).
+ * 4. Returns all Sheet-side changes (`imports`) so the app immediately persists them to Firestore.
  */
 export async function syncMasterSheet(
   accessToken: string,
   masterKey: MasterSheetKey,
   spreadsheetId: string,
   state: TournamentState,
-  knownUrl?: string
+  knownUrl?: string,
+  deletedIds?: DeletedEntityIds
 ): Promise<SheetSyncSummary> {
   const meta = MASTER_SHEET_GROUP_MAP[masterKey];
   return syncStateToExistingSpreadsheet(accessToken, spreadsheetId, state, {
@@ -455,12 +398,10 @@ export async function syncMasterSheet(
     masterKey,
     masterLabel: meta.label,
     disciplineFilter: meta.disciplineIds,
+    deletedIds,
   });
 }
 
-/**
- * Synchronizes championship tabs into an existing Google Spreadsheet ID.
- */
 export async function syncStateToExistingSpreadsheet(
   accessToken: string,
   spreadsheetId: string,
@@ -470,6 +411,7 @@ export async function syncStateToExistingSpreadsheet(
     masterKey?: MasterSheetKey;
     masterLabel?: string;
     disciplineFilter?: DisciplineId[];
+    deletedIds?: DeletedEntityIds;
   }
 ): Promise<SheetSyncSummary> {
   const cleanId = extractSpreadsheetId(spreadsheetId);
@@ -498,7 +440,14 @@ export async function syncStateToExistingSpreadsheet(
     (meta.sheets ?? []).map((s) => s.properties?.title).filter(Boolean) as string[]
   );
 
-  // Create only the managed Web_* tabs if missing; leave all other user tabs untouched
+  // 1. Read existing managed tabs BEFORE creating/writing so Sheet edits are never lost
+  const currentSheetTabs = await readManagedTabsFromSpreadsheet(
+    accessToken,
+    cleanId,
+    existingTitles
+  );
+
+  // 2. Create only missing managed Web_* tabs; leave all organizer custom tabs untouched
   const missingTabs = TEMPLATE_TABS.filter((tab) => !existingTitles.has(tab));
   if (missingTabs.length > 0) {
     const addRes = await fetch(
@@ -520,29 +469,20 @@ export async function syncStateToExistingSpreadsheet(
     }
   }
 
-  // Clear ONLY the 5 managed Web_* tabs so no stale trailing rows remain
-  const clearRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cleanId)}/values:batchClear`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        ranges: TEMPLATE_TABS.map((tab) => `'${tab}'!A:Z`),
-      }),
-    }
-  );
-  if (!clearRes.ok) {
-    const errText = await clearRes.text();
-    throw new Error(`Error al limpiar pestañas Web_* (${clearRes.status}): ${errText}`);
-  }
+  // 3. Perform 3-way bidirectional non-destructive merge
+  const baselineTabs = loadSyncBaseline(cleanId);
+  const merged = mergeTournamentWithSheets({
+    webState: state,
+    sheetTabs: currentSheetTabs,
+    baselineTabs,
+    disciplineFilter: options?.disciplineFilter,
+    deletedIds: options?.deletedIds,
+  });
 
-  const payloads = buildTemplateSheetPayloads(state, options?.disciplineFilter);
+  // 4. Write merged payloads starting at A1 (preserving extra user columns!)
   const dataEntries = TEMPLATE_TABS.map((tab) => ({
     range: `'${tab}'!A1`,
-    values: payloads[tab],
+    values: merged.mergedTabs[tab],
   }));
 
   const batchRes = await fetch(
@@ -565,7 +505,49 @@ export async function syncStateToExistingSpreadsheet(
     throw new Error(`Error al escribir datos en Google Sheets (${batchRes.status}): ${errText}`);
   }
 
-  const totalRowsWritten = TEMPLATE_TABS.reduce((sum, tab) => sum + payloads[tab].length, 0);
+  // 5. Clear ONLY trailing stale rows strictly below the new merged row count
+  // (e.g., after an explicit admin deletion) without ever wiping custom extra columns!
+  const trailingClearRanges: string[] = [];
+  for (const tab of TEMPLATE_TABS) {
+    const prevRows = currentSheetTabs[tab]?.length ?? 0;
+    const nextRows = merged.mergedTabs[tab].length;
+    if (prevRows > nextRows) {
+      const colWidth = Math.max(
+        merged.mergedTabs[tab][0]?.length ?? 1,
+        currentSheetTabs[tab]?.[0]?.length ?? 1
+      );
+      const endColLetter = columnNumberToA1(colWidth);
+      trailingClearRanges.push(`'${tab}'!A${nextRows + 1}:${endColLetter}${prevRows}`);
+    }
+  }
+
+  if (trailingClearRanges.length > 0) {
+    const clearRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cleanId)}/values:batchClear`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ranges: trailingClearRanges,
+        }),
+      }
+    );
+    if (!clearRes.ok) {
+      const errText = await clearRes.text();
+      throw new Error(`Error limpiando filas sobrantes en Google Sheets (${clearRes.status}): ${errText}`);
+    }
+  }
+
+  // 6. Persist merged baseline for future 3-way merges
+  saveSyncBaseline(cleanId, merged.mergedTabs);
+
+  const totalRowsWritten = TEMPLATE_TABS.reduce(
+    (sum, tab) => sum + merged.mergedTabs[tab].length,
+    0
+  );
 
   return {
     masterKey: options?.masterKey,
@@ -579,16 +561,21 @@ export async function syncStateToExistingSpreadsheet(
     tabsUpdated: [...TEMPLATE_TABS],
     totalRowsWritten,
     syncedAt: new Date().toISOString(),
+    mode: 'bidirectional',
+    imports: merged.imports,
+    mergeStats: merged.stats,
   };
 }
 
 /**
- * Syncs all configured Master Spreadsheets (or a specified subset of MasterSheetKeys).
+ * Syncs all configured Master Spreadsheets (or a specified subset of MasterSheetKeys)
+ * using the bidirectional non-destructive merge pipeline.
  */
 export async function syncMultipleMasterSheets(
   accessToken: string,
   state: TournamentState,
-  onlyKeys?: MasterSheetKey[]
+  onlyKeys?: MasterSheetKey[],
+  deletedIds?: DeletedEntityIds
 ): Promise<{
   succeeded: SheetSyncSummary[];
   failed: Array<{ masterKey: MasterSheetKey; label: string; error: string }>;
@@ -603,7 +590,14 @@ export async function syncMultipleMasterSheets(
 
   for (const target of targets) {
     try {
-      const summary = await syncMasterSheet(accessToken, target.key, target.spreadsheetId, state);
+      const summary = await syncMasterSheet(
+        accessToken,
+        target.key,
+        target.spreadsheetId,
+        state,
+        undefined,
+        deletedIds
+      );
       succeeded.push(summary);
     } catch (err: unknown) {
       failed.push({

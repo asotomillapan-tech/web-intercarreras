@@ -5,6 +5,7 @@ import {
   Edit3,
   Plus,
   Search,
+  Trash2,
   Upload,
   Users,
   X,
@@ -20,10 +21,13 @@ import type {
   TournamentState,
 } from '../types/tournament';
 
+import { ConfirmDialog } from './ConfirmDialog';
+
 interface AdminPlayersManagerProps {
   state: TournamentState;
   onAddPlayer: (player: Player) => void;
   onUpdatePlayer: (player: Player) => void;
+  onDeletePlayer: (player: Player) => void;
 }
 
 const EMPTY_STATS: PlayerStats = {
@@ -92,6 +96,7 @@ export function AdminPlayersManager({
   state,
   onAddPlayer,
   onUpdatePlayer,
+  onDeletePlayer,
 }: AdminPlayersManagerProps) {
   const [search, setSearch] = useState('');
   const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
@@ -102,6 +107,7 @@ export function AdminPlayersManager({
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [pendingDeletePlayer, setPendingDeletePlayer] = useState<Player | null>(null);
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
 
@@ -267,6 +273,20 @@ export function AdminPlayersManager({
     setMode('none');
     setDraft(null);
     setFormErrors([]);
+  };
+
+  const confirmDeletePlayer = () => {
+    if (!pendingDeletePlayer) return;
+    const deleted = pendingDeletePlayer;
+    onDeletePlayer(deleted);
+    setStatusMsg(
+      `Jugador ${deleted.nombre} ${deleted.apellidoPaterno} eliminado de Firestore y marcado para sincronización.`
+    );
+    if (draft?.id === deleted.id) {
+      setMode('none');
+      setDraft(null);
+    }
+    setPendingDeletePlayer(null);
   };
 
   const teamsForDraftDiscipline = useMemo(() => {
@@ -801,14 +821,25 @@ export function AdminPlayersManager({
                       <p className="text-neutral-500">{player.stats.partidosJugados} PJ</p>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openEditForm(player)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display uppercase tracking-wider transition-colors cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Modificar</span>
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditForm(player)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Modificar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingDeletePlayer(player)}
+                          aria-label={`Eliminar jugador ${player.nombre} ${player.apellidoPaterno}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-red-300 bg-white hover:bg-red-600 hover:text-white hover:border-red-600 text-red-700 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -817,6 +848,28 @@ export function AdminPlayersManager({
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDeletePlayer !== null}
+        title={
+          pendingDeletePlayer
+            ? `Eliminar a ${pendingDeletePlayer.nombre} ${pendingDeletePlayer.apellidoPaterno}`
+            : 'Eliminar jugador'
+        }
+        description="Esta acción eliminará permanentemente la ficha pública y privada del estudiante en Firestore y lo removerá en la próxima sincronización con Google Sheets."
+        details={
+          pendingDeletePlayer
+            ? [
+                `Estudiante: #${pendingDeletePlayer.dorsal} ${pendingDeletePlayer.nombre} ${pendingDeletePlayer.apellidoPaterno} ${pendingDeletePlayer.apellidoMaterno}`,
+                `Equipo: ${teamMap.get(pendingDeletePlayer.teamId)?.nombre ?? pendingDeletePlayer.teamId} (${DISCIPLINE_MAP[pendingDeletePlayer.disciplineId].nombreCorto})`,
+                `RUT: ${pendingDeletePlayer.rut || 'Sin RUT'} · Carrera: ${pendingDeletePlayer.carrera}`,
+              ]
+            : []
+        }
+        confirmLabel="Confirmar y eliminar jugador"
+        onConfirm={confirmDeletePlayer}
+        onCancel={() => setPendingDeletePlayer(null)}
+      />
     </div>
   );
 }

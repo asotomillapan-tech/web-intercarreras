@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   AlertCircle,
+  ArrowDownToLine,
+  ArrowLeftRight,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -13,6 +15,12 @@ import {
   ShieldCheck,
   Zap,
 } from 'lucide-react';
+import {
+  hasAnySheetImports,
+  type DeletedEntityIds,
+  type SheetImportDelta,
+  type SheetMergeStats,
+} from '../domain/sheetsMergeEngine';
 import {
   getGoogleAccessToken,
   initGoogleAuth,
@@ -29,6 +37,7 @@ import {
   extractSpreadsheetId,
   getConfiguredMasterEntries,
   inspectSpreadsheetMetadata,
+  pullChangesFromMasterSheet,
   syncMasterSheet,
   syncMultipleMasterSheets,
   type MasterSheetInspection,
@@ -51,6 +60,7 @@ export interface AutoSyncStatusInfo {
 interface MasterSheetsPanelProps {
   state: TournamentState;
   pendingSyncKeys: MasterSheetKey[];
+  deletedIds?: DeletedEntityIds;
   autoSyncSessionApproved: boolean;
   autoSyncState: AutoSyncStatusInfo;
   onSaveMasterSheets: (
@@ -59,6 +69,8 @@ interface MasterSheetsPanelProps {
   ) => Promise<void>;
   onApproveAutoSyncSession: (approved: boolean) => void;
   onClearPendingSyncKeys: (keys: MasterSheetKey[]) => void;
+  onClearDeletedTombstones?: () => void;
+  onApplySheetImports: (imports: SheetImportDelta) => Promise<void>;
   onMarkSynced: (spreadsheetId: string) => void;
 }
 
@@ -68,14 +80,41 @@ type PendingConfirmAction =
   | { type: 'create-one'; masterKey: MasterSheetKey }
   | { type: 'enable-autosync' };
 
+function formatMergeStatsLine(stats: SheetMergeStats, mode: 'bidirectional' | 'pull'): string {
+  const pulledNew = stats.pulledNewTeams + stats.pulledNewPlayers + stats.pulledNewMatches;
+  const pulledUpdated =
+    stats.pulledUpdatedTeams +
+    stats.pulledUpdatedPlayers +
+    stats.pulledUpdatedMatches +
+    stats.pulledUpdatedConfigs;
+  const parts: string[] = [];
+  if (pulledNew > 0) parts.push(`${pulledNew} nuevo(s) importado(s) desde Sheets`);
+  if (pulledUpdated > 0) parts.push(`${pulledUpdated} editado(s) en Sheets aplicado(s) a la web`);
+  if (mode === 'bidirectional' && stats.pushedToSheet > 0) {
+    parts.push(`${stats.pushedToSheet} registro(s) nuevo(s) enviado(s) desde web`);
+  }
+  if (stats.preservedExtraColumns > 0) {
+    parts.push(`${stats.preservedExtraColumns} col. extra conservada(s)`);
+  }
+  if (parts.length === 0) {
+    return mode === 'pull'
+      ? 'Sin cambios nuevos en Google Sheets.'
+      : 'Web y Google Sheets quedaron sincronizados sin pérdida de ediciones.';
+  }
+  return parts.join(' · ');
+}
+
 export function MasterSheetsPanel({
   state,
   pendingSyncKeys,
+  deletedIds,
   autoSyncSessionApproved,
   autoSyncState,
   onSaveMasterSheets,
   onApproveAutoSyncSession,
   onClearPendingSyncKeys,
+  onClearDeletedTombstones,
+  onApplySheetImports,
   onMarkSynced,
 }: MasterSheetsPanelProps) {
   const [googleUser, setGoogleUser] = useState<User | null>(null);
@@ -96,11 +135,12 @@ export function MasterSheetsPanel({
   const [savingKey, setSavingKey] = useState<MasterSheetKey | null>(null);
   const [savedToast, setSavedToast] = useState<string | null>(null);
 
-  // Inspection & Sync Feedback
+  // Inspection, Pull & Sync Feedback
   const [inspections, setInspections] = useState<
     Partial<Record<MasterSheetKey, MasterSheetInspection>>
   >({});
   const [inspectingKey, setInspectingKey] = useState<MasterSheetKey | null>(null);
+  const [pullingKey, setPullingKey] = useState<MasterSheetKey | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncResults, setSyncResults] = useState<SheetSyncSummary[]>([]);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -215,16 +255,58 @@ export function MasterSheetsPanel({
     }
   };
 
+  // Read-only pull from Google Sheets -> Firestore (never writes to Sheets)
+  const handlePullFromMaster = async (key: MasterSheetKey, rawId: string) => {
+    if (!googleToken) {
+      setAuthError('Conecta tu cuenta Google primero para leer los cambios desde Google Sheets.');
+      return;
+    }
+    const cleanId = extractSpreadsheetId(rawId);
+    if (!cleanId) return;
+    setPullingKey(key);
+    setSyncError(null);
+    setSavedToast(null);
+    try {
+      const summary = await pullChangesFromMasterSheet(googleToken, key, cleanId, state);
+      if (hasAnySheetImports(summary.imports)) {
+        await onApplySheetImports(summary.imports);
+      }
+      setSyncResults([summary]);
+      setSavedToast(
+        `Lectura desde ${MASTER_SHEET_GROUP_MAP[key].shortLabel} completada: ${formatMergeStatsLine(
+          summary.mergeStats,
+          'pull'
+        )}`
+      );
+    } catch (err: unknown) {
+      setSyncError(
+        err instanceof Error ? err.message : 'Error leyendo cambios desde Google Sheets.'
+      );
+    } finally {
+      setPullingKey(null);
+    }
+  };
+
   const handleDisableAutoSync = async () => {
     setSyncError(null);
     onApproveAutoSyncSession(false);
     try {
       await onSaveMasterSheets(state.masterSheets, false);
-      setSavedToast('Sincronización automática desactivada. Puedes sincronizar manualmente cuando desees.');
+      setSavedToast(
+        'Sincronización automática desactivada. Puedes sincronizar manualmente cuando desees.'
+      );
     } catch (err: unknown) {
       setSyncError(
         err instanceof Error ? err.message : 'Error guardando preferencia de auto-sincronización.'
       );
+    }
+  };
+
+  const applySummaryImports = async (summaries: SheetSyncSummary[]) => {
+    for (const s of summaries) {
+      if (hasAnySheetImports(s.imports)) {
+        await onApplySheetImports(s.imports);
+      }
     }
   };
 
@@ -243,16 +325,20 @@ export function MasterSheetsPanel({
       if (confirmAction.type === 'enable-autosync') {
         await onSaveMasterSheets(state.masterSheets, true);
         onApproveAutoSyncSession(true);
-        // Perform immediate initial sync of all configured Masters so they start 100% up to date
-        const { succeeded, failed } = await syncMultipleMasterSheets(googleToken, state);
+        const { succeeded, failed } = await syncMultipleMasterSheets(
+          googleToken,
+          state,
+          undefined,
+          deletedIds
+        );
+        await applySummaryImports(succeeded);
         setSyncResults(succeeded);
         if (succeeded.length > 0) {
           onMarkSynced(succeeded[0].spreadsheetId);
           onClearPendingSyncKeys(
-            succeeded
-              .map((s) => s.masterKey)
-              .filter((k): k is MasterSheetKey => Boolean(k))
+            succeeded.map((s) => s.masterKey).filter((k): k is MasterSheetKey => Boolean(k))
           );
+          onClearDeletedTombstones?.();
         }
         if (failed.length > 0) {
           setSyncError(
@@ -262,12 +348,11 @@ export function MasterSheetsPanel({
           );
         } else {
           setSavedToast(
-            `Auto-sync activado y ${succeeded.length} planilla(s) Master sincronizada(s) al día.`
+            `Auto-sync bidireccional activado y ${succeeded.length} planilla(s) Master fusionadas sin sobrescribir cambios.`
           );
         }
       } else if (confirmAction.type === 'sync-one') {
         const cleanId = extractSpreadsheetId(confirmAction.spreadsheetId);
-        // Ensure edited ID is also persisted if changed
         if (cleanId && state.masterSheets[confirmAction.masterKey] !== cleanId) {
           await onSaveMasterSheets({ ...state.masterSheets, [confirmAction.masterKey]: cleanId });
         }
@@ -275,21 +360,30 @@ export function MasterSheetsPanel({
           googleToken,
           confirmAction.masterKey,
           cleanId,
-          state
+          state,
+          undefined,
+          deletedIds
         );
+        await applySummaryImports([summary]);
         setSyncResults([summary]);
         onMarkSynced(summary.spreadsheetId);
         onClearPendingSyncKeys([confirmAction.masterKey]);
+        onClearDeletedTombstones?.();
       } else if (confirmAction.type === 'sync-all') {
-        const { succeeded, failed } = await syncMultipleMasterSheets(googleToken, state);
+        const { succeeded, failed } = await syncMultipleMasterSheets(
+          googleToken,
+          state,
+          undefined,
+          deletedIds
+        );
+        await applySummaryImports(succeeded);
         setSyncResults(succeeded);
         if (succeeded.length > 0) {
           onMarkSynced(succeeded[0].spreadsheetId);
           onClearPendingSyncKeys(
-            succeeded
-              .map((s) => s.masterKey)
-              .filter((k): k is MasterSheetKey => Boolean(k))
+            succeeded.map((s) => s.masterKey).filter((k): k is MasterSheetKey => Boolean(k))
           );
+          onClearDeletedTombstones?.();
         }
         if (failed.length > 0) {
           setSyncError(
@@ -329,15 +423,13 @@ export function MasterSheetsPanel({
 
     if (confirmAction.type === 'enable-autosync') {
       return {
-        title: 'Activar sincronización automática con Sheets Master',
+        title: 'Activar sincronización automática bidireccional (Web ⇄ Sheets)',
         description:
-          'Al confirmar, cada vez que inscribas equipos, edites jugadores, cierres partidos, registres transferencias o cambies el formato durante esta sesión, la web actualizará automáticamente las 5 pestañas Web_* en las planillas Master correspondientes (sin tocar tus otras pestañas).',
+          'Al confirmar, cada cambio realizado en la web se fusionará automáticamente con Google Sheets leyendo primero tus cambios manuales en las pestañas Web_* para NUNCA sobrescribir lo que edites desde Sheets.',
         details: [
-          ...configuredMasters.map(
-            (m) => `${m.meta.shortLabel} → ID ${m.spreadsheetId}`
-          ),
-          `Pestañas gestionadas (no destructivas): ${TEMPLATE_TABS.join(', ')}`,
-          'Además se ejecutará una sincronización inicial inmediata ahora mismo.',
+          ...configuredMasters.map((m) => `${m.meta.shortLabel} → ID ${m.spreadsheetId}`),
+          `Pestañas fusionadas sin borrado destructivo: ${TEMPLATE_TABS.join(', ')}`,
+          'Conserva ediciones hechas en Sheets, filas nuevas agregadas en Sheets y columnas personalizadas.',
         ],
         confirmLabel: 'Confirmar y activar auto-sync',
       };
@@ -345,13 +437,11 @@ export function MasterSheetsPanel({
 
     if (confirmAction.type === 'sync-all') {
       return {
-        title: `Sincronizar ${configuredMasters.length} planilla(s) Master`,
+        title: `Sincronización bidireccional en ${configuredMasters.length} planilla(s) Master`,
         description:
-          'Se actualizarán las 5 pestañas gestionadas (Web_Equipos, Web_Jugadores, Web_Partidos, Web_Transferencias y Web_Formato) en cada Master configurado, filtrando automáticamente los datos de su disciplina. Tus pestañas propias no se modificarán.',
-        details: configuredMasters.map(
-          (m) => `${m.meta.label} · ID ${m.spreadsheetId}`
-        ),
-        confirmLabel: 'Sincronizar todos los Masters',
+          'Se leerán primero todos los cambios hechos directamente en Google Sheets, se importarán/actualizarán en Firestore, y luego se actualizarán las pestañas Web_* conservando filas nuevas y columnas extra de Sheets.',
+        details: configuredMasters.map((m) => `${m.meta.label} · ID ${m.spreadsheetId}`),
+        confirmLabel: 'Sincronizar Web ⇄ Sheets',
       };
     }
 
@@ -368,21 +458,20 @@ export function MasterSheetsPanel({
       };
     }
 
-    // sync-one
     const meta = MASTER_SHEET_GROUP_MAP[confirmAction.masterKey];
     const cleanId = extractSpreadsheetId(confirmAction.spreadsheetId);
     const payloads = buildTemplateSheetPayloads(state, meta.disciplineIds);
     return {
-      title: `Sincronizar ${meta.label}`,
-      description: `Se actualizarán únicamente las 5 pestañas gestionadas (Web_*) dentro de la hoja ID "${cleanId}" con los datos actuales de ${meta.shortLabel}. Cualquier otra pestaña propia del archivo permanecerá intacta.`,
+      title: `Sincronización bidireccional — ${meta.label}`,
+      description: `Se leerán primero las pestañas Web_* en "${cleanId}" para incorporar a la web cualquier modificación o fila nueva hecha en Google Sheets, y luego se fusionarán con los datos actuales de ${meta.shortLabel} sin borrar columnas extra ni pestañas propias.`,
       details: [
-        `Web_Equipos: ${payloads.Web_Equipos.length - 1} equipo(s)`,
-        `Web_Jugadores (12 campos UFRO): ${payloads.Web_Jugadores.length - 1} jugador(es)`,
-        `Web_Partidos: ${payloads.Web_Partidos.length - 1} partido(s)`,
-        `Web_Transferencias: ${payloads.Web_Transferencias.length - 1} transferencia(s)`,
-        `Web_Formato: ${payloads.Web_Formato.length - 1} disciplina(s)`,
+        `Web_Equipos en web: ${payloads.Web_Equipos.length - 1} equipo(s)`,
+        `Web_Jugadores en web: ${payloads.Web_Jugadores.length - 1} jugador(es)`,
+        `Web_Partidos en web: ${payloads.Web_Partidos.length - 1} partido(s)`,
+        `Web_Transferencias en web: ${payloads.Web_Transferencias.length - 1} transferencia(s)`,
+        `Web_Formato en web: ${payloads.Web_Formato.length - 1} disciplina(s)`,
       ],
-      confirmLabel: 'Sincronizar ahora',
+      confirmLabel: 'Fusionar Web ⇄ Sheets',
     };
   }, [confirmAction, configuredMasters, state]);
 
@@ -393,42 +482,40 @@ export function MasterSheetsPanel({
         <div className="flex items-center gap-2 mb-3">
           <FileSpreadsheet className="w-4 h-4 text-[#707ef9]" />
           <h2 className="font-display text-lg font-bold uppercase tracking-wide text-[#0d0d0d]">
-            Cómo funciona la sincronización con tus Google Sheets Master
+            Sincronización bidireccional no destructiva (Web ⇄ Google Sheets)
           </h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-neutral-700 leading-relaxed">
           <div className="bg-white border border-neutral-200 p-3.5">
             <p className="font-bold text-[#0d0d0d] uppercase tracking-wider mb-1">
-              1. Base en tiempo real + Respaldo Master
+              1. Edita desde la Web o desde Sheets
             </p>
             <p>
-              Todo lo que ocurre en la web se guarda al instante en <strong>Firestore</strong>.
-              Luego, cada disciplina se vincula a su propio <strong>Google Sheet Master</strong>{' '}
-              (Fútbol 7 Hombres ya viene enlazado a tu planilla oficial).
+              Antes de escribir, la sincronización <strong>lee primero tu Google Sheet</strong> y
+              compara campo por campo. Las ediciones hechas directamente en Google Sheets{' '}
+              <strong>nunca se borran</strong> y se importan automáticamente a Firestore.
             </p>
           </div>
           <div className="bg-white border border-neutral-200 p-3.5">
             <p className="font-bold text-[#0d0d0d] uppercase tracking-wider mb-1">
-              2. Pestañas seguras (<code className="font-mono">Web_*</code>)
+              2. Filas nuevas y columnas extra protegidas
             </p>
             <p>
-              La sincronización escribe solo en 5 pestañas propias (
+              Si agregas equipos, jugadores o resultados nuevos directamente en{' '}
               <code className="font-mono">Web_Equipos</code>,{' '}
-              <code className="font-mono">Web_Jugadores</code>,{' '}
-              <code className="font-mono">Web_Partidos</code>,{' '}
-              <code className="font-mono">Web_Transferencias</code> y{' '}
-              <code className="font-mono">Web_Formato</code>). Tus pestañas y fórmulas previas no se
-              borran.
+              <code className="font-mono">Web_Jugadores</code> o{' '}
+              <code className="font-mono">Web_Partidos</code> (incluso sin ID), la web los crea en
+              Firestore y conserva tus columnas adicionales y pestañas propias intactas.
             </p>
           </div>
           <div className="bg-white border border-neutral-200 p-3.5">
             <p className="font-bold text-[#0d0d0d] uppercase tracking-wider mb-1">
-              3. Modo Auto-Sync en sesión de Admin
+              3. Traer cambios o Auto-Sync seguro
             </p>
             <p>
-              Conecta Google y activa <strong>Auto-Sync</strong>: cada inscripción, ficha, marcador
-              finalizado o transferencia actualizará automáticamente el Master de esa disciplina
-              en segundos.
+              Usa <strong>Traer desde Sheets</strong> cuando edites en la planilla y quieras verlo
+              de inmediato en la web, o activa <strong>Auto-Sync</strong> para fusionar en ambos
+              sentidos cada cambio del panel administrador.
             </p>
           </div>
         </div>
@@ -439,13 +526,13 @@ export function MasterSheetsPanel({
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 pb-4">
           <div>
             <h3 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-              Conexión Google Workspace y Auto-Sync
+              Conexión Google Workspace y Auto-Sync Bidireccional
             </h3>
             <p className="text-xs text-neutral-500 mt-0.5">
               {configuredMasters.length} de {MASTER_SHEET_GROUPS.length} planillas Master vinculadas
               en Firestore.
               {state.lastSyncedAt && (
-                <> · Última escritura: {new Date(state.lastSyncedAt).toLocaleString('es-CL')}</>
+                <> · Última sincronización: {new Date(state.lastSyncedAt).toLocaleString('es-CL')}</>
               )}
             </p>
           </div>
@@ -506,24 +593,24 @@ export function MasterSheetsPanel({
                 className={`w-4 h-4 ${isAutoSyncLive ? 'text-emerald-400' : 'text-[#707ef9]'}`}
               />
               <span className="font-display text-sm font-bold uppercase tracking-wider">
-                Sincronización Automática con Masters:{' '}
+                Auto-Sync Bidireccional con Masters:{' '}
                 {isAutoSyncLive
-                  ? 'ACTIVA EN ESTA SESIÓN'
+                  ? 'ACTIVO EN ESTA SESIÓN'
                   : state.autoSyncSheetsEnabled
                   ? 'REQUIERE CONFIRMAR SESIÓN GOOGLE'
-                  : 'DESACTIVADA'}
+                  : 'DESACTIVADO'}
               </span>
             </div>
             <p className="text-xs text-white/75">
               {autoSyncState.status === 'syncing'
-                ? 'Sincronizando cambios automáticamente con Google Sheets...'
+                ? 'Fusionando cambios bidireccionalmente con Google Sheets...'
                 : autoSyncState.message
                 ? autoSyncState.message
                 : pendingSyncKeys.length > 0
                 ? `Tienes cambios pendientes en: ${pendingSyncKeys
                     .map((k) => MASTER_SHEET_GROUP_MAP[k].shortLabel)
                     .join(', ')}.`
-                : 'Al activarla, cada cambio en equipos, jugadores, partidos, transferencias o formato se enviará solo al Master correspondiente.'}
+                : 'Al activarlo, cada cambio en equipos, jugadores, partidos o formato se fusionará con su Master respetando ediciones previas en Sheets.'}
             </p>
           </div>
 
@@ -585,20 +672,32 @@ export function MasterSheetsPanel({
         {syncResults.length > 0 && (
           <div role="status" className="bg-emerald-50 border border-emerald-300 p-4 space-y-2 text-xs text-emerald-950">
             <p className="font-bold uppercase tracking-wider">
-              Sincronización completada ({syncResults.length} planilla{syncResults.length > 1 ? 's' : ''})
+              {syncResults[0].mode === 'pull'
+                ? 'Importación desde Google Sheets completada'
+                : `Sincronización bidireccional completada (${syncResults.length} planilla${syncResults.length > 1 ? 's' : ''})`}
             </p>
-            <ul className="space-y-1.5">
+            <ul className="space-y-2">
               {syncResults.map((res) => (
-                <li key={`${res.spreadsheetId}-${res.syncedAt}`} className="flex flex-wrap items-center justify-between gap-2">
-                  <span>
-                    <strong>{res.masterLabel || res.spreadsheetTitle || res.spreadsheetId}</strong>:{' '}
-                    {res.totalRowsWritten} filas escritas en {res.tabsUpdated.join(', ')}.
-                  </span>
+                <li
+                  key={`${res.spreadsheetId}-${res.syncedAt}`}
+                  className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200 pt-2 first:border-t-0 first:pt-0"
+                >
+                  <div className="space-y-0.5">
+                    <p>
+                      <strong>{res.masterLabel || res.spreadsheetTitle || res.spreadsheetId}</strong>
+                      {res.mode === 'bidirectional' && (
+                        <> — {res.totalRowsWritten} filas fusionadas en {res.tabsUpdated.join(', ')}.</>
+                      )}
+                    </p>
+                    <p className="text-emerald-800">
+                      {formatMergeStatsLine(res.mergeStats, res.mode)}
+                    </p>
+                  </div>
                   <a
                     href={res.spreadsheetUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-bold text-[#707ef9] underline"
+                    className="inline-flex items-center gap-1 font-bold text-[#707ef9] underline shrink-0"
                   >
                     <span>Abrir en Google Sheets</span>
                     <ExternalLink className="w-3 h-3" />
@@ -739,7 +838,7 @@ export function MasterSheetsPanel({
                     <>
                       <button
                         type="button"
-                        disabled={!googleToken || syncLoading}
+                        disabled={!googleToken || syncLoading || pullingKey === group.key}
                         onClick={() =>
                           setConfirmAction({
                             type: 'sync-one',
@@ -749,8 +848,19 @@ export function MasterSheetsPanel({
                         }
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-wider text-[11px] cursor-pointer disabled:opacity-45"
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Sincronizar este Master</span>
+                        <ArrowLeftRight className="w-3.5 h-3.5" />
+                        <span>Sincronizar Web ⇄ Sheets</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!googleToken || syncLoading || pullingKey === group.key}
+                        onClick={() => void handlePullFromMaster(group.key, cleanDraftId)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0d0d0d] hover:bg-neutral-800 text-white font-display font-bold uppercase tracking-wider text-[11px] cursor-pointer disabled:opacity-45"
+                      >
+                        <ArrowDownToLine className="w-3.5 h-3.5" />
+                        <span>
+                          {pullingKey === group.key ? 'Leyendo...' : 'Traer desde Sheets'}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -760,7 +870,7 @@ export function MasterSheetsPanel({
                       >
                         <SearchCheck className="w-3.5 h-3.5 text-[#707ef9]" />
                         <span>
-                          {inspectingKey === group.key ? 'Verificando...' : 'Verificar acceso'}
+                          {inspectingKey === group.key ? 'Verificando...' : 'Verificar'}
                         </span>
                       </button>
                     </>
@@ -804,8 +914,8 @@ export function MasterSheetsPanel({
               Vista previa de datos — {MASTER_SHEET_GROUP_MAP[previewMasterKey].label}
             </h3>
             <p className="text-xs text-neutral-500">
-              Filas exactas que se escribirán en las pestañas <code className="font-mono">Web_*</code>{' '}
-              de este Master.
+              Filas actuales de la web que se fusionarán con las pestañas{' '}
+              <code className="font-mono">Web_*</code> de este Master.
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -846,7 +956,7 @@ export function MasterSheetsPanel({
                   <td colSpan={9} className="py-6 px-4 text-center text-neutral-500">
                     Sin registros todavía en {previewTab} para{' '}
                     {MASTER_SHEET_GROUP_MAP[previewMasterKey].shortLabel}. Al inscribir equipos o
-                    registrar encuentros aparecerán aquí automáticamente.
+                    importar desde Google Sheets aparecerán aquí automáticamente.
                   </td>
                 </tr>
               ) : (

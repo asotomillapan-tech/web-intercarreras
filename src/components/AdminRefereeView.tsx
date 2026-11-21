@@ -26,6 +26,7 @@ import {
 } from '../domain/rbacEngine';
 import { isVolleyballSetWon } from '../domain/tournamentEngine';
 import { getFirebaseIdToken } from '../services/firebaseAuth';
+import type { DeletedEntityIds, SheetImportDelta } from '../domain/sheetsMergeEngine';
 import type {
   AiScoresheetResult,
   AppUserProfile,
@@ -36,15 +37,24 @@ import type {
   Match,
   MatchEvent,
   Player,
+  Team,
   TournamentStage,
   TournamentState,
   UserRole,
 } from '../types/tournament';
 import { AdminMatchEditor } from './AdminMatchEditor';
 import { AdminPlayersManager } from './AdminPlayersManager';
+import { AdminTeamsManager } from './AdminTeamsManager';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 
-export type PanelSubTab = 'arbitro' | 'partidos' | 'jugadores' | 'usuarios' | 'formato' | 'sheets';
+export type PanelSubTab =
+  | 'arbitro'
+  | 'partidos'
+  | 'equipos'
+  | 'jugadores'
+  | 'usuarios'
+  | 'formato'
+  | 'sheets';
 
 interface AdminRefereeViewProps {
   state: TournamentState;
@@ -52,11 +62,16 @@ interface AdminRefereeViewProps {
   initialSubTab?: PanelSubTab;
   focusedMatchId?: string | null;
   pendingSyncKeys: MasterSheetKey[];
+  deletedIds?: DeletedEntityIds;
   autoSyncSessionApproved: boolean;
   autoSyncState: AutoSyncStatusInfo;
   onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: Partial<{ goles: number; tarjetasAmarillas: number; tarjetasRojas: number; puntos: number; triples: number; faltas: number; aces: number; bloqueos: number }>) => void;
+  onAddTeam: (team: Team) => void;
+  onUpdateTeam: (team: Team) => void;
+  onDeleteTeam: (team: Team) => void;
   onAddPlayer: (player: Player) => void;
   onUpdatePlayer: (player: Player) => void;
+  onDeletePlayer: (player: Player) => void;
   onUpdateConfig: (disciplineId: DisciplineId, config: DisciplineFormatConfig, rebuildGroups: boolean) => void;
   onSaveMasterSheets: (
     nextMasterSheets: MasterSheetsConfig,
@@ -64,6 +79,8 @@ interface AdminRefereeViewProps {
   ) => Promise<void>;
   onApproveAutoSyncSession: (approved: boolean) => void;
   onClearPendingSyncKeys: (keys: MasterSheetKey[]) => void;
+  onClearDeletedTombstones: () => void;
+  onApplySheetImports: (imports: SheetImportDelta) => Promise<void>;
   onMarkSynced: (spreadsheetId: string) => void;
   onAdminChangeUserRole: (
     targetUid: string,
@@ -165,15 +182,22 @@ export function AdminRefereeView({
   initialSubTab = 'arbitro',
   focusedMatchId = null,
   pendingSyncKeys,
+  deletedIds,
   autoSyncSessionApproved,
   autoSyncState,
   onUpdateMatch,
+  onAddTeam,
+  onUpdateTeam,
+  onDeleteTeam,
   onAddPlayer,
   onUpdatePlayer,
+  onDeletePlayer,
   onUpdateConfig,
   onSaveMasterSheets,
   onApproveAutoSyncSession,
   onClearPendingSyncKeys,
+  onClearDeletedTombstones,
+  onApplySheetImports,
   onMarkSynced,
   onAdminChangeUserRole,
   onRefreshUsers,
@@ -814,6 +838,17 @@ export function AdminRefereeView({
                   </button>
                   <button
                     type="button"
+                    onClick={() => setSubTab('equipos')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'equipos'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Equipos ({state.teams.length})
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setSubTab('jugadores')}
                     className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
                       effectiveSubTab === 'jugadores'
@@ -1410,12 +1445,23 @@ export function AdminRefereeView({
           />
         )}
 
-        {/* TAB 1C (ADMIN ONLY): ADD & MODIFY PLAYERS */}
+        {/* TAB 1C (ADMIN ONLY): ADD, MODIFY & DELETE TEAMS */}
+        {effectiveSubTab === 'equipos' && isAdmin && (
+          <AdminTeamsManager
+            state={state}
+            onAddTeam={onAddTeam}
+            onUpdateTeam={onUpdateTeam}
+            onDeleteTeam={onDeleteTeam}
+          />
+        )}
+
+        {/* TAB 1D (ADMIN ONLY): ADD, MODIFY & DELETE PLAYERS */}
         {effectiveSubTab === 'jugadores' && isAdmin && (
           <AdminPlayersManager
             state={state}
             onAddPlayer={onAddPlayer}
             onUpdatePlayer={onUpdatePlayer}
+            onDeletePlayer={onDeletePlayer}
           />
         )}
 
@@ -2046,11 +2092,14 @@ export function AdminRefereeView({
           <MasterSheetsPanel
             state={state}
             pendingSyncKeys={pendingSyncKeys}
+            deletedIds={deletedIds}
             autoSyncSessionApproved={autoSyncSessionApproved}
             autoSyncState={autoSyncState}
             onSaveMasterSheets={onSaveMasterSheets}
             onApproveAutoSyncSession={onApproveAutoSyncSession}
             onClearPendingSyncKeys={onClearPendingSyncKeys}
+            onClearDeletedTombstones={onClearDeletedTombstones}
+            onApplySheetImports={onApplySheetImports}
             onMarkSynced={onMarkSynced}
           />
         )}

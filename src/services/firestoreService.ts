@@ -868,6 +868,45 @@ export async function updateFirestorePlayerStats(playerId: string, stats: Player
   }
 }
 
+export async function deleteFirestorePlayer(playerId: string): Promise<void> {
+  const pubPath = `players/${playerId}`;
+  try {
+    await deleteDoc(doc(db, 'players', playerId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, pubPath);
+  }
+  // Also delete isolated student PII record if present
+  try {
+    const privRef = doc(db, 'player_private', playerId);
+    const privSnap = await getDoc(privRef);
+    if (privSnap.exists()) {
+      await deleteDoc(privRef);
+    }
+  } catch {
+    // Non-fatal if private doc didn't exist
+  }
+}
+
+export async function deleteFirestoreTeam(
+  teamId: string,
+  cascade?: { playerIds?: string[]; matchIds?: string[] }
+): Promise<void> {
+  const teamPath = `teams/${teamId}`;
+  try {
+    await deleteDoc(doc(db, 'teams', teamId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, teamPath);
+  }
+
+  if (cascade?.playerIds && cascade.playerIds.length > 0) {
+    await Promise.all(cascade.playerIds.map((pid) => deleteFirestorePlayer(pid)));
+  }
+
+  if (cascade?.matchIds && cascade.matchIds.length > 0) {
+    await deleteFirestoreMatchesForDiscipline(cascade.matchIds);
+  }
+}
+
 export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole: UserRole): Promise<void> {
   const path = `matches/${match.id}`;
   try {

@@ -15,9 +15,16 @@ import {
   syncMultipleMasterSheets,
 } from './services/googleSheets';
 import {
+  hasAnySheetImports,
+  type DeletedEntityIds,
+  type SheetImportDelta,
+} from './domain/sheetsMergeEngine';
+import {
   adminUpdateFirestoreUserRole,
   deleteFirestoreMatchesForDiscipline,
   deleteFirestorePhoto,
+  deleteFirestorePlayer,
+  deleteFirestoreTeam,
   ensureAllConfigsInFirestore,
   executeFirestoreTransfer,
   listFirestoreUsers,
@@ -90,11 +97,20 @@ function AppContent() {
   // Master Google Sheets Auto-Sync Engine (requires explicit session confirmation via ConfirmDialog)
   const [autoSyncSessionApproved, setAutoSyncSessionApproved] = useState(false);
   const [pendingSyncKeys, setPendingSyncKeys] = useState<MasterSheetKey[]>([]);
+  const [deletedTombstones, setDeletedTombstones] = useState<DeletedEntityIds>({
+    teamIds: [],
+    playerIds: [],
+    matchIds: [],
+  });
   const [autoSyncState, setAutoSyncState] = useState<AutoSyncStatusInfo>({ status: 'idle' });
   const stateRef = useRef(state);
+  const deletedTombstonesRef = useRef(deletedTombstones);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+  useEffect(() => {
+    deletedTombstonesRef.current = deletedTombstones;
+  }, [deletedTombstones]);
 
   const queueMasterSyncForDiscipline = useCallback((disciplineId: DisciplineId) => {
     const primaryKey = getMasterKeyForDiscipline(disciplineId);
@@ -278,7 +294,61 @@ function AppContent() {
     return state.users.find((u) => u.uid === currentUserUid) ?? null;
   }, [currentUserUid, state.users]);
 
-  // Debounced Automatic Master Sheets Sync (runs ONLY after explicit session approval by an Admin)
+  const handleClearDeletedTombstones = useCallback(() => {
+    setDeletedTombstones({ teamIds: [], playerIds: [], matchIds: [] });
+  }, []);
+
+  const handleApplySheetImports = useCallback(
+    async (imports: SheetImportDelta) => {
+      if (!currentUser || !hasAnySheetImports(imports)) return;
+
+      // 1. Merge imported/updated records cleanly into local React state
+      setState((prev) => {
+        const teamMap = new Map(prev.teams.map((t) => [t.id, t]));
+        imports.teamsToCreate.forEach((t) => teamMap.set(t.id, { ...t, createdByUid: currentUser.uid }));
+        imports.teamsToUpdate.forEach((t) => teamMap.set(t.id, t));
+
+        const playerMap = new Map(prev.players.map((p) => [p.id, p]));
+        imports.playersToCreate.forEach((p) => playerMap.set(p.id, p));
+        imports.playersToUpdate.forEach((p) => playerMap.set(p.id, p));
+
+        const matchMap = new Map(prev.matches.map((m) => [m.id, m]));
+        imports.matchesToCreate.forEach((m) => matchMap.set(m.id, m));
+        imports.matchesToUpdate.forEach((m) => matchMap.set(m.id, m));
+
+        const nextConfigs = { ...prev.configs };
+        imports.configsToUpdate.forEach((cfg) => {
+          nextConfigs[cfg.disciplineId] = cfg;
+        });
+
+        return {
+          ...prev,
+          teams: Array.from(teamMap.values()),
+          players: Array.from(playerMap.values()),
+          matches: Array.from(matchMap.values()),
+          configs: nextConfigs,
+        };
+      });
+
+      // 2. Persist every Sheet-side change to Firestore
+      try {
+        await Promise.all([
+          ...imports.teamsToCreate.map((t) => saveFirestoreTeam(t, currentUser.uid, true)),
+          ...imports.teamsToUpdate.map((t) => saveFirestoreTeam(t, currentUser.uid, false)),
+          ...imports.playersToCreate.map((p) => saveFirestorePlayer(p, true, currentUser.role)),
+          ...imports.playersToUpdate.map((p) => saveFirestorePlayer(p, false, currentUser.role)),
+          ...imports.matchesToCreate.map((m) => saveFirestoreMatch(m, true, currentUser.role)),
+          ...imports.matchesToUpdate.map((m) => saveFirestoreMatch(m, false, currentUser.role)),
+          ...imports.configsToUpdate.map((cfg) => saveFirestoreDisciplineConfig(cfg)),
+        ]);
+      } catch (err) {
+        reportCloudError('Error aplicando cambios importados desde Google Sheets a Firestore', err);
+      }
+    },
+    [currentUser, reportCloudError]
+  );
+
+  // Debounced Automatic Bidirectional Master Sheets Sync (runs ONLY after explicit session approval by an Admin)
   useEffect(() => {
     if (
       pendingSyncKeys.length === 0 ||
@@ -302,7 +372,7 @@ function AppContent() {
     const timer = window.setTimeout(async () => {
       setAutoSyncState({
         status: 'syncing',
-        message: `Sincronizando automáticamente: ${keysSnapshot
+        message: `Fusionando bidireccionalmente: ${keysSnapshot
           .map((k) => MASTER_SHEET_GROUP_MAP[k].shortLabel)
           .join(', ')}...`,
       });
@@ -310,13 +380,20 @@ function AppContent() {
         const { succeeded, failed } = await syncMultipleMasterSheets(
           token,
           stateRef.current,
-          keysSnapshot
+          keysSnapshot,
+          deletedTombstonesRef.current
         );
         if (succeeded.length > 0) {
+          for (const summary of succeeded) {
+            if (hasAnySheetImports(summary.imports)) {
+              await handleApplySheetImports(summary.imports);
+            }
+          }
           const syncedKeys = new Set(
             succeeded.map((s) => s.masterKey).filter((k): k is MasterSheetKey => Boolean(k))
           );
           setPendingSyncKeys((prev) => prev.filter((k) => !syncedKeys.has(k)));
+          handleClearDeletedTombstones();
           const syncedAt = new Date().toISOString();
           const lastId = succeeded[0].spreadsheetId;
           setState((prev) => ({
@@ -348,7 +425,6 @@ function AppContent() {
               .join(' · ')}`,
           });
         } else {
-          // Changed discipline had no Master Sheet ID linked yet
           setPendingSyncKeys((prev) => prev.filter((k) => !keysSnapshot.includes(k)));
           setAutoSyncState({ status: 'idle' });
         }
@@ -361,7 +437,14 @@ function AppContent() {
     }, 1500);
 
     return () => window.clearTimeout(timer);
-  }, [pendingSyncKeys, autoSyncSessionApproved, state.autoSyncSheetsEnabled, currentUser?.role]);
+  }, [
+    pendingSyncKeys,
+    autoSyncSessionApproved,
+    state.autoSyncSheetsEnabled,
+    currentUser?.role,
+    handleApplySheetImports,
+    handleClearDeletedTombstones,
+  ]);
 
   const activeModalMatch: Match | null = useMemo(() => {
     if (!activeMatchModalId) return null;
@@ -526,6 +609,77 @@ function AppContent() {
     void saveFirestorePlayer(newPlayer, true, currentUser.role).catch((err) =>
       reportCloudError('Error registrando estudiante en Firestore', err)
     );
+  };
+
+  const handleDeletePlayer = (player: Player) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    setState((prev) => ({
+      ...prev,
+      players: prev.players.filter((p) => p.id !== player.id),
+    }));
+    setDeletedTombstones((prev) => ({
+      ...prev,
+      playerIds: Array.from(new Set([...(prev.playerIds ?? []), player.id])),
+    }));
+    queueMasterSyncForDiscipline(player.disciplineId);
+    void deleteFirestorePlayer(player.id).catch((err) =>
+      reportCloudError('Error eliminando jugador en Firestore', err)
+    );
+  };
+
+  const handleAdminAddTeam = (team: Team) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const enriched: Team = { ...team, createdByUid: currentUser.uid };
+    setState((prev) => ({
+      ...prev,
+      teams: [...prev.teams, enriched],
+    }));
+    queueMasterSyncForDiscipline(enriched.disciplineId);
+    void saveFirestoreTeam(enriched, currentUser.uid, true).catch((err) =>
+      reportCloudError('Error agregando equipo en Firestore', err)
+    );
+  };
+
+  const handleAdminUpdateTeam = (team: Team) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    setState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) => (t.id === team.id ? { ...t, ...team } : t)),
+    }));
+    queueMasterSyncForDiscipline(team.disciplineId);
+    void saveFirestoreTeam(team, currentUser.uid, false).catch((err) =>
+      reportCloudError('Error actualizando equipo en Firestore', err)
+    );
+  };
+
+  const handleAdminDeleteTeam = (team: Team) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const affectedPlayerIds = stateRef.current.players
+      .filter((p) => p.teamId === team.id)
+      .map((p) => p.id);
+    const affectedMatchIds = stateRef.current.matches
+      .filter((m) => m.homeTeamId === team.id || m.awayTeamId === team.id)
+      .map((m) => m.id);
+
+    setState((prev) => ({
+      ...prev,
+      teams: prev.teams.filter((t) => t.id !== team.id),
+      players: prev.players.filter((p) => p.teamId !== team.id),
+      matches: prev.matches.filter((m) => m.homeTeamId !== team.id && m.awayTeamId !== team.id),
+    }));
+    if (inspectedTeamId === team.id) {
+      setInspectedTeamId(null);
+    }
+    setDeletedTombstones((prev) => ({
+      teamIds: Array.from(new Set([...(prev.teamIds ?? []), team.id])),
+      playerIds: Array.from(new Set([...(prev.playerIds ?? []), ...affectedPlayerIds])),
+      matchIds: Array.from(new Set([...(prev.matchIds ?? []), ...affectedMatchIds])),
+    }));
+    queueMasterSyncForDiscipline(team.disciplineId);
+    void deleteFirestoreTeam(team.id, {
+      playerIds: affectedPlayerIds,
+      matchIds: affectedMatchIds,
+    }).catch((err) => reportCloudError('Error eliminando equipo en Firestore', err));
   };
 
   const handleAddPhoto = async (photo: PhotoEntry) => {
@@ -769,6 +923,12 @@ function AppContent() {
       teams: nextTeams,
       matches: nextMatches,
     }));
+    if (oldMatchIdsToDelete.length > 0) {
+      setDeletedTombstones((prev) => ({
+        ...prev,
+        matchIds: Array.from(new Set([...(prev.matchIds ?? []), ...oldMatchIdsToDelete])),
+      }));
+    }
     queueMasterSyncForDiscipline(disciplineId);
 
     void (async () => {
@@ -965,15 +1125,22 @@ function AppContent() {
             initialSubTab={panelInitialSubTab}
             focusedMatchId={focusedMatchId}
             pendingSyncKeys={pendingSyncKeys}
+            deletedIds={deletedTombstones}
             autoSyncSessionApproved={autoSyncSessionApproved}
             autoSyncState={autoSyncState}
             onUpdateMatch={handleUpdateMatch}
+            onAddTeam={handleAdminAddTeam}
+            onUpdateTeam={handleAdminUpdateTeam}
+            onDeleteTeam={handleAdminDeleteTeam}
             onAddPlayer={handleAddPlayerToTeam}
             onUpdatePlayer={handleUpdatePlayer}
+            onDeletePlayer={handleDeletePlayer}
             onUpdateConfig={handleUpdateConfig}
             onSaveMasterSheets={handleSaveMasterSheets}
             onApproveAutoSyncSession={setAutoSyncSessionApproved}
             onClearPendingSyncKeys={handleClearPendingSyncKeys}
+            onClearDeletedTombstones={handleClearDeletedTombstones}
+            onApplySheetImports={handleApplySheetImports}
             onMarkSynced={handleMarkSynced}
             onAdminChangeUserRole={handleAdminChangeUserRole}
             onRefreshUsers={handleRefreshUsers}
