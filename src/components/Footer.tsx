@@ -82,13 +82,37 @@ export function Footer({ onNavigate }: FooterProps) {
                   Panel de arbitraje, roles y Google Sheets
                 </button>
               </li>
+              <li>
+                <a
+                  href="/privacidad"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('privacidad');
+                  }}
+                  className="hover:text-[#707ef9] cursor-pointer"
+                >
+                  Política de Privacidad
+                </a>
+              </li>
             </ul>
           </div>
         </div>
 
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
           <span>© 2026 Campeonato Intercarreras · Universidad de La Frontera, Temuco, Chile</span>
-          <span>Dirección de Desarrollo Estudiantil · División de Deportes</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <a
+              href="/privacidad"
+              onClick={(e) => {
+                e.preventDefault();
+                onNavigate('privacidad');
+              }}
+              className="text-neutral-300 hover:text-[#707ef9] underline"
+            >
+              Política de Privacidad
+            </a>
+            <span>Dirección de Desarrollo Estudiantil · División de Deportes</span>
+          </div>
         </div>
       </div>
     </footer>

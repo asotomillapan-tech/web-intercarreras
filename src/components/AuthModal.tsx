@@ -13,6 +13,7 @@ interface AuthModalProps {
   onGoogleSignIn: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onOpenAccountHub: () => void;
+  onOpenPrivacy?: () => void;
 }
 
 export function AuthModal({
@@ -24,6 +25,7 @@ export function AuthModal({
   onGoogleSignIn,
   onSignOut,
   onOpenAccountHub,
+  onOpenPrivacy,
 }: AuthModalProps) {
   const [signingOut, setSigningOut] = useState(false);
 
@@ -199,6 +201,24 @@ export function AuthModal({
                 persona ha iniciado sesión por primera vez.
               </p>
             </div>
+
+            <p className="text-[11px] text-neutral-500 text-center">
+              Al iniciar sesión, aceptas el tratamiento de datos descrito en nuestra{' '}
+              <a
+                href="/privacidad"
+                onClick={(e) => {
+                  if (onOpenPrivacy) {
+                    e.preventDefault();
+                    onClose();
+                    onOpenPrivacy();
+                  }
+                }}
+                className="text-[#707ef9] font-medium underline"
+              >
+                Política de Privacidad
+              </a>
+              .
+            </p>
           </div>
         </div>
       </div>

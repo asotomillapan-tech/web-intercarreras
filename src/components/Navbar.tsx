@@ -16,7 +16,8 @@ export type NavSection =
   | 'inscripciones'
   | 'transferencias'
   | 'cuenta'
-  | 'panel';
+  | 'panel'
+  | 'privacidad';
 
 interface NavbarProps {
   activeSection: NavSection;

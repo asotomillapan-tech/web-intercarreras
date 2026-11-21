@@ -55,6 +55,7 @@ import { HomeView } from './components/HomeView';
 import { MatchMvpModal } from './components/MatchMvpModal';
 import { Navbar, type NavSection } from './components/Navbar';
 import { PlayersView } from './components/PlayersView';
+import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { RegistrationView } from './components/RegistrationView';
 import { StandingsView } from './components/StandingsView';
 import { TeamProfileModal } from './components/TeamProfileModal';
@@ -76,9 +77,23 @@ import type {
 } from './types/tournament';
 import type { AutoSyncStatusInfo } from './components/MasterSheetsPanel';
 
+function isPrivacyPath(pathname: string): boolean {
+  const clean = pathname.replace(/\/+$/, '').toLowerCase();
+  return (
+    clean === '/privacidad' ||
+    clean === '/politica-de-privacidad' ||
+    clean === '/privacy' ||
+    clean === '/privacy-policy'
+  );
+}
+
 function AppContent() {
   const [state, setState] = useState<TournamentState>(() => createInitialTournamentState());
-  const [activeSection, setActiveSection] = useState<NavSection>('inicio');
+  const [activeSection, setActiveSection] = useState<NavSection>(() =>
+    typeof window !== 'undefined' && isPrivacyPath(window.location.pathname)
+      ? 'privacidad'
+      : 'inicio'
+  );
   const [selectedDiscipline, setSelectedDiscipline] = useState<DisciplineId>('f7-h-1');
   const [inspectedPlayer, setInspectedPlayer] = useState<Player | null>(null);
   const [inspectedTeamId, setInspectedTeamId] = useState<string | null>(null);
@@ -456,10 +471,29 @@ function AppContent() {
     return state.teams.find((t) => t.id === inspectedTeamId) ?? null;
   }, [inspectedTeamId, state.teams]);
 
+  useEffect(() => {
+    const onPopState = () => {
+      if (isPrivacyPath(window.location.pathname)) {
+        setActiveSection('privacidad');
+      } else {
+        setActiveSection((prev) => (prev === 'privacidad' ? 'inicio' : prev));
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   const handleNavigate = (section: NavSection) => {
     setActiveSection(section);
     if (section !== 'jugadores') {
       setInspectedPlayer(null);
+    }
+    if (typeof window !== 'undefined') {
+      if (section === 'privacidad' && !isPrivacyPath(window.location.pathname)) {
+        window.history.pushState({}, '', '/privacidad');
+      } else if (section !== 'privacidad' && isPrivacyPath(window.location.pathname)) {
+        window.history.pushState({}, '', '/');
+      }
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1147,6 +1181,10 @@ function AppContent() {
             onOpenAuth={() => setAuthModalOpen(true)}
           />
         )}
+
+        {activeSection === 'privacidad' && (
+          <PrivacyPolicyView onNavigate={handleNavigate} />
+        )}
       </main>
 
       <Footer onNavigate={handleNavigate} />
@@ -1187,6 +1225,7 @@ function AppContent() {
         onGoogleSignIn={handleGoogleSignIn}
         onSignOut={handleSignOut}
         onOpenAccountHub={() => handleNavigate('cuenta')}
+        onOpenPrivacy={() => handleNavigate('privacidad')}
       />
     </div>
   );
