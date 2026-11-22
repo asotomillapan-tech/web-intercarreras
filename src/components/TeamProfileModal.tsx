@@ -25,6 +25,7 @@ import type {
   Player,
   Team,
 } from '../types/tournament';
+import { TeamCrest } from './TeamCrest';
 
 interface TeamProfileModalProps {
   team: Team | null;
@@ -145,12 +146,17 @@ export function TeamProfileModal({
         {/* Carbon Editorial Team Header */}
         <div className="bg-[#0d0d0d] text-white p-6 sm:p-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-16 h-16 bg-[#707ef9] text-white font-display text-3xl uppercase flex items-center justify-center shrink-0">
-              {team.sigla}
-            </div>
+            <TeamCrest
+              escudo={team.escudo}
+              sigla={team.sigla}
+              nombre={team.nombre}
+              size="xl"
+              surface="dark"
+            />
             <div>
               <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
                 {disciplineMeta.nombre} · {team.groupName}
+                {team.anioFundacion ? ` · Fundado en ${team.anioFundacion}` : ''}
               </p>
               <h2
                 id="team-profile-title"

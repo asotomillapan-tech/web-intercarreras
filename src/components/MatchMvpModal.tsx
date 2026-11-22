@@ -87,9 +87,9 @@ export function MatchMvpModal({
                 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-tight mt-1"
               >
                 {votingOpen
-                  ? 'Encuentro en Horario Programado · Votación MVP'
+                  ? 'Encuentro en Horario Programado · Votación POTM'
                   : revealData
-                  ? 'Ficha Oficial Post-Partido y MVP'
+                  ? 'Ficha Oficial Post-Partido y Player of The Match (POTM)'
                   : 'Encuentro Programado'}
               </h2>
             </div>

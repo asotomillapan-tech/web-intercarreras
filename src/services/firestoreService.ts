@@ -19,6 +19,7 @@ import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
 import type {
   AcademicLevel,
   AppUserProfile,
+  ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
   MasterSheetKey,
@@ -30,7 +31,9 @@ import type {
   PhotoEntry,
   Player,
   PlayerStats,
+  PositionAwardVoteRecord,
   Team,
+  TotyBallotRecord,
   TournamentState,
   TransferRecord,
   UserRole,
@@ -105,6 +108,10 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     votesRes,
     photosRes,
     newsRes,
+    nomineesRes,
+    champMvpRes,
+    posAwardsRes,
+    totyRes,
   ] = await Promise.allSettled([
     getDoc(doc(db, 'settings', 'tournament')),
     getDocs(query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
@@ -115,6 +122,10 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'mvp_votes'), where('matchId', '>=', ''))),
     getDocs(query(collection(db, 'photos'), where('season', '>=', ''))),
     getDocs(query(collection(db, 'news'), where('published', '==', true))),
+    getDocs(query(collection(db, 'award_nominees'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'championship_mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'position_award_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
   ]);
 
   const result: Partial<TournamentState> = {};
@@ -204,6 +215,11 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
         carrera: String(data.carrera || ''),
         facultad: String(data.facultad || ''),
         groupName: String(data.groupName || 'Grupo A'),
+        escudo: typeof data.escudo === 'string' && data.escudo ? data.escudo : undefined,
+        anioFundacion:
+          typeof data.anioFundacion === 'number' && Number.isFinite(data.anioFundacion)
+            ? Math.trunc(data.anioFundacion)
+            : undefined,
         logrosAnteriores: typeof data.logrosAnteriores === 'string' ? data.logrosAnteriores : undefined,
         createdByUid: typeof data.createdByUid === 'string' ? data.createdByUid : undefined,
       };
@@ -329,6 +345,77 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     result.news = newsRes.value.docs
       .map((d) => mapNewsDoc(d.id, d.data()))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  if (nomineesRes.status === 'fulfilled') {
+    const map: Partial<Record<DisciplineId, string[]>> = {};
+    nomineesRes.value.docs.forEach((d) => {
+      const data = d.data();
+      const discId = (data.disciplineId || d.id) as DisciplineId;
+      if (ALL_DISCIPLINE_IDS.includes(discId) && Array.isArray(data.mvpNomineeIds)) {
+        map[discId] = data.mvpNomineeIds
+          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+          .slice(0, 5);
+      }
+    });
+    result.awardNominees = map;
+  }
+
+  if (champMvpRes.status === 'fulfilled') {
+    result.championshipMvpVotes = champMvpRes.value.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        disciplineId: data.disciplineId as DisciplineId,
+        temporada: String(data.temporada || '2026'),
+        voterUid: String(data.voterUid || ''),
+        playerId: String(data.playerId || ''),
+        playerName: String(data.playerName || ''),
+        teamId: String(data.teamId || ''),
+        createdAt: toIso(data.createdAt),
+        updatedAt: toIso(data.updatedAt),
+      };
+    });
+  }
+
+  if (posAwardsRes.status === 'fulfilled') {
+    result.positionAwardVotes = posAwardsRes.value.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        disciplineId: data.disciplineId as DisciplineId,
+        temporada: String(data.temporada || '2026'),
+        positionKey: String(data.positionKey || ''),
+        positionLabel: String(data.positionLabel || ''),
+        voterUid: String(data.voterUid || ''),
+        playerId: String(data.playerId || ''),
+        playerName: String(data.playerName || ''),
+        teamId: String(data.teamId || ''),
+        createdAt: toIso(data.createdAt),
+        updatedAt: toIso(data.updatedAt),
+      };
+    });
+  }
+
+  if (totyRes.status === 'fulfilled') {
+    result.totyBallots = totyRes.value.docs.map((d) => {
+      const data = d.data();
+      const rawSel = data.selections && typeof data.selections === 'object' ? data.selections : {};
+      const selections: Record<string, string> = {};
+      Object.entries(rawSel as Record<string, unknown>).forEach(([k, v]) => {
+        if (typeof v === 'string' && v.trim()) {
+          selections[k] = v.trim();
+        }
+      });
+      return {
+        id: d.id,
+        disciplineId: data.disciplineId as DisciplineId,
+        temporada: String(data.temporada || '2026'),
+        voterUid: String(data.voterUid || ''),
+        selections,
+        updatedAt: toIso(data.updatedAt),
+      };
+    });
   }
 
   return result;
@@ -798,36 +885,72 @@ export async function ensureAllConfigsInFirestore(
 // 4. Teams, Players (Public + Isolated Private PII), Matches & Transfers
 // ---------------------------------------------------------------------------
 
-export async function saveFirestoreTeam(team: Team, actorUid: string, isNew: boolean): Promise<void> {
+export async function saveFirestoreTeam(
+  team: Team,
+  actorUid: string,
+  isNew: boolean,
+  actorRole?: UserRole
+): Promise<void> {
   const path = `teams/${team.id}`;
   try {
     const ref = doc(db, 'teams', team.id);
+    const safeNombre = (team.nombre || '').trim().slice(0, 120);
+    const nombre = safeNombre.length >= 2 ? safeNombre : safeNombre.padEnd(2, 'X');
+    const safeSigla = (team.sigla || '').trim().toUpperCase().slice(0, 8);
+    const sigla = safeSigla.length >= 2 ? safeSigla : nombre.slice(0, 3).toUpperCase().padEnd(2, 'X');
+    const safeCarrera = (team.carrera || '').trim().slice(0, 140);
+    const carrera = safeCarrera.length >= 2 ? safeCarrera : 'Carrera UFRO';
+    const safeFacultad = (team.facultad || '').trim().slice(0, 140);
+    const facultad = safeFacultad.length >= 2 ? safeFacultad : 'Universidad de La Frontera';
+    const groupName = ((team.groupName || '').trim() || 'Grupo A').slice(0, 40);
+    const validYear =
+      typeof team.anioFundacion === 'number' &&
+      Number.isFinite(team.anioFundacion) &&
+      Math.trunc(team.anioFundacion) >= 1950 &&
+      Math.trunc(team.anioFundacion) <= 2035
+        ? Math.trunc(team.anioFundacion)
+        : undefined;
+
     if (isNew) {
       const payload: Record<string, unknown> = {
         id: team.id,
-        nombre: team.nombre.trim().slice(0, 120),
-        sigla: team.sigla.trim().slice(0, 8),
+        nombre,
+        sigla,
         disciplineId: team.disciplineId,
-        carrera: team.carrera.trim().slice(0, 140),
-        facultad: team.facultad.trim().slice(0, 140),
-        groupName: team.groupName.trim().slice(0, 40),
+        carrera,
+        facultad,
+        groupName,
         createdByUid: actorUid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
+      if (team.escudo && team.escudo.length <= 160000) {
+        payload.escudo = team.escudo;
+      }
+      if (validYear !== undefined) {
+        payload.anioFundacion = validYear;
+      }
       if (team.logrosAnteriores) {
         payload.logrosAnteriores = team.logrosAnteriores.trim().slice(0, 160);
       }
       await setDoc(ref, payload);
     } else {
       const updatePayload: Record<string, unknown> = {
-        nombre: team.nombre.trim().slice(0, 120),
-        sigla: team.sigla.trim().slice(0, 8),
-        carrera: team.carrera.trim().slice(0, 140),
-        facultad: team.facultad.trim().slice(0, 140),
-        groupName: team.groupName.trim().slice(0, 40),
+        nombre,
+        sigla,
         updatedAt: serverTimestamp(),
       };
+      if (actorRole !== 'delegado') {
+        updatePayload.carrera = carrera;
+        updatePayload.facultad = facultad;
+        updatePayload.groupName = groupName;
+      }
+      if (team.escudo !== undefined && team.escudo.length <= 160000) {
+        updatePayload.escudo = team.escudo;
+      }
+      if (validYear !== undefined) {
+        updatePayload.anioFundacion = validYear;
+      }
       if (team.logrosAnteriores !== undefined) {
         updatePayload.logrosAnteriores = team.logrosAnteriores.trim().slice(0, 160);
       }
@@ -1408,3 +1531,142 @@ export async function deleteFirestoreNewsArticle(newsId: string): Promise<void> 
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+// ---------------------------------------------------------------------------
+// 7. Championship Awards, MVP Nominees, Position Awards & TOTY Ballots
+// ---------------------------------------------------------------------------
+
+export async function saveFirestoreAwardNominees(
+  disciplineId: DisciplineId,
+  temporada: string,
+  mvpNomineeIds: string[]
+): Promise<void> {
+  const path = `award_nominees/${disciplineId}`;
+  try {
+    const ref = doc(db, 'award_nominees', disciplineId);
+    const cleanedIds = Array.from(new Set(mvpNomineeIds.map((id) => id.trim()).filter(Boolean))).slice(
+      0,
+      5
+    );
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        temporada: (temporada || '2026').slice(0, 16),
+        mvpNomineeIds: cleanedIds,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        disciplineId,
+        temporada: (temporada || '2026').slice(0, 16),
+        mvpNomineeIds: cleanedIds,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveFirestoreChampionshipMvpVote(
+  vote: ChampionshipMvpVoteRecord
+): Promise<void> {
+  const voteId = `${vote.disciplineId}_${vote.voterUid}`;
+  const path = `championship_mvp_votes/${voteId}`;
+  try {
+    const ref = doc(db, 'championship_mvp_votes', voteId);
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        playerId: vote.playerId,
+        playerName: vote.playerName.trim().slice(0, 120),
+        teamId: vote.teamId,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        disciplineId: vote.disciplineId,
+        temporada: (vote.temporada || '2026').slice(0, 16),
+        voterUid: vote.voterUid,
+        playerId: vote.playerId,
+        playerName: vote.playerName.trim().slice(0, 120),
+        teamId: vote.teamId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveFirestorePositionAwardVote(
+  vote: PositionAwardVoteRecord
+): Promise<void> {
+  const voteId = `${vote.disciplineId}_${vote.positionKey}_${vote.voterUid}`;
+  const path = `position_award_votes/${voteId}`;
+  try {
+    const ref = doc(db, 'position_award_votes', voteId);
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        positionLabel: vote.positionLabel.trim().slice(0, 60),
+        playerId: vote.playerId,
+        playerName: vote.playerName.trim().slice(0, 120),
+        teamId: vote.teamId,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        disciplineId: vote.disciplineId,
+        temporada: (vote.temporada || '2026').slice(0, 16),
+        positionKey: vote.positionKey.trim().slice(0, 32),
+        positionLabel: vote.positionLabel.trim().slice(0, 60),
+        voterUid: vote.voterUid,
+        playerId: vote.playerId,
+        playerName: vote.playerName.trim().slice(0, 120),
+        teamId: vote.teamId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveFirestoreTotyBallot(ballot: TotyBallotRecord): Promise<void> {
+  const ballotId = `${ballot.disciplineId}_${ballot.voterUid}`;
+  const path = `toty_ballots/${ballotId}`;
+  try {
+    const ref = doc(db, 'toty_ballots', ballotId);
+    const cleanSelections: Record<string, string> = {};
+    Object.entries(ballot.selections)
+      .slice(0, 10)
+      .forEach(([posKey, playerId]) => {
+        if (posKey.trim() && playerId.trim()) {
+          cleanSelections[posKey.trim().slice(0, 32)] = playerId.trim().slice(0, 128);
+        }
+      });
+
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        selections: cleanSelections,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        disciplineId: ballot.disciplineId,
+        temporada: (ballot.temporada || '2026').slice(0, 16),
+        voterUid: ballot.voterUid,
+        selections: cleanSelections,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+

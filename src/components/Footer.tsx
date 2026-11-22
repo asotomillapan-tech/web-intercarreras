@@ -36,7 +36,7 @@ export function Footer({ onNavigate }: FooterProps) {
             <ul className="space-y-2 text-sm text-neutral-300">
               <li>
                 <button type="button" onClick={() => onNavigate('inicio')} className="hover:text-[#707ef9] cursor-pointer">
-                  Inicio, resultados y votación MVP
+                  Inicio y calendario oficial
                 </button>
               </li>
               <li>
@@ -45,8 +45,23 @@ export function Footer({ onNavigate }: FooterProps) {
                 </button>
               </li>
               <li>
+                <button type="button" onClick={() => onNavigate('equipos')} className="hover:text-[#707ef9] cursor-pointer">
+                  Equipos, escudos e historia
+                </button>
+              </li>
+              <li>
                 <button type="button" onClick={() => onNavigate('jugadores')} className="hover:text-[#707ef9] cursor-pointer">
                   Perfiles de jugadores
+                </button>
+              </li>
+              <li>
+                <button type="button" onClick={() => onNavigate('votaciones')} className="hover:text-[#707ef9] cursor-pointer">
+                  Votaciones (POTM, MVP y TOTY)
+                </button>
+              </li>
+              <li>
+                <button type="button" onClick={() => onNavigate('minijuegos')} className="hover:text-[#707ef9] cursor-pointer">
+                  Minijuegos (Fantasy 2027 y Leyendas)
                 </button>
               </li>
               <li>

@@ -1,0 +1,238 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import type {
+  ChampionshipMvpVoteRecord,
+  Player,
+  PositionAwardVoteRecord,
+  Team,
+  TotyBallotRecord,
+} from '../types/tournament.ts';
+import {
+  aggregateChampionshipMvpVotes,
+  aggregatePositionAwardVotes,
+  computeCommunityToty,
+  getPositionsForSport,
+  matchPlayerToPositionKey,
+} from './awardsEngine.ts';
+
+const sampleTeams: Team[] = [
+  {
+    id: 't1',
+    nombre: 'Ingeniería FC',
+    sigla: 'ING',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ingeniería Civil Informática',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo A',
+  },
+  {
+    id: 't2',
+    nombre: 'Medicina FC',
+    sigla: 'MED',
+    disciplineId: 'f7-h-1',
+    carrera: 'Medicina',
+    facultad: 'Facultad de Medicina',
+    groupName: 'Grupo A',
+  },
+];
+
+const makePlayer = (id: string, nombre: string, posicion: string, teamId = 't1'): Player => ({
+  id,
+  teamId,
+  disciplineId: 'f7-h-1',
+  dorsal: 10,
+  posicion,
+  nombre,
+  apellidoPaterno: 'UFRO',
+  apellidoMaterno: 'Test',
+  carrera: 'Ingeniería Civil Informática',
+  facultad: 'Facultad de Ingeniería y Ciencias',
+  rut: '',
+  numeroMatricula: '',
+  correoInstitucional: '',
+  nivelAcademico: 'Pregrado',
+  fechaNacimiento: '',
+  fotografia: '',
+  esSeleccionadoUfro: false,
+  stats: {
+    partidosJugados: 3,
+    goles: 4,
+    asistencias: 2,
+    tarjetasAmarillas: 0,
+    tarjetasRojas: 0,
+    puntos: 0,
+    rebotes: 0,
+    triples: 0,
+    faltas: 0,
+    aces: 0,
+    bloqueos: 0,
+  },
+});
+
+const samplePlayers: Player[] = [
+  makePlayer('p-gk', 'Lucas', 'Portero', 't1'),
+  makePlayer('p-def', 'Matías', 'Defensa Central', 't1'),
+  makePlayer('p-mid', 'Diego', 'Volante Mixto', 't2'),
+  makePlayer('p-fw-a', 'Jugador A', 'Delantero', 't1'),
+  makePlayer('p-fw-b', 'Jugador B', 'Extremo / Delantero', 't2'),
+];
+
+test('sport positions cover football, basketball 5x5, basketball 3x3, and volleyball', () => {
+  assert.deepEqual(
+    getPositionsForSport('futbol7').map((p) => p.key),
+    ['arquero', 'defensa', 'mediocampista', 'delantero']
+  );
+  assert.deepEqual(
+    getPositionsForSport('basquetbol').map((p) => p.key),
+    ['base', 'escolta', 'alero', 'ala_pivot', 'pivot']
+  );
+  assert.deepEqual(
+    getPositionsForSport('basquetbol3x3').map((p) => p.key),
+    ['base', 'alero', 'pivot']
+  );
+  assert.deepEqual(
+    getPositionsForSport('voleibol').map((p) => p.key),
+    ['armador', 'punta', 'central', 'opuesto', 'libero']
+  );
+});
+
+test('matchPlayerToPositionKey maps specific keywords before generic ones', () => {
+  assert.equal(matchPlayerToPositionKey('Portero Titular', 'futbol7'), 'arquero');
+  assert.equal(matchPlayerToPositionKey('Ala-Pívot', 'basquetbol'), 'ala_pivot');
+  assert.equal(matchPlayerToPositionKey('Pívot', 'basquetbol'), 'pivot');
+  assert.equal(matchPlayerToPositionKey('Líbero', 'voleibol'), 'libero');
+  assert.equal(matchPlayerToPositionKey('Punta Receptor', 'voleibol'), 'punta');
+});
+
+test('aggregateChampionshipMvpVotes counts only votes for the 5 admin nominees', () => {
+  const votes: ChampionshipMvpVoteRecord[] = [
+    {
+      id: 'f7-h-1_u1',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u1',
+      playerId: 'p-fw-b',
+      playerName: 'Jugador B UFRO',
+      teamId: 't2',
+      createdAt: '2026-05-01T10:00:00Z',
+    },
+    {
+      id: 'f7-h-1_u2',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u2',
+      playerId: 'p-fw-b',
+      playerName: 'Jugador B UFRO',
+      teamId: 't2',
+      createdAt: '2026-05-01T10:05:00Z',
+    },
+    {
+      id: 'f7-h-1_u3',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u3',
+      playerId: 'p-fw-a',
+      playerName: 'Jugador A UFRO',
+      teamId: 't1',
+      createdAt: '2026-05-01T10:10:00Z',
+    },
+    // Non-nominated player vote should be excluded from official 5-nominee tally
+    {
+      id: 'f7-h-1_u4',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u4',
+      playerId: 'non-nominee',
+      playerName: 'Otro',
+      teamId: 't1',
+      createdAt: '2026-05-01T10:12:00Z',
+    },
+  ];
+
+  const res = aggregateChampionshipMvpVotes(
+    'f7-h-1',
+    ['p-gk', 'p-def', 'p-mid', 'p-fw-a', 'p-fw-b'],
+    votes,
+    samplePlayers,
+    sampleTeams
+  );
+
+  assert.equal(res.totalVotes, 3);
+  assert.equal(res.candidates.length, 5);
+  assert.equal(res.candidates[0].playerId, 'p-fw-b');
+  assert.equal(res.candidates[0].votes, 2);
+  assert.equal(res.candidates[0].percentage, 67);
+});
+
+test('aggregatePositionAwardVotes ranks players per position', () => {
+  const votes: PositionAwardVoteRecord[] = [
+    {
+      id: 'f7-h-1_arquero_u1',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      positionKey: 'arquero',
+      positionLabel: 'Arquero / Portero',
+      voterUid: 'u1',
+      playerId: 'p-gk',
+      playerName: 'Lucas UFRO',
+      teamId: 't1',
+      createdAt: '2026-05-01T10:00:00Z',
+    },
+  ];
+
+  const standings = aggregatePositionAwardVotes(
+    'f7-h-1',
+    'futbol7',
+    votes,
+    samplePlayers,
+    sampleTeams
+  );
+
+  const gkAward = standings.find((s) => s.position.key === 'arquero');
+  assert.ok(gkAward);
+  assert.equal(gkAward.totalVotes, 1);
+  assert.equal(gkAward.leader?.playerId, 'p-gk');
+});
+
+test('computeCommunityToty picks the highest-voted player per position (Jugador B 12 votes > Jugador A 10 votes)', () => {
+  const ballots: TotyBallotRecord[] = [];
+  for (let i = 0; i < 10; i++) {
+    ballots.push({
+      id: `f7-h-1_userA_${i}`,
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: `userA_${i}`,
+      selections: {
+        arquero: 'p-gk',
+        defensa: 'p-def',
+        mediocampista: 'p-mid',
+        delantero: 'p-fw-a',
+      },
+      updatedAt: '2026-05-02T12:00:00Z',
+    });
+  }
+  for (let i = 0; i < 12; i++) {
+    ballots.push({
+      id: `f7-h-1_userB_${i}`,
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: `userB_${i}`,
+      selections: {
+        arquero: 'p-gk',
+        defensa: 'p-def',
+        mediocampista: 'p-mid',
+        delantero: 'p-fw-b',
+      },
+      updatedAt: '2026-05-02T12:05:00Z',
+    });
+  }
+
+  const toty = computeCommunityToty('f7-h-1', 'futbol7', ballots, samplePlayers, sampleTeams);
+  assert.equal(toty.totalBallots, 22);
+  const delanteroSlot = toty.slots.find((s) => s.position.key === 'delantero');
+  assert.ok(delanteroSlot);
+  assert.equal(delanteroSlot.winner?.playerId, 'p-fw-b');
+  assert.equal(delanteroSlot.winner?.votes, 12);
+  assert.equal(delanteroSlot.runnerUps[0]?.playerId, 'p-fw-a');
+  assert.equal(delanteroSlot.runnerUps[0]?.votes, 10);
+});

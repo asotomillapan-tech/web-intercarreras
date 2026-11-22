@@ -15,6 +15,12 @@
 12. **Playoff Phase & Leg Integrity**: `/matches/{matchId}.fase` is restricted strictly to `['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Tercer Lugar', 'Final']`, optional `playoffLeg` is restricted strictly to `['IDA', 'VUELTA', 'UNICO']`, and optional `/configs/{disciplineId}.playoffsIdaYVuelta` must be a boolean.
 13. **Public Transfer Announcements vs Private Pending Requests**: Only effected transfers (`estado == 'APROBADA'`) are publicly readable in `/transfers/{transferId}` for the Homepage and Public Transfers Directory. `PENDIENTE` and `RECHAZADA` transfer records are readable strictly by the involved teams' delegates (`isDelegadoOf(fromTeamId) || isDelegadoOf(toTeamId)`) or `isAdmin()`.
 14. **Strict Timestamps & Schema Validation**: Every write validates `isValidId()` on single-doc targets, `isValid[Entity](incoming())`, `hasAll`/`hasOnly` keys, string `.size()` limits, bounded arrays, and `request.time` for `createdAt`/`updatedAt`.
+15. **Team Crest & Founding Metadata Bounds**: Optional `/teams/{teamId}.escudo` is bounded to `<= 160000` chars (sanitized SVG or transparent PNG data URI) and `anioFundacion` is an integer in `[1950, 2035]`, editable strictly by `Admin` or the team's assigned `Delegado`.
+16. **Official Awards & TOTY Voting Integrity**:
+    - `/award_nominees/{disciplineId}` (up to 5 official MVP nominees per discipline) is writable strictly by `isAdmin()`.
+    - `/championship_mvp_votes/{voteId}` enforces deterministic 1-vote-per-user-per-discipline (`voteId == disciplineId + '_' + request.auth.uid`, `voterUid == request.auth.uid`) for verified accounts only.
+    - `/position_award_votes/{voteId}` enforces deterministic 1-vote-per-user-per-position (`voteId == disciplineId + '_' + positionKey + '_' + request.auth.uid`).
+    - `/toty_ballots/{ballotId}` enforces deterministic 1-ballot-per-user-per-discipline (`ballotId == disciplineId + '_' + request.auth.uid`) with bounded `selections` map (`1..10` entries).
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
 1. **Self-Admin Escalation on Create**: `POST /users/{uid}` with `role: 'admin'` by non-bootstrapped user -> DENIED.
@@ -23,7 +29,7 @@
 4. **Shadow Field Injection on Team**: `POST /teams/{id}` with ghost field `isOfficial: true` -> DENIED (`hasOnly` check).
 5. **Public Student PII Scraping**: Unauthenticated or `tradicional` user calling `GET /player_private/PL-001` -> DENIED.
 6. **Jugador Stat Tampering**: Linked `jugador` updating `stats.goles` or `esSeleccionadoUfro: true` on `/players/{playerId}` -> DENIED (`affectedKeys().hasOnly(...)`).
-7. **Cross-Team Delegado Hijack**: `delegado` of `TEAM-A` updating a player belonging to `TEAM-B` -> DENIED.
+7. **Cross-Team Delegado Hijack**: `delegado` of `TEAM-A` updating a player or crest belonging to `TEAM-B` -> DENIED.
 8. **Referee Post-Finalization Tampering**: `arbitro` updating `homeScore` on a match whose existing `status == 'FINALIZADO'` -> DENIED (Terminal State Lock).
 9. **Registration While Closed**: `delegado` creating `/teams/T-NEW` when `/configs/{disciplineId}.inscripcionesAbiertas == false` -> DENIED.
 10. **Transfer Bypass / Self-Approval**:
@@ -32,5 +38,6 @@
     - Initiating `delegado` of `fromTeam` attempting to approve the `toTeam` side (`toTeamApproved: true`) -> DENIED.
     - Delegate mutating an already `APROBADA` or `RECHAZADA` transfer -> DENIED (Terminal State Lock).
     - Public visitor reading a `PENDIENTE` or `RECHAZADA` transfer document -> DENIED.
-11. **Unauthorized News Publishing / Draft Leak**: `tradicional`, `jugador`, `delegado`, or `arbitro` creating/updating `/news/{id}` or reading `/news/{draftId}` (`published == false`) -> DENIED.
-12. **Resource Poisoning / Oversized ID**: Creating `/photos/{200-char-id}` or `/news/{id}` with `content` > 12000 chars -> DENIED (`isValidId` + `.size()`).
+11. **Unauthorized News Publishing / Draft Leak / Nominee Tampering**: Non-press creating `/news/{id}`, or non-admin mutating `/award_nominees/{disciplineId}` or exceeding 5 nominees -> DENIED.
+12. **Ballot Stuffing & Resource Poisoning**: Authenticated user creating `/championship_mvp_votes/f7-h-1_otherUid`, `/toty_ballots/f7-h-1_fake` with spoofed `voterUid`, or uploading `/teams/{id}.escudo` > 160 KB -> DENIED.
+

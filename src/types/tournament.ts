@@ -67,6 +67,8 @@ export interface Team {
   carrera: string;
   facultad: string;
   groupName: string;
+  escudo?: string;
+  anioFundacion?: number;
   logrosAnteriores?: string;
   capitanCorreo?: string;
   createdByUid?: string;
@@ -398,6 +400,48 @@ export interface NewsArticle {
   updatedAt: string;
 }
 
+export interface AwardNomineesConfig {
+  disciplineId: DisciplineId;
+  temporada: string;
+  mvpNomineeIds: string[];
+  updatedAt?: string;
+}
+
+export interface ChampionshipMvpVoteRecord {
+  id: string;
+  disciplineId: DisciplineId;
+  temporada: string;
+  voterUid: string;
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PositionAwardVoteRecord {
+  id: string;
+  disciplineId: DisciplineId;
+  temporada: string;
+  positionKey: string;
+  positionLabel: string;
+  voterUid: string;
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TotyBallotRecord {
+  id: string;
+  disciplineId: DisciplineId;
+  temporada: string;
+  voterUid: string;
+  selections: Record<string, string>;
+  updatedAt: string;
+}
+
 export interface TournamentState {
   temporada: string;
   configs: Record<DisciplineId, DisciplineFormatConfig>;
@@ -408,6 +452,10 @@ export interface TournamentState {
   referees: RefereeProfile[];
   users: AppUserProfile[];
   mvpVotes: MvpVoteRecord[];
+  awardNominees: Partial<Record<DisciplineId, string[]>>;
+  championshipMvpVotes: ChampionshipMvpVoteRecord[];
+  positionAwardVotes: PositionAwardVoteRecord[];
+  totyBallots: TotyBallotRecord[];
   photos: PhotoEntry[];
   news: NewsArticle[];
   driveUploadRootFolderId?: string;

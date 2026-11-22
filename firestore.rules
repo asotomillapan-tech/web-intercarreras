@@ -274,6 +274,8 @@ service cloud.firestore {
           'carrera',
           'facultad',
           'groupName',
+          'escudo',
+          'anioFundacion',
           'logrosAnteriores',
           'createdByUid',
           'createdAt',
@@ -286,6 +288,8 @@ service cloud.firestore {
         && data.carrera is string && data.carrera.size() >= 2 && data.carrera.size() <= 140
         && data.facultad is string && data.facultad.size() >= 2 && data.facultad.size() <= 140
         && data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 40
+        && (!('escudo' in data) || (data.escudo is string && data.escudo.size() <= 160000))
+        && (!('anioFundacion' in data) || (data.anioFundacion is int && data.anioFundacion >= 1950 && data.anioFundacion <= 2035))
         && (!('logrosAnteriores' in data) || (data.logrosAnteriores is string && data.logrosAnteriores.size() <= 160))
         && (!('createdByUid' in data) || isValidId(data.createdByUid))
         && data.createdAt is timestamp
@@ -675,6 +679,119 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidAwardNominees(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'mvpNomineeIds',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'mvpNomineeIds',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && data.mvpNomineeIds is list && data.mvpNomineeIds.size() <= 5
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChampionshipMvpVote(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'voterUid',
+          'playerId',
+          'playerName',
+          'teamId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'voterUid',
+          'playerId',
+          'playerName',
+          'teamId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && isValidId(data.voterUid)
+        && isValidId(data.playerId)
+        && data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 120
+        && isValidId(data.teamId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPositionAwardVote(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'positionKey',
+          'positionLabel',
+          'voterUid',
+          'playerId',
+          'playerName',
+          'teamId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'positionKey',
+          'positionLabel',
+          'voterUid',
+          'playerId',
+          'playerName',
+          'teamId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && data.positionKey is string && data.positionKey.size() >= 2 && data.positionKey.size() <= 32
+        && data.positionKey.matches('^[a-z0-9_]+$')
+        && data.positionLabel is string && data.positionLabel.size() >= 2 && data.positionLabel.size() <= 60
+        && isValidId(data.voterUid)
+        && isValidId(data.playerId)
+        && data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 120
+        && isValidId(data.teamId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTotyBallot(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'voterUid',
+          'selections',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'voterUid',
+          'selections',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && isValidId(data.voterUid)
+        && data.selections is map && data.selections.size() >= 1 && data.selections.size() <= 10
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection 1: /users/{userId} (PII isolated to owner or admin) ---
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
@@ -864,15 +981,22 @@ service cloud.firestore {
               'carrera',
               'facultad',
               'groupName',
+              'escudo',
+              'anioFundacion',
               'logrosAnteriores',
               'updatedAt'
             ])
           )
           || (
-            isDelegadoOf(teamId)
+            (
+              isDelegadoOf(teamId)
+              || (isDelegado() && 'createdByUid' in existing() && existing().createdByUid == request.auth.uid)
+            )
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'nombre',
               'sigla',
+              'escudo',
+              'anioFundacion',
               'logrosAnteriores',
               'updatedAt'
             ])
@@ -1370,6 +1494,144 @@ service cloud.firestore {
         && isPress();
 
       allow delete: if isValidId(newsId) && isPress();
+    }
+
+    // --- Collection 13: /award_nominees/{disciplineId} (Admin-Managed 5 Championship MVP Nominees) ---
+    match /award_nominees/{disciplineId} {
+      allow get: if isValidDiscipline(disciplineId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isAdmin()
+        && isValidAwardNominees(incoming())
+        && incoming().disciplineId == disciplineId
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isAdmin()
+        && isValidAwardNominees(incoming())
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'temporada',
+          'mvpNomineeIds',
+          'updatedAt'
+        ]);
+
+      allow delete: if isValidDiscipline(disciplineId) && isAdmin();
+    }
+
+    // --- Collection 14: /championship_mvp_votes/{voteId} (1 Verified Vote per User per Discipline) ---
+    match /championship_mvp_votes/{voteId} {
+      allow get: if isValidId(voteId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(voteId)
+        && isValidChampionshipMvpVote(incoming())
+        && incoming().voterUid == request.auth.uid
+        && voteId == incoming().disciplineId + '_' + request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(voteId)
+        && isValidChampionshipMvpVote(incoming())
+        && incoming().voterUid == existing().voterUid
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().temporada == existing().temporada
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().voterUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'playerId',
+              'playerName',
+              'teamId',
+              'updatedAt'
+            ])
+          )
+          || isAdmin()
+        );
+
+      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+    }
+
+    // --- Collection 15: /position_award_votes/{voteId} (1 Verified Vote per User per Sport Position) ---
+    match /position_award_votes/{voteId} {
+      allow get: if isValidId(voteId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(voteId)
+        && isValidPositionAwardVote(incoming())
+        && incoming().voterUid == request.auth.uid
+        && voteId == incoming().disciplineId + '_' + incoming().positionKey + '_' + request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(voteId)
+        && isValidPositionAwardVote(incoming())
+        && incoming().voterUid == existing().voterUid
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().temporada == existing().temporada
+        && incoming().positionKey == existing().positionKey
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().voterUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'positionLabel',
+              'playerId',
+              'playerName',
+              'teamId',
+              'updatedAt'
+            ])
+          )
+          || isAdmin()
+        );
+
+      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+    }
+
+    // --- Collection 16: /toty_ballots/{ballotId} (1 Verified TOTY Ballot per User per Discipline) ---
+    match /toty_ballots/{ballotId} {
+      allow get: if isValidId(ballotId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidId(ballotId)
+        && isValidTotyBallot(incoming())
+        && incoming().voterUid == request.auth.uid
+        && ballotId == incoming().disciplineId + '_' + request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(ballotId)
+        && isValidTotyBallot(incoming())
+        && incoming().voterUid == existing().voterUid
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().temporada == existing().temporada
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().voterUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'selections',
+              'updatedAt'
+            ])
+          )
+          || isAdmin()
+        );
+
+      allow delete: if isValidId(ballotId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
     }
   }
 }

@@ -53,6 +53,7 @@ import type {
   TournamentState,
   UserRole,
 } from '../types/tournament';
+import { AdminAwardsManager } from './AdminAwardsManager';
 import { AdminMatchEditor } from './AdminMatchEditor';
 import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
@@ -65,6 +66,7 @@ export type PanelSubTab =
   | 'partidos'
   | 'equipos'
   | 'jugadores'
+  | 'votaciones'
   | 'usuarios'
   | 'formato'
   | 'sheets';
@@ -106,6 +108,7 @@ interface AdminRefereeViewProps {
     delegatedTeamId?: string,
     linkedPlayerId?: string
   ) => Promise<void> | void;
+  onSaveAwardNominees: (disciplineId: DisciplineId, nomineeIds: string[]) => Promise<void> | void;
   onRefreshUsers?: () => Promise<void> | void;
   onOpenAuth: () => void;
 }
@@ -223,6 +226,7 @@ export function AdminRefereeView({
   onApplySheetImports,
   onMarkSynced,
   onAdminChangeUserRole,
+  onSaveAwardNominees,
   onRefreshUsers,
   onOpenAuth,
 }: AdminRefereeViewProps) {
@@ -832,6 +836,17 @@ export function AdminRefereeView({
                     }`}
                   >
                     Jugadores ({state.players.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('votaciones')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'votaciones'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Votaciones / MVP
                   </button>
                   <button
                     type="button"
@@ -2363,6 +2378,11 @@ export function AdminRefereeView({
             onUpdateNews={onUpdateNews}
             onDeleteNews={onDeleteNews}
           />
+        )}
+
+        {/* TAB 6: NOMINADOS MVP DEL CAMPEONATO (SOLO ADMIN) */}
+        {effectiveSubTab === 'votaciones' && isAdmin && (
+          <AdminAwardsManager state={state} onSaveAwardNominees={onSaveAwardNominees} />
         )}
       </div>
     </div>

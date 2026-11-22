@@ -1,5 +1,5 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
-import { CheckCircle2, Edit3, Lock, Plus, Trash2, Upload, Users } from 'lucide-react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { CheckCircle2, Edit3, Lock, Plus, Shield, Trash2, Upload, Users } from 'lucide-react';
 import {
   DISCIPLINES,
   DISCIPLINE_MAP,
@@ -16,11 +16,14 @@ import type {
   Team,
   TournamentState,
 } from '../types/tournament';
+import { CrestUploader } from './CrestUploader';
+import { TeamCrest } from './TeamCrest';
 
 interface RegistrationViewProps {
   state: TournamentState;
   currentUser: AppUserProfile | null;
   onRegisterTeam: (team: Team, roster: Player[]) => void;
+  onUpdateTeam: (team: Team) => void;
   onUpdatePlayer: (updated: Player) => void;
   onAddPlayerToTeam: (player: Player) => void;
   onOpenSheetsSync: () => void;
@@ -69,6 +72,7 @@ export function RegistrationView({
   state,
   currentUser,
   onRegisterTeam,
+  onUpdateTeam,
   onUpdatePlayer,
   onAddPlayerToTeam,
   onOpenSheetsSync,
@@ -79,6 +83,9 @@ export function RegistrationView({
   const [teamName, setTeamName] = useState('');
   const [teamCarrera, setTeamCarrera] = useState(UFRO_CAREERS[0].carrera);
   const [capitanCorreo, setCapitanCorreo] = useState('');
+  const [teamEscudo, setTeamEscudo] = useState<string>('');
+  const [teamAnioFundacion, setTeamAnioFundacion] = useState<string>('');
+  const [teamLogros, setTeamLogros] = useState<string>('');
   const [roster, setRoster] = useState<DraftPlayer[]>([
     createEmptyPlayer(UFRO_CAREERS[0].carrera, UFRO_CAREERS[0].facultad, 0),
   ]);
@@ -92,8 +99,12 @@ export function RegistrationView({
     if (currentUser.role === 'admin') {
       return [...state.teams].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     }
-    if (currentUser.role === 'delegado' && currentUser.delegatedTeamId) {
-      return state.teams.filter((t) => t.id === currentUser.delegatedTeamId);
+    if (currentUser.role === 'delegado') {
+      return state.teams.filter(
+        (t) =>
+          (currentUser.delegatedTeamId && t.id === currentUser.delegatedTeamId) ||
+          t.createdByUid === currentUser.uid
+      );
     }
     return [];
   }, [currentUser, state.teams]);
@@ -101,6 +112,21 @@ export function RegistrationView({
   const [selectedManagedTeamId, setSelectedManagedTeamId] = useState<string>('');
   const effectiveManagedTeam =
     managedTeams.find((t) => t.id === selectedManagedTeamId) ?? managedTeams[0] ?? null;
+
+  const [editTeamEscudo, setEditTeamEscudo] = useState<string>('');
+  const [editTeamAnio, setEditTeamAnio] = useState<string>('');
+  const [editTeamLogros, setEditTeamLogros] = useState<string>('');
+  const [showIdentityEditor, setShowIdentityEditor] = useState(false);
+
+  useEffect(() => {
+    if (effectiveManagedTeam) {
+      setEditTeamEscudo(effectiveManagedTeam.escudo ?? '');
+      setEditTeamAnio(
+        effectiveManagedTeam.anioFundacion ? String(effectiveManagedTeam.anioFundacion) : ''
+      );
+      setEditTeamLogros(effectiveManagedTeam.logrosAnteriores ?? '');
+    }
+  }, [effectiveManagedTeam?.id, effectiveManagedTeam?.escudo, effectiveManagedTeam?.anioFundacion, effectiveManagedTeam?.logrosAnteriores]);
 
   const managedTeamPlayers = useMemo(() => {
     if (!effectiveManagedTeam) return [];
@@ -234,6 +260,14 @@ export function RegistrationView({
       );
     }
 
+    const parsedYear = teamAnioFundacion.trim() ? Number(teamAnioFundacion.trim()) : undefined;
+    if (
+      parsedYear !== undefined &&
+      (!Number.isInteger(parsedYear) || parsedYear < 1950 || parsedYear > 2035)
+    ) {
+      validationErrors.push('El año de fundación debe ser un número entero entre 1950 y 2035.');
+    }
+
     if (validationErrors.length > 0) {
       setErrors(validationErrors);
       setSuccessInfo(null);
@@ -267,6 +301,9 @@ export function RegistrationView({
       facultad: selectedCareerObj.facultad,
       groupName: assignedGroup,
       capitanCorreo: capitanCorreo.trim().toLowerCase(),
+      escudo: teamEscudo || undefined,
+      anioFundacion: parsedYear,
+      logrosAnteriores: teamLogros.trim() ? teamLogros.trim().slice(0, 160) : undefined,
       createdByUid: currentUser?.uid,
     };
 
@@ -308,7 +345,35 @@ export function RegistrationView({
     setSuccessInfo({ teamName: newTeam.nombre, count: newPlayers.length });
     setTeamName('');
     setCapitanCorreo('');
+    setTeamEscudo('');
+    setTeamAnioFundacion('');
+    setTeamLogros('');
     setRoster([createEmptyPlayer(selectedCareerObj.carrera, selectedCareerObj.facultad, 0)]);
+  };
+
+  const handleSaveTeamIdentity = (e: FormEvent) => {
+    e.preventDefault();
+    if (!effectiveManagedTeam) return;
+    const trimmedYear = editTeamAnio.trim();
+    const parsedYear = trimmedYear ? Number(trimmedYear) : undefined;
+    if (
+      parsedYear !== undefined &&
+      (!Number.isInteger(parsedYear) || parsedYear < 1950 || parsedYear > 2035)
+    ) {
+      setRosterErrors(['El año de fundación debe ser un número entero entre 1950 y 2035.']);
+      return;
+    }
+
+    const updatedTeam: Team = {
+      ...effectiveManagedTeam,
+      escudo: editTeamEscudo,
+      anioFundacion: parsedYear,
+      logrosAnteriores: editTeamLogros.trim().slice(0, 160),
+    };
+    onUpdateTeam(updatedTeam);
+    setRosterErrors([]);
+    setRosterMsg(`Identidad y escudo de ${effectiveManagedTeam.nombre} actualizados correctamente.`);
+    setShowIdentityEditor(false);
   };
 
   const handleSaveEditedMember = (e: FormEvent) => {
@@ -550,13 +615,30 @@ export function RegistrationView({
             ) : (
               <>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                      Gestión de Nómina Oficial ({currentUser?.role === 'admin' ? 'Administrador' : 'Delegado'})
-                    </p>
-                    <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                      Plantel de {effectiveManagedTeam.nombre} ({managedTeamPlayers.length} jugadores)
-                    </h2>
+                  <div className="flex items-center gap-3.5">
+                    <TeamCrest
+                      escudo={effectiveManagedTeam.escudo}
+                      sigla={effectiveManagedTeam.sigla}
+                      nombre={effectiveManagedTeam.nombre}
+                      size="md"
+                    />
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+                        Gestión de Nómina Oficial ({currentUser?.role === 'admin' ? 'Administrador' : 'Delegado'})
+                      </p>
+                      <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                        Plantel de {effectiveManagedTeam.nombre} ({managedTeamPlayers.length} jugadores)
+                      </h2>
+                      <p className="text-xs text-neutral-500 mt-0.5">
+                        {effectiveManagedTeam.carrera}
+                        {effectiveManagedTeam.anioFundacion
+                          ? ` · Fundado en ${effectiveManagedTeam.anioFundacion}`
+                          : ''}
+                        {effectiveManagedTeam.logrosAnteriores
+                          ? ` · ${effectiveManagedTeam.logrosAnteriores}`
+                          : ''}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
@@ -568,6 +650,7 @@ export function RegistrationView({
                           setSelectedManagedTeamId(e.target.value);
                           setEditingPlayer(null);
                           setShowAddMember(false);
+                          setShowIdentityEditor(false);
                         }}
                         className="border border-neutral-300 bg-white px-3 py-2 text-sm text-[#0d0d0d]"
                       >
@@ -582,7 +665,22 @@ export function RegistrationView({
                     <button
                       type="button"
                       onClick={() => {
+                        setShowIdentityEditor((prev) => !prev);
+                        setShowAddMember(false);
+                        setEditingPlayer(null);
+                        setRosterErrors([]);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-[#0d0d0d] bg-white hover:bg-[#0d0d0d] hover:text-white text-[#0d0d0d] text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>{showIdentityEditor ? 'Cerrar escudo' : 'Escudo e Historia'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
                         setShowAddMember((prev) => !prev);
+                        setShowIdentityEditor(false);
                         setEditingPlayer(null);
                         setRosterErrors([]);
                       }}
@@ -610,6 +708,86 @@ export function RegistrationView({
                       <p key={i}>{err}</p>
                     ))}
                   </div>
+                )}
+
+                {/* Team Crest, Founding Year & Previous Titles Editor (Delegado / Admin) */}
+                {showIdentityEditor && (
+                  <form
+                    onSubmit={handleSaveTeamIdentity}
+                    className="border border-[#0d0d0d] bg-[#f5f6f8] p-6 space-y-5"
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+                      <div>
+                        <h3 className="font-display text-lg font-bold uppercase text-[#0d0d0d]">
+                          Escudo oficial e historia de {effectiveManagedTeam.nombre}
+                        </h3>
+                        <p className="text-xs text-neutral-600">
+                          Sube tu escudo sobre fondo blanco para quitar el fondo automáticamente, o
+                          carga directamente un PNG transparente / SVG.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowIdentityEditor(false)}
+                        className="text-xs text-neutral-600 hover:text-[#0d0d0d] cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+
+                    <CrestUploader
+                      value={editTeamEscudo}
+                      onChange={(nextUrl) => setEditTeamEscudo(nextUrl ?? '')}
+                      teamName={effectiveManagedTeam.nombre}
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label
+                          htmlFor="edit-team-year"
+                          className="block text-xs font-medium text-neutral-700 mb-1"
+                        >
+                          Año de fundación (opcional)
+                        </label>
+                        <input
+                          id="edit-team-year"
+                          type="number"
+                          min={1950}
+                          max={2035}
+                          placeholder="Ej: 2018"
+                          value={editTeamAnio}
+                          onChange={(e) => setEditTeamAnio(e.target.value)}
+                          className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label
+                          htmlFor="edit-team-logros"
+                          className="block text-xs font-medium text-neutral-700 mb-1"
+                        >
+                          Títulos anteriores y palmarés (opcional)
+                        </label>
+                        <input
+                          id="edit-team-logros"
+                          type="text"
+                          maxLength={160}
+                          placeholder="Ej: Campeón 2023, Subcampeón 2025"
+                          value={editTeamLogros}
+                          onChange={(e) => setEditTeamLogros(e.target.value)}
+                          className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        className="px-5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                      >
+                        Guardar identidad del equipo
+                      </button>
+                    </div>
+                  </form>
                 )}
 
                 {/* Add New Player to Existing Team Form */}
@@ -1058,6 +1236,44 @@ export function RegistrationView({
                 />
               </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 border-t border-neutral-100">
+              <div>
+                <label htmlFor="reg-team-year" className="block text-xs font-medium text-neutral-700 mb-1.5">
+                  Año de Fundación (opcional)
+                </label>
+                <input
+                  id="reg-team-year"
+                  type="number"
+                  min={1950}
+                  max={2035}
+                  value={teamAnioFundacion}
+                  onChange={(e) => setTeamAnioFundacion(e.target.value)}
+                  placeholder="Ej: 2019"
+                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] tabular-nums focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label htmlFor="reg-team-logros" className="block text-xs font-medium text-neutral-700 mb-1.5">
+                  Títulos y Logros Anteriores (opcional)
+                </label>
+                <input
+                  id="reg-team-logros"
+                  type="text"
+                  maxLength={160}
+                  value={teamLogros}
+                  onChange={(e) => setTeamLogros(e.target.value)}
+                  placeholder="Ej: Campeón 2024, 3er Lugar 2025"
+                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                />
+              </div>
+            </div>
+
+            <CrestUploader
+              value={teamEscudo}
+              onChange={(nextUrl) => setTeamEscudo(nextUrl ?? '')}
+              teamName={teamName || 'Equipo'}
+            />
           </div>
 
           {/* Roster Builder (All 12 Mandatory Fields) */}

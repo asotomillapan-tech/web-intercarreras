@@ -245,6 +245,13 @@
           "minLength": 1,
           "maxLength": 40
         },
+        "escudo": {
+          "type": "string",
+          "maxLength": 160000
+        },
+        "anioFundacion": {
+          "type": "integer"
+        },
         "logrosAnteriores": {
           "type": "string",
           "maxLength": 160
@@ -854,6 +861,166 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "AwardNominees": {
+      "title": "AwardNominees",
+      "description": "Configuración oficial administrada por Admin con hasta 5 jugadores nominados al MVP del Campeonato por disciplina.",
+      "type": "object",
+      "properties": {
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "mvpNomineeIds": {
+          "type": "array",
+          "description": "Lista acotada de hasta 5 IDs de jugadores nominados al MVP del campeonato."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["disciplineId", "temporada", "mvpNomineeIds", "updatedAt"]
+    },
+    "ChampionshipMvpVote": {
+      "title": "ChampionshipMvpVote",
+      "description": "Voto único de usuario registrado por el MVP del Campeonato entre los 5 nominados oficiales de una disciplina.",
+      "type": "object",
+      "properties": {
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "voterUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "teamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["disciplineId", "temporada", "voterUid", "playerId", "playerName", "teamId", "createdAt", "updatedAt"]
+    },
+    "PositionAwardVote": {
+      "title": "PositionAwardVote",
+      "description": "Voto único de usuario registrado por premio a mejor jugador de una posición específica según deporte.",
+      "type": "object",
+      "properties": {
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "positionKey": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "positionLabel": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60
+        },
+        "voterUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "teamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["disciplineId", "temporada", "positionKey", "positionLabel", "voterUid", "playerId", "playerName", "teamId", "createdAt", "updatedAt"]
+    },
+    "TotyBallot": {
+      "title": "TotyBallot",
+      "description": "Papeleta individual de Equipo Ideal (TOTY) donde cada usuario registrado escoge un jugador por posición en una disciplina.",
+      "type": "object",
+      "properties": {
+        "disciplineId": {
+          "type": "string",
+          "enum": ["f7-h-1", "f7-h-2", "f7-h-3", "f7-m", "basquet-h", "basquet-3x3-m", "voley-m", "voley-h"]
+        },
+        "temporada": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "voterUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "selections": {
+          "type": "object",
+          "description": "Mapa acotado positionKey -> playerId (máximo 10 posiciones)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["disciplineId", "temporada", "voterUid", "selections", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -875,7 +1042,7 @@
     },
     "/teams/{teamId}": {
       "schema": { "$ref": "#/entities/Team" },
-      "description": "Equipos oficiales inscritos por disciplina."
+      "description": "Equipos oficiales inscritos por disciplina con escudo transparente y año de fundación."
     },
     "/players/{playerId}": {
       "schema": { "$ref": "#/entities/PlayerPublic" },
@@ -895,7 +1062,23 @@
     },
     "/mvp_votes/{voteId}": {
       "schema": { "$ref": "#/entities/MvpVote" },
-      "description": "Votos individuales de MVP por partido (un documento por combinación partido-usuario)."
+      "description": "Votos individuales de POTM (Player of the Match) por partido."
+    },
+    "/award_nominees/{disciplineId}": {
+      "schema": { "$ref": "#/entities/AwardNominees" },
+      "description": "Lista oficial administrada por Admin con hasta 5 jugadores nominados al MVP del Campeonato por disciplina."
+    },
+    "/championship_mvp_votes/{voteId}": {
+      "schema": { "$ref": "#/entities/ChampionshipMvpVote" },
+      "description": "Votos únicos de usuarios registrados por el MVP del Campeonato por disciplina."
+    },
+    "/position_award_votes/{voteId}": {
+      "schema": { "$ref": "#/entities/PositionAwardVote" },
+      "description": "Votos únicos de usuarios registrados por premios individuales por posición deportiva."
+    },
+    "/toty_ballots/{ballotId}": {
+      "schema": { "$ref": "#/entities/TotyBallot" },
+      "description": "Papeletas individuales de Equipo Ideal (TOTY) por disciplina y usuario registrado."
     },
     "/photos/{photoId}": {
       "schema": { "$ref": "#/entities/PhotoEntry" },

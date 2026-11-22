@@ -12,6 +12,8 @@ import {
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS } from '../data/ufroSeed';
 import type { DisciplineId, Team, TournamentState } from '../types/tournament';
 import { ConfirmDialog } from './ConfirmDialog';
+import { CrestUploader } from './CrestUploader';
+import { TeamCrest } from './TeamCrest';
 
 interface AdminTeamsManagerProps {
   state: TournamentState;
@@ -28,6 +30,8 @@ interface TeamFormDraft {
   carrera: string;
   facultad: string;
   groupName: string;
+  escudo?: string;
+  anioFundacion: string;
   logrosAnteriores: string;
 }
 
@@ -70,6 +74,8 @@ function createNewTeamDraft(defaultDisc?: DisciplineId): TeamFormDraft {
     carrera: defaultCareer.carrera,
     facultad: defaultCareer.facultad,
     groupName: 'Grupo A',
+    escudo: undefined,
+    anioFundacion: '',
     logrosAnteriores: '',
   };
 }
@@ -148,6 +154,8 @@ export function AdminTeamsManager({
       carrera: team.carrera,
       facultad: team.facultad,
       groupName: team.groupName,
+      escudo: team.escudo,
+      anioFundacion: team.anioFundacion ? String(team.anioFundacion) : '',
       logrosAnteriores: team.logrosAnteriores ?? '',
     });
     setSiglaTouched(true);
@@ -202,6 +210,12 @@ export function AdminTeamsManager({
       .toLowerCase()
       .slice(0, 28);
 
+    const parsedYear = draft.anioFundacion.trim() ? Number(draft.anioFundacion.trim()) : undefined;
+    const validYear =
+      parsedYear && Number.isFinite(parsedYear) && parsedYear >= 1950 && parsedYear <= 2035
+        ? Math.trunc(parsedYear)
+        : undefined;
+
     const teamRecord: Team = {
       id: draft.id ?? `tm-${draft.disciplineId}-${slug || 'eq'}-${Date.now().toString(36)}`,
       disciplineId: draft.disciplineId,
@@ -210,6 +224,8 @@ export function AdminTeamsManager({
       carrera: draft.carrera.trim().slice(0, 140),
       facultad: draft.facultad.trim().slice(0, 140),
       groupName: draft.groupName.trim().slice(0, 40),
+      escudo: draft.escudo,
+      anioFundacion: validYear,
       logrosAnteriores: draft.logrosAnteriores.trim()
         ? draft.logrosAnteriores.trim().slice(0, 160)
         : undefined,
@@ -445,8 +461,24 @@ export function AdminTeamsManager({
             </div>
 
             <div>
+              <label htmlFor="adm-tm-year" className="block text-xs font-medium text-neutral-700 mb-1">
+                Año de fundación (opcional)
+              </label>
+              <input
+                id="adm-tm-year"
+                type="number"
+                min={1950}
+                max={2035}
+                value={draft.anioFundacion}
+                onChange={(e) => setDraft({ ...draft, anioFundacion: e.target.value })}
+                placeholder="Ej: 2018"
+                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+              />
+            </div>
+
+            <div className="sm:col-span-2 lg:col-span-3">
               <label htmlFor="adm-tm-logros" className="block text-xs font-medium text-neutral-700 mb-1">
-                Logros anteriores (opcional)
+                Títulos y logros anteriores (opcional)
               </label>
               <input
                 id="adm-tm-logros"
@@ -454,11 +486,18 @@ export function AdminTeamsManager({
                 maxLength={160}
                 value={draft.logrosAnteriores}
                 onChange={(e) => setDraft({ ...draft, logrosAnteriores: e.target.value })}
-                placeholder="Ej: Campeón 2025"
+                placeholder="Ej: Campeón 2024, Subcampeón 2025"
                 className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
               />
             </div>
           </div>
+
+          <CrestUploader
+            value={draft.escudo}
+            onChange={(nextUrl) => setDraft({ ...draft, escudo: nextUrl })}
+            teamName={draft.nombre || 'Equipo'}
+            compact
+          />
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button
@@ -543,12 +582,19 @@ export function AdminTeamsManager({
                 return (
                   <tr key={team.id} className="hover:bg-[#f9fafb]">
                     <td className="py-3 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <span className="inline-flex items-center justify-center w-10 h-8 bg-[#0d0d0d] text-white font-display text-xs uppercase tracking-wider shrink-0">
-                          {team.sigla}
-                        </span>
+                      <div className="flex items-center gap-3">
+                        <TeamCrest
+                          escudo={team.escudo}
+                          sigla={team.sigla}
+                          nombre={team.nombre}
+                          size="sm"
+                        />
                         <div>
                           <p className="font-bold text-[#0d0d0d]">{team.nombre}</p>
+                          <p className="text-[11px] text-neutral-500">
+                            {team.sigla}
+                            {team.anioFundacion ? ` · Fund. ${team.anioFundacion}` : ''}
+                          </p>
                           {team.logrosAnteriores && (
                             <p className="text-[11px] text-[#707ef9]">{team.logrosAnteriores}</p>
                           )}

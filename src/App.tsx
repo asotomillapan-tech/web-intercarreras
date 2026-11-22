@@ -37,14 +37,18 @@ import {
   loadAuthorizedPlayerPrivateMap,
   loadPublicTournamentState,
   rejectFirestoreTransferRequest,
+  saveFirestoreAwardNominees,
+  saveFirestoreChampionshipMvpVote,
   saveFirestoreDisciplineConfig,
   saveFirestoreMatch,
   saveFirestoreMvpVote,
   saveFirestoreNewsArticle,
   saveFirestorePhoto,
   saveFirestorePlayer,
+  saveFirestorePositionAwardVote,
   saveFirestoreSettings,
   saveFirestoreTeam,
+  saveFirestoreTotyBallot,
   syncGoogleUserToFirestore,
   updateFirestorePlayerStats,
   updateFirestoreUserPreferences,
@@ -61,6 +65,7 @@ import { Footer } from './components/Footer';
 import { GalleryView } from './components/GalleryView';
 import { HomeView } from './components/HomeView';
 import { MatchMvpModal } from './components/MatchMvpModal';
+import { MinigamesView } from './components/MinigamesView';
 import { Navbar, type NavSection } from './components/Navbar';
 import { NewsArticleModal } from './components/NewsArticleModal';
 import { PlayersView } from './components/PlayersView';
@@ -69,9 +74,12 @@ import { PublicTransfersView } from './components/PublicTransfersView';
 import { RegistrationView } from './components/RegistrationView';
 import { StandingsView } from './components/StandingsView';
 import { TeamProfileModal } from './components/TeamProfileModal';
+import { TeamsView } from './components/TeamsView';
 import { TransfersView } from './components/TransfersView';
+import { VotationsView } from './components/VotationsView';
 import type {
   AppUserProfile,
+  ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
   MasterSheetKey,
@@ -81,7 +89,9 @@ import type {
   NewsArticle,
   PhotoEntry,
   Player,
+  PositionAwardVoteRecord,
   Team,
+  TotyBallotRecord,
   TournamentState,
   TransferRecord,
   UserRole,
@@ -178,6 +188,10 @@ function AppContent() {
           matches: cloud.matches ?? prev.matches,
           transfers: cloud.transfers ?? prev.transfers,
           mvpVotes: cloud.mvpVotes ?? prev.mvpVotes,
+          awardNominees: cloud.awardNominees ?? prev.awardNominees,
+          championshipMvpVotes: cloud.championshipMvpVotes ?? prev.championshipMvpVotes,
+          positionAwardVotes: cloud.positionAwardVotes ?? prev.positionAwardVotes,
+          totyBallots: cloud.totyBallots ?? prev.totyBallots,
           photos: cloud.photos ?? prev.photos,
           news: cloud.news ?? prev.news,
         }));
@@ -318,6 +332,10 @@ function AppContent() {
               matches: freshPublic.matches ?? prev.matches,
               transfers: freshPublic.transfers ?? prev.transfers,
               mvpVotes: freshPublic.mvpVotes ?? prev.mvpVotes,
+              awardNominees: freshPublic.awardNominees ?? prev.awardNominees,
+              championshipMvpVotes: freshPublic.championshipMvpVotes ?? prev.championshipMvpVotes,
+              positionAwardVotes: freshPublic.positionAwardVotes ?? prev.positionAwardVotes,
+              totyBallots: freshPublic.totyBallots ?? prev.totyBallots,
               photos: freshPublic.photos ?? prev.photos,
               news: freshPublic.news ?? prev.news,
             }));
@@ -698,7 +716,140 @@ function AppContent() {
       playerName: voteRecord.playerName,
       teamId: player.teamId,
       voterUid: currentUser.uid,
-    }).catch((err) => reportCloudError('Error guardando voto MVP', err));
+    }).catch((err) => reportCloudError('Error guardando voto POTM', err));
+  };
+
+  const handleSaveAwardNominees = async (disciplineId: DisciplineId, nomineeIds: string[]) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const cleaned = Array.from(new Set(nomineeIds.map((id) => id.trim()).filter(Boolean))).slice(0, 5);
+    const updatedAt = new Date().toISOString();
+    setState((prev) => ({
+      ...prev,
+      awardNominees: {
+        ...prev.awardNominees,
+        [disciplineId]: {
+          disciplineId,
+          temporada: prev.temporada,
+          mvpNomineeIds: cleaned,
+          updatedAt,
+        },
+      },
+    }));
+    try {
+      await saveFirestoreAwardNominees(disciplineId, stateRef.current.temporada, cleaned);
+    } catch (err) {
+      reportCloudError('Error guardando nominados al MVP del Campeonato', err);
+      throw err;
+    }
+  };
+
+  const handleVoteChampionshipMvp = async (disciplineId: DisciplineId, player: Player) => {
+    if (!currentUser) {
+      setAuthModalOpen(true);
+      return;
+    }
+    const voteId = `${disciplineId}_${currentUser.uid}`;
+    const now = new Date().toISOString();
+    const record: ChampionshipMvpVoteRecord = {
+      id: voteId,
+      disciplineId,
+      temporada: stateRef.current.temporada,
+      voterUid: currentUser.uid,
+      playerId: player.id,
+      playerName: `${player.nombre} ${player.apellidoPaterno}`,
+      teamId: player.teamId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setState((prev) => {
+      const exists = prev.championshipMvpVotes.some((v) => v.id === voteId);
+      return {
+        ...prev,
+        championshipMvpVotes: exists
+          ? prev.championshipMvpVotes.map((v) => (v.id === voteId ? record : v))
+          : [record, ...prev.championshipMvpVotes],
+      };
+    });
+    try {
+      await saveFirestoreChampionshipMvpVote(record);
+    } catch (err) {
+      reportCloudError('Error guardando voto MVP del Campeonato', err);
+    }
+  };
+
+  const handleVotePositionAward = async (
+    disciplineId: DisciplineId,
+    positionKey: string,
+    positionLabel: string,
+    player: Player
+  ) => {
+    if (!currentUser) {
+      setAuthModalOpen(true);
+      return;
+    }
+    const voteId = `${disciplineId}_${positionKey}_${currentUser.uid}`;
+    const now = new Date().toISOString();
+    const record: PositionAwardVoteRecord = {
+      id: voteId,
+      disciplineId,
+      temporada: stateRef.current.temporada,
+      positionKey,
+      positionLabel,
+      voterUid: currentUser.uid,
+      playerId: player.id,
+      playerName: `${player.nombre} ${player.apellidoPaterno}`,
+      teamId: player.teamId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setState((prev) => {
+      const exists = prev.positionAwardVotes.some((v) => v.id === voteId);
+      return {
+        ...prev,
+        positionAwardVotes: exists
+          ? prev.positionAwardVotes.map((v) => (v.id === voteId ? record : v))
+          : [record, ...prev.positionAwardVotes],
+      };
+    });
+    try {
+      await saveFirestorePositionAwardVote(record);
+    } catch (err) {
+      reportCloudError('Error guardando voto por posición', err);
+    }
+  };
+
+  const handleSubmitTotyBallot = async (
+    disciplineId: DisciplineId,
+    selections: Record<string, string>
+  ) => {
+    if (!currentUser) {
+      setAuthModalOpen(true);
+      return;
+    }
+    const ballotId = `${disciplineId}_${currentUser.uid}`;
+    const now = new Date().toISOString();
+    const ballot: TotyBallotRecord = {
+      id: ballotId,
+      disciplineId,
+      temporada: stateRef.current.temporada,
+      voterUid: currentUser.uid,
+      selections,
+      updatedAt: now,
+    };
+    setState((prev) => {
+      const exists = prev.totyBallots.some((b) => b.id === ballotId);
+      return {
+        ...prev,
+        totyBallots: exists
+          ? prev.totyBallots.map((b) => (b.id === ballotId ? ballot : b))
+          : [ballot, ...prev.totyBallots],
+      };
+    });
+    try {
+      await saveFirestoreTotyBallot(ballot);
+    } catch (err) {
+      reportCloudError('Error guardando boleta de Equipo Ideal (TOTY)', err);
+    }
   };
 
   const handleUpdatePlayer = (updatedPlayer: Player) => {
@@ -751,14 +902,20 @@ function AppContent() {
     );
   };
 
-  const handleAdminUpdateTeam = (team: Team) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+  const handleUpdateTeam = (team: Team) => {
+    if (!currentUser) return;
+    const isAdmin = currentUser.role === 'admin';
+    const isAuthorizedDelegado =
+      currentUser.role === 'delegado' &&
+      (currentUser.delegatedTeamId === team.id || team.createdByUid === currentUser.uid);
+    if (!isAdmin && !isAuthorizedDelegado) return;
+
     setState((prev) => ({
       ...prev,
       teams: prev.teams.map((t) => (t.id === team.id ? { ...t, ...team } : t)),
     }));
     queueMasterSyncForDiscipline(team.disciplineId);
-    void saveFirestoreTeam(team, currentUser.uid, false).catch((err) =>
+    void saveFirestoreTeam(team, currentUser.uid, false, currentUser.role).catch((err) =>
       reportCloudError('Error actualizando equipo en Firestore', err)
     );
   };
@@ -1236,6 +1393,15 @@ function AppContent() {
           />
         )}
 
+        {activeSection === 'equipos' && (
+          <TeamsView
+            state={state}
+            selectedDiscipline={selectedDiscipline}
+            onSelectDiscipline={setSelectedDiscipline}
+            onOpenTeamProfile={(team) => setInspectedTeamId(team.id)}
+          />
+        )}
+
         {activeSection === 'jugadores' && (
           <PlayersView
             state={state}
@@ -1246,6 +1412,22 @@ function AppContent() {
             onUpdatePlayer={handleUpdatePlayer}
           />
         )}
+
+        {activeSection === 'votaciones' && (
+          <VotationsView
+            state={state}
+            selectedDiscipline={selectedDiscipline}
+            currentUser={currentUser}
+            onSelectDiscipline={setSelectedDiscipline}
+            onOpenAuth={() => setAuthModalOpen(true)}
+            onOpenMatchMvp={(match) => setActiveMatchModalId(match.id)}
+            onVoteChampionshipMvp={handleVoteChampionshipMvp}
+            onVotePositionAward={handleVotePositionAward}
+            onSubmitTotyBallot={handleSubmitTotyBallot}
+          />
+        )}
+
+        {activeSection === 'minijuegos' && <MinigamesView state={state} />}
 
         {activeSection === 'galeria' && (
           <GalleryView
@@ -1263,6 +1445,7 @@ function AppContent() {
             state={state}
             currentUser={currentUser}
             onRegisterTeam={handleRegisterTeam}
+            onUpdateTeam={handleUpdateTeam}
             onUpdatePlayer={handleUpdatePlayer}
             onAddPlayerToTeam={handleAddPlayerToTeam}
             onOpenSheetsSync={handleOpenSheetsSync}
@@ -1320,7 +1503,7 @@ function AppContent() {
             onUpdateMatch={handleUpdateMatch}
             onAddMatch={handleAdminAddMatch}
             onAddTeam={handleAdminAddTeam}
-            onUpdateTeam={handleAdminUpdateTeam}
+            onUpdateTeam={handleUpdateTeam}
             onDeleteTeam={handleAdminDeleteTeam}
             onAddPlayer={handleAddPlayerToTeam}
             onUpdatePlayer={handleUpdatePlayer}
@@ -1336,6 +1519,7 @@ function AppContent() {
             onApplySheetImports={handleApplySheetImports}
             onMarkSynced={handleMarkSynced}
             onAdminChangeUserRole={handleAdminChangeUserRole}
+            onSaveAwardNominees={handleSaveAwardNominees}
             onRefreshUsers={handleRefreshUsers}
             onOpenAuth={() => setAuthModalOpen(true)}
           />

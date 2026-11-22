@@ -318,3 +318,84 @@ test('columnNumberToA1 converts column indices accurately', () => {
   assert.equal(columnNumberToA1(27), 'AA');
   assert.equal(columnNumberToA1(28), 'AB');
 });
+
+test('Auto-namespaces colliding cross-discipline IDs (e.g. EQ01 in f7-m when f7-h-1 already owns EQ01)', () => {
+  const webState = buildFixtureState();
+  // f7-h-1 already owns a team with ID EQ01 in Firestore
+  webState.teams.push({
+    id: 'EQ01',
+    nombre: 'Agronomía Varones',
+    sigla: 'AGR',
+    disciplineId: 'f7-h-1',
+    carrera: 'Agronomía',
+    facultad: 'Facultad de Ciencias Agropecuarias y Medioambiente',
+    groupName: 'Grupo A',
+  });
+
+  // Now syncing Fútbol 7 Mujeres Master Sheet whose Web_Equipos also uses generic ID EQ01
+  const sheetTabs = {
+    Web_Equipos: [
+      [...STANDARD_HEADERS.Web_Equipos],
+      [
+        'EQ01',
+        'Fútbol 7 Mujeres',
+        'Grupo A',
+        'Kinesiología Damas',
+        'KIN',
+        'Kinesiología',
+        'Facultad de Medicina',
+        '',
+        '',
+      ],
+    ],
+    Web_Jugadores: [
+      [...STANDARD_HEADERS.Web_Jugadores],
+      [
+        'JUG01',
+        'Fútbol 7 Mujeres',
+        'EQ01',
+        '10',
+        'Delantero',
+        'Camila',
+        'Rojas',
+        'Soto',
+        'Kinesiología',
+        'Facultad de Medicina',
+        '',
+        '',
+        '',
+        'Pregrado',
+        '',
+        '',
+        'No',
+        '0',
+        '0',
+        '0',
+        '0',
+        '0',
+        '0',
+      ],
+    ],
+    Web_Partidos: [[...STANDARD_HEADERS.Web_Partidos]],
+    Web_Transferencias: [[...STANDARD_HEADERS.Web_Transferencias]],
+    Web_Formato: [[...STANDARD_HEADERS.Web_Formato]],
+  };
+
+  const result = mergeTournamentWithSheets({
+    webState,
+    sheetTabs,
+    disciplineFilter: ['f7-m'],
+  });
+
+  assert.equal(result.imports.teamsToCreate.length, 1);
+  assert.equal(result.imports.teamsToCreate[0].id, 'f7-m-EQ01');
+  assert.equal(result.imports.teamsToCreate[0].disciplineId, 'f7-m');
+
+  // Linked player referencing EQ01 must remap cleanly to f7-m-EQ01
+  assert.equal(result.imports.playersToCreate.length, 1);
+  assert.equal(result.imports.playersToCreate[0].teamId, 'f7-m-EQ01');
+
+  // Merged sheet writes back the namespaced ID so subsequent syncs stay 1-to-1
+  assert.equal(result.mergedTabs.Web_Equipos[1][0], 'f7-m-EQ01');
+});
+

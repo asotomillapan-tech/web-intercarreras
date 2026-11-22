@@ -13,7 +13,10 @@ import type { AppUserProfile, Match, TournamentState } from '../types/tournament
 export type NavSection =
   | 'inicio'
   | 'posiciones'
+  | 'equipos'
   | 'jugadores'
+  | 'votaciones'
+  | 'minijuegos'
   | 'galeria'
   | 'inscripciones'
   | 'transferencias'
@@ -34,7 +37,10 @@ interface NavbarProps {
 const BASE_NAV_ITEMS: Array<{ id: NavSection; label: string }> = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'posiciones', label: 'Posiciones' },
+  { id: 'equipos', label: 'Equipos' },
   { id: 'jugadores', label: 'Jugadores' },
+  { id: 'votaciones', label: 'Votaciones' },
+  { id: 'minijuegos', label: 'Minijuegos' },
   { id: 'galeria', label: 'Galería' },
   { id: 'inscripciones', label: 'Inscripciones' },
 ];
@@ -105,7 +111,7 @@ export function Navbar({
         </button>
 
         {/* Zone 2: Concise single-line nav links (Transferencias visible exclusively to Delegados) */}
-        <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-6">
+        <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-4">
           {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
             const showPendingCount =
@@ -115,7 +121,7 @@ export function Navbar({
                 key={item.id}
                 type="button"
                 onClick={() => handleSelect(item.id)}
-                className={`relative h-16 flex items-center gap-1.5 text-sm font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
+                className={`relative h-16 flex items-center gap-1.5 text-[13px] font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >
@@ -137,7 +143,7 @@ export function Navbar({
         </nav>
 
         {/* Medium desktop nav (compact spacing) */}
-        <nav aria-label="Navegación principal compacta" className="hidden lg:flex xl:hidden items-center gap-4">
+        <nav aria-label="Navegación principal compacta" className="hidden lg:flex xl:hidden items-center gap-2.5">
           {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
             const showPendingCount =
@@ -147,7 +153,7 @@ export function Navbar({
                 key={item.id}
                 type="button"
                 onClick={() => handleSelect(item.id)}
-                className={`relative h-16 flex items-center gap-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`relative h-16 flex items-center gap-1 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >

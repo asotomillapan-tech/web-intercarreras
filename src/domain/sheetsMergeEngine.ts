@@ -631,6 +631,36 @@ export function mergeTournamentWithSheets(params: {
     [...STANDARD_HEADERS.Web_Equipos, ...eqSheet.extraHeaders],
   ];
   const seenTeamIds = new Set<string>();
+  const globalTeamIds = new Set<string>(webState.teams.map((t) => t.id));
+  const remappedTeamIds = new Map<string, string>();
+
+  const allocateUniqueScopedId = (
+    rawCandidate: string,
+    discId: DisciplineId,
+    fallbackPrefix: string,
+    idx: number,
+    usedGlobal: Set<string>,
+    usedSeen: Set<string>
+  ): string => {
+    const base = sanitizeFirestoreId(rawCandidate, fallbackPrefix, idx);
+    if (!usedGlobal.has(base) && !usedSeen.has(base)) {
+      usedGlobal.add(base);
+      return base;
+    }
+    const scoped = sanitizeFirestoreId(`${discId}-${base}`, `${discId}-${fallbackPrefix}`, idx);
+    if (!usedGlobal.has(scoped) && !usedSeen.has(scoped)) {
+      usedGlobal.add(scoped);
+      return scoped;
+    }
+    let suffix = 2;
+    let candidate = sanitizeFirestoreId(`${scoped}-${suffix}`, `${discId}-${fallbackPrefix}`, idx);
+    while (usedGlobal.has(candidate) || usedSeen.has(candidate)) {
+      suffix++;
+      candidate = sanitizeFirestoreId(`${scoped}-${suffix}`, `${discId}-${fallbackPrefix}`, idx);
+    }
+    usedGlobal.add(candidate);
+    return candidate;
+  };
 
   // Combined team lookup (existing + newly imported from Sheet) for resolving players & matches
   const allTeamsEffective = new Map<string, Team>(webState.teams.map((t) => [t.id, t]));
@@ -638,8 +668,19 @@ export function mergeTournamentWithSheets(params: {
   const findTeamByNameOrId = (ref: string, preferredDisc?: DisciplineId): Team | undefined => {
     const trimmed = cleanCell(ref);
     if (!trimmed) return undefined;
+    const remappedId = remappedTeamIds.get(trimmed);
+    if (remappedId) {
+      const remappedTeam = allTeamsEffective.get(remappedId);
+      if (remappedTeam && (!preferredDisc || remappedTeam.disciplineId === preferredDisc)) {
+        return remappedTeam;
+      }
+    }
+    if (preferredDisc) {
+      const scopedDirect = allTeamsEffective.get(`${preferredDisc}-${trimmed}`);
+      if (scopedDirect && scopedDirect.disciplineId === preferredDisc) return scopedDirect;
+    }
     const direct = allTeamsEffective.get(trimmed);
-    if (direct) return direct;
+    if (direct && (!preferredDisc || direct.disciplineId === preferredDisc)) return direct;
     const norm = normalizeText(trimmed);
     const list = Array.from(allTeamsEffective.values());
     if (preferredDisc) {
@@ -650,6 +691,7 @@ export function mergeTournamentWithSheets(params: {
       );
       if (exactDisc) return exactDisc;
     }
+    if (direct) return direct;
     return list.find(
       (t) => normalizeText(t.nombre) === norm || normalizeText(t.sigla) === norm
     );
@@ -657,10 +699,19 @@ export function mergeTournamentWithSheets(params: {
 
   eqSheet.rows.forEach((sRow, idx) => {
     const rawId = sRow.standardCells[0];
-    const webTeam = rawId ? webTeamById.get(rawId) : undefined;
-    const baseCells = rawId ? baseTeamsById.get(rawId) : undefined;
+    const rowDiscId = resolveDisciplineId(sRow.standardCells[1], disciplineFilter);
+    const scopedExistingId = rawId ? `${rowDiscId}-${rawId}` : '';
+    const webTeam =
+      (rawId ? webTeamById.get(rawId) : undefined) ??
+      (scopedExistingId ? webTeamById.get(scopedExistingId) : undefined);
+    const baseCells =
+      (rawId ? baseTeamsById.get(rawId) : undefined) ??
+      (scopedExistingId ? baseTeamsById.get(scopedExistingId) : undefined);
 
     if (webTeam) {
+      if (rawId && rawId !== webTeam.id) {
+        remappedTeamIds.set(rawId, webTeam.id);
+      }
       seenTeamIds.add(webTeam.id);
       const webCells = webTeamRowById.get(webTeam.id) ?? [];
 
@@ -764,7 +815,17 @@ export function mergeTournamentWithSheets(params: {
     const nombre = cleanCell(sRow.standardCells[3]);
     if (nombre.length >= 2) {
       const discId = resolveDisciplineId(sRow.standardCells[1], disciplineFilter);
-      const id = sanitizeFirestoreId(rawId || `tm-${discId}-${nombre}`, `tm-${discId}`, idx);
+      const id = allocateUniqueScopedId(
+        rawId || `tm-${discId}-${nombre}`,
+        discId,
+        `tm-${discId}`,
+        idx,
+        globalTeamIds,
+        seenTeamIds
+      );
+      if (rawId && rawId !== id) {
+        remappedTeamIds.set(rawId, id);
+      }
       const matchedCareer = UFRO_CAREERS.find(
         (c) => normalizeText(c.carrera) === normalizeText(sRow.standardCells[5])
       );
@@ -859,11 +920,18 @@ export function mergeTournamentWithSheets(params: {
     [...STANDARD_HEADERS.Web_Jugadores, ...plSheet.extraHeaders],
   ];
   const seenPlayerIds = new Set<string>();
+  const globalPlayerIds = new Set<string>(webState.players.map((p) => p.id));
 
   plSheet.rows.forEach((sRow, idx) => {
     const rawId = sRow.standardCells[0];
-    const webPlayer = rawId ? webPlayerById.get(rawId) : undefined;
-    const baseCells = rawId ? basePlayersById.get(rawId) : undefined;
+    const rowDiscId = resolveDisciplineId(sRow.standardCells[1], disciplineFilter);
+    const scopedPlayerId = rawId ? `${rowDiscId}-${rawId}` : '';
+    const webPlayer =
+      (rawId ? webPlayerById.get(rawId) : undefined) ??
+      (scopedPlayerId ? webPlayerById.get(scopedPlayerId) : undefined);
+    const baseCells =
+      (rawId ? basePlayersById.get(rawId) : undefined) ??
+      (scopedPlayerId ? basePlayersById.get(scopedPlayerId) : undefined);
 
     if (webPlayer) {
       seenPlayerIds.add(webPlayer.id);
@@ -1088,10 +1156,13 @@ export function mergeTournamentWithSheets(params: {
     const matchedTeam = findTeamByNameOrId(sRow.standardCells[2], discId);
 
     if (nombre.length >= 1 && apellidoPaterno.length >= 1 && matchedTeam) {
-      const id = sanitizeFirestoreId(
+      const id = allocateUniqueScopedId(
         rawId || `pl-${matchedTeam.disciplineId}-${nombre}-${apellidoPaterno}`,
+        matchedTeam.disciplineId,
         `pl-${matchedTeam.disciplineId}`,
-        idx
+        idx,
+        globalPlayerIds,
+        seenPlayerIds
       );
       const apellidoMaterno = cleanCell(sRow.standardCells[7]) || '-';
       const carreraRaw = cleanCell(sRow.standardCells[8]);
@@ -1235,11 +1306,18 @@ export function mergeTournamentWithSheets(params: {
     [...STANDARD_HEADERS.Web_Partidos, ...mtSheet.extraHeaders],
   ];
   const seenMatchIds = new Set<string>();
+  const globalMatchIds = new Set<string>(webState.matches.map((m) => m.id));
 
   mtSheet.rows.forEach((sRow, idx) => {
     const rawId = sRow.standardCells[0];
-    const webMatch = rawId ? webMatchById.get(rawId) : undefined;
-    const baseCells = rawId ? baseMatchesById.get(rawId) : undefined;
+    const rowDiscId = resolveDisciplineId(sRow.standardCells[1], disciplineFilter);
+    const scopedMatchId = rawId ? `${rowDiscId}-${rawId}` : '';
+    const webMatch =
+      (rawId ? webMatchById.get(rawId) : undefined) ??
+      (scopedMatchId ? webMatchById.get(scopedMatchId) : undefined);
+    const baseCells =
+      (rawId ? baseMatchesById.get(rawId) : undefined) ??
+      (scopedMatchId ? baseMatchesById.get(scopedMatchId) : undefined);
 
     if (webMatch) {
       seenMatchIds.add(webMatch.id);
@@ -1378,10 +1456,13 @@ export function mergeTournamentWithSheets(params: {
     const awayTeam = findTeamByNameOrId(sRow.standardCells[10], discId);
 
     if (homeTeam && awayTeam && homeTeam.id !== awayTeam.id) {
-      const id = sanitizeFirestoreId(
+      const id = allocateUniqueScopedId(
         rawId || `m-${discId}-${homeTeam.sigla}-${awayTeam.sigla}`,
+        discId,
         `m-${discId}`,
-        idx
+        idx,
+        globalMatchIds,
+        seenMatchIds
       );
       const status = parseMatchStatus(sRow.standardCells[11], 'PROGRAMADO');
       const fecha =
