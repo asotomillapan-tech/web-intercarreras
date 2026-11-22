@@ -321,6 +321,7 @@ export function createInitialTournamentState(): TournamentState {
     totyBallots: [],
     photos: [],
     news: [],
+    leyendasLeaderboard: [],
     masterSheets: { ...DEFAULT_MASTER_SHEETS },
     autoSyncSheetsEnabled: false,
     lastSyncedSpreadsheetId: DEFAULT_FUTBOL_HOMBRES_MASTER_SHEET_ID,

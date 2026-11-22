@@ -442,6 +442,65 @@ export interface TotyBallotRecord {
   updatedAt: string;
 }
 
+export interface LeyendasStintRecord {
+  team: string;
+  teamId?: string;
+  sigla?: string;
+  escudo?: string;
+  div: string;
+  years: string;
+}
+
+export interface LeyendasTrophyRecord {
+  id: string;
+  title: string;
+  year: number;
+  team: string;
+}
+
+export interface LeyendasAwardRecord {
+  id: string;
+  title: string;
+  year: number;
+}
+
+export interface LeyendasLeaderboardEntry {
+  id: string;
+  uid: string;
+  playerName: string;
+  career: string;
+  sportKey: 'futbol' | 'basquet' | 'voley';
+  branch: 'hombre' | 'mujer';
+  pos: string;
+  ovr: number;
+  maxOvr: number;
+  score: number;
+  legacyTitle: string;
+  legacyDesc: string;
+  titlesCount: number;
+  awardsCount: number;
+  capsCount: number;
+  semestersPlayed: number;
+  stats: {
+    g: number;
+    a: number;
+    m: number;
+    pts: number;
+    reb: number;
+    ast: number;
+    blk: number;
+    ace: number;
+  };
+  finalTeam: string;
+  finalTeamId?: string;
+  finalTeamEscudo?: string;
+  stints: LeyendasStintRecord[];
+  trophies: LeyendasTrophyRecord[];
+  awards: LeyendasAwardRecord[];
+  weekKey: string;
+  createdAt: string;
+}
+
 export interface TournamentState {
   temporada: string;
   configs: Record<DisciplineId, DisciplineFormatConfig>;
@@ -458,6 +517,7 @@ export interface TournamentState {
   totyBallots: TotyBallotRecord[];
   photos: PhotoEntry[];
   news: NewsArticle[];
+  leyendasLeaderboard: LeyendasLeaderboardEntry[];
   driveUploadRootFolderId?: string;
   driveUploadRootFolderName?: string;
   masterSheets: MasterSheetsConfig;

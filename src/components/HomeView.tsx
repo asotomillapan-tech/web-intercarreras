@@ -17,6 +17,11 @@ import {
   LOGO_LIGHT_SVG,
 } from '../data/ufroSeed';
 import {
+  filterMatchesByOrg,
+  groupMatchesByOrg,
+  type MatchGroupByMode,
+} from '../domain/matchFilterEngine';
+import {
   NEWS_CATEGORY_META,
   sanitizeSafeNewsUrl,
   sortNewsForHomepage,
@@ -40,6 +45,7 @@ import type {
 } from '../types/tournament';
 import { HomeMatchCalendar } from './HomeMatchCalendar';
 import { HomeTransfersSection } from './HomeTransfersSection';
+import { MatchFilterBar } from './MatchFilterBar';
 import type { NavSection } from './Navbar';
 
 interface HomeViewProps {
@@ -82,6 +88,9 @@ export function HomeView({
   onOpenAuth,
 }: HomeViewProps) {
   const [matchFilter, setMatchFilter] = useState<'ALL' | DisciplineId>('ALL');
+  const [matchGroupFilter, setMatchGroupFilter] = useState<'ALL' | string>('ALL');
+  const [matchStageFilter, setMatchStageFilter] = useState<'ALL' | Match['fase']>('ALL');
+  const [matchGroupBy, setMatchGroupBy] = useState<MatchGroupByMode>('none');
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
 
@@ -93,17 +102,31 @@ export function HomeView({
   const featuredMatch: Match | undefined = activeWindowMatches[0] ?? state.matches[0];
 
   const visibleMatches = useMemo(() => {
-    const filtered =
-      matchFilter === 'ALL'
-        ? state.matches
-        : state.matches.filter((m) => m.disciplineId === matchFilter);
+    const filtered = filterMatchesByOrg(state.matches, {
+      disciplineId: matchFilter,
+      groupName: matchGroupFilter,
+      fase: matchStageFilter,
+    });
     const ordered = [...filtered].sort((a, b) => {
       const weight = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'FINALIZADO' ? 1 : 2);
       if (weight(a.status) !== weight(b.status)) return weight(a.status) - weight(b.status);
       return b.fecha.localeCompare(a.fecha);
     });
-    return ordered.slice(0, 8);
-  }, [state.matches, matchFilter]);
+    return ordered.slice(0, matchGroupBy === 'none' ? 8 : 24);
+  }, [state.matches, matchFilter, matchGroupFilter, matchStageFilter, matchGroupBy]);
+
+  const visibleMatchSections = useMemo(() => {
+    const labels = Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<
+      DisciplineId,
+      string
+    >;
+    return groupMatchesByOrg(
+      visibleMatches,
+      matchGroupBy,
+      labels,
+      DISCIPLINES.map((d) => d.id)
+    );
+  }, [visibleMatches, matchGroupBy]);
 
   const activeDisciplineMeta = DISCIPLINE_MAP[selectedDiscipline];
 
@@ -627,7 +650,10 @@ export function HomeView({
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setMatchFilter('ALL')}
+              onClick={() => {
+                setMatchFilter('ALL');
+                setMatchGroupFilter('ALL');
+              }}
               className={`px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 matchFilter === 'ALL'
                   ? 'bg-[#0d0d0d] text-white'
@@ -640,7 +666,10 @@ export function HomeView({
               <button
                 key={d.id}
                 type="button"
-                onClick={() => setMatchFilter(d.id)}
+                onClick={() => {
+                  setMatchFilter(d.id);
+                  setMatchGroupFilter('ALL');
+                }}
                 className={`px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   matchFilter === d.id
                     ? 'bg-[#707ef9] text-white'
@@ -651,51 +680,93 @@ export function HomeView({
               </button>
             ))}
           </div>
+
+          <MatchFilterBar
+            idPrefix="home-center"
+            matches={state.matches}
+            scopedDiscipline={matchFilter}
+            groupFilter={matchGroupFilter}
+            onGroupChange={setMatchGroupFilter}
+            stageFilter={matchStageFilter}
+            onStageChange={setMatchStageFilter}
+            groupBy={matchGroupBy}
+            onGroupByChange={setMatchGroupBy}
+            onReset={() => {
+              setMatchFilter('ALL');
+              setMatchGroupFilter('ALL');
+              setMatchStageFilter('ALL');
+              setMatchGroupBy('none');
+            }}
+            compact
+          />
         </div>
 
         {visibleMatches.length === 0 ? (
           <div className="border border-neutral-200 bg-[#f5f6f8] p-10 text-center space-y-3">
             <p className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-              Sin encuentros programados todavía
+              Sin encuentros para esta selección
             </p>
             <p className="text-sm text-neutral-600 max-w-xl mx-auto">
-              Cuando los equipos completen su inscripción y la Dirección de Deportes genere el
-              fixture de la temporada {state.temporada}, aquí aparecerán los partidos programados,
-              las encuestas MVP en horario y los resultados oficiales validados.
+              Ajusta los filtros de disciplina, grupo o fase, o revisa el calendario completo de la
+              temporada {state.temporada}.
             </p>
             <div className="pt-2">
               <button
                 type="button"
-                onClick={() => onNavigate('inscripciones')}
+                onClick={() => {
+                  setMatchFilter('ALL');
+                  setMatchGroupFilter('ALL');
+                  setMatchStageFilter('ALL');
+                  setMatchGroupBy('none');
+                }}
                 className="px-5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer"
               >
-                Ir a Inscripciones {state.temporada}
+                Restablecer filtros
               </button>
             </div>
           </div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-neutral-200 border border-neutral-200">
-          {visibleMatches.map((match) => {
-            const home = teamMap.get(match.homeTeamId);
-            const away = teamMap.get(match.awayTeamId);
-            const disc = DISCIPLINE_MAP[match.disciplineId];
-            const votingOpen = canVoteMatchMvp(match);
-            const revealData = shouldRevealPublicMatchData(match);
-            const mvpTally = computeMatchMvpStandings(match.id, state.mvpVotes);
+        <div className="space-y-6">
+          {visibleMatchSections.map((section) => (
+            <div key={section.key} className="space-y-2">
+              {matchGroupBy !== 'none' && (
+                <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                  <h3 className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                    {section.label}
+                  </h3>
+                  <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                    {section.matches.length} {section.matches.length === 1 ? 'partido' : 'partidos'}
+                  </span>
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-neutral-200 border border-neutral-200">
+                {section.matches.map((match) => {
+                  const home = teamMap.get(match.homeTeamId);
+                  const away = teamMap.get(match.awayTeamId);
+                  const disc = DISCIPLINE_MAP[match.disciplineId];
+                  const votingOpen = canVoteMatchMvp(match);
+                  const revealData = shouldRevealPublicMatchData(match);
+                  const mvpTally = computeMatchMvpStandings(match.id, state.mvpVotes);
 
-            return (
-              <div
-                key={match.id}
-                className="bg-white p-5 flex flex-col justify-between gap-4 hover:bg-[#f9fafb] transition-colors"
-              >
-                <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="font-medium text-[#0d0d0d] truncate">{disc.nombreCorto}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{match.groupName}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="tabular-nums">{match.fecha}</span>
-                  </div>
+                  return (
+                    <div
+                      key={match.id}
+                      className="bg-white p-5 flex flex-col justify-between gap-4 hover:bg-[#f9fafb] transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="font-medium text-[#0d0d0d] truncate">{disc.nombreCorto}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{match.fase !== 'Grupos' ? match.fase : match.groupName}</span>
+                          {match.fase !== 'Grupos' && match.groupName && match.groupName !== '-' && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>{match.groupName}</span>
+                            </>
+                          )}
+                          <span aria-hidden="true">·</span>
+                          <span className="tabular-nums">{match.fecha}</span>
+                        </div>
 
                   <span
                     className={`font-medium whitespace-nowrap shrink-0 tabular-nums ${
@@ -792,6 +863,9 @@ export function HomeView({
               </div>
             );
           })}
+              </div>
+            </div>
+          ))}
         </div>
         )}
       </section>

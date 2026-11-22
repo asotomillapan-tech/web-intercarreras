@@ -19,6 +19,12 @@ import {
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
+  extractMatchGroups,
+  extractMatchStages,
+  filterMatchesByOrg,
+  MATCH_STAGE_ORDER,
+} from '../domain/matchFilterEngine';
+import {
   applyMatchLiveEvent,
   revertMatchLiveEvent,
   type PlayerStatDelta,
@@ -46,6 +52,7 @@ import type {
   MasterSheetsConfig,
   Match,
   MatchEvent,
+  MatchPhase,
   NewsArticle,
   Player,
   Team,
@@ -252,6 +259,9 @@ export function AdminRefereeView({
 
   // Referee Console State (Action-First -> Player Menu -> Confirmar Registro)
   const [selectedRefId, setSelectedRefId] = useState<string>(state.referees[0]?.id ?? 'ref-f7-1');
+  const [refDisciplineFilter, setRefDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
+  const [refGroupFilter, setRefGroupFilter] = useState<'ALL' | string>('ALL');
+  const [refStageFilter, setRefStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [selectedMatchId, setSelectedMatchId] = useState<string>(
     focusedMatchId ?? state.matches.find((m) => m.status === 'EN_VIVO')?.id ?? state.matches[0]?.id ?? ''
   );
@@ -317,24 +327,59 @@ export function AdminRefereeView({
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
   const activeReferee = state.referees.find((r) => r.id === selectedRefId) ?? state.referees[0];
 
-  const refereeMatches = useMemo(() => {
-    return state.matches
-      .filter((m) => {
-        const sport = DISCIPLINE_MAP[m.disciplineId].sportType;
-        if (activeReferee.sportType === 'basquetbol') {
-          return sport === 'basquetbol' || sport === 'basquetbol3x3';
-        }
-        return sport === activeReferee.sportType;
-      })
-      .sort((a, b) => {
-        const w = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'PROGRAMADO' ? 1 : 2);
-        return w(a.status) - w(b.status);
-      })
-      .slice(0, 24);
+  const refereeSportMatches = useMemo(() => {
+    return state.matches.filter((m) => {
+      const sport = DISCIPLINE_MAP[m.disciplineId].sportType;
+      if (activeReferee.sportType === 'basquetbol') {
+        return sport === 'basquetbol' || sport === 'basquetbol3x3';
+      }
+      return sport === activeReferee.sportType;
+    });
   }, [state.matches, activeReferee]);
 
+  const refereeDisciplines = useMemo(() => {
+    return DISCIPLINES.filter((d) => {
+      if (activeReferee.sportType === 'basquetbol') {
+        return d.sportType === 'basquetbol' || d.sportType === 'basquetbol3x3';
+      }
+      return d.sportType === activeReferee.sportType;
+    });
+  }, [activeReferee]);
+
+  const refereeGroups = useMemo(
+    () =>
+      extractMatchGroups(refereeSportMatches, {
+        disciplineId: refDisciplineFilter,
+        fase: refStageFilter,
+      }),
+    [refereeSportMatches, refDisciplineFilter, refStageFilter]
+  );
+
+  const refereeStages = useMemo(() => {
+    const present = extractMatchStages(refereeSportMatches, {
+      disciplineId: refDisciplineFilter,
+      groupName: refGroupFilter,
+    });
+    return present.length > 0 ? present : MATCH_STAGE_ORDER;
+  }, [refereeSportMatches, refDisciplineFilter, refGroupFilter]);
+
+  const refereeMatches = useMemo(() => {
+    return filterMatchesByOrg(refereeSportMatches, {
+      disciplineId: refDisciplineFilter,
+      groupName: refGroupFilter,
+      fase: refStageFilter,
+    }).sort((a, b) => {
+      const w = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'PROGRAMADO' ? 1 : 2);
+      if (w(a.status) !== w(b.status)) return w(a.status) - w(b.status);
+      return `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`);
+    });
+  }, [refereeSportMatches, refDisciplineFilter, refGroupFilter, refStageFilter]);
+
   const activeMatch: Match | undefined =
-    state.matches.find((m) => m.id === selectedMatchId) ?? refereeMatches[0] ?? state.matches[0];
+    refereeMatches.find((m) => m.id === selectedMatchId) ??
+    state.matches.find((m) => m.id === selectedMatchId) ??
+    refereeMatches[0] ??
+    state.matches[0];
 
   const activeMatchMeta = activeMatch ? DISCIPLINE_MAP[activeMatch.disciplineId] : undefined;
   const homeTeam = activeMatch ? teamMap.get(activeMatch.homeTeamId) : undefined;
@@ -362,6 +407,9 @@ export function AdminRefereeView({
 
   const handleSelectReferee = (refId: string) => {
     setSelectedRefId(refId);
+    setRefDisciplineFilter('ALL');
+    setRefGroupFilter('ALL');
+    setRefStageFilter('ALL');
     const ref = state.referees.find((r) => r.id === refId);
     if (!ref) return;
     const firstMatch = state.matches.find((m) => {
@@ -953,28 +1001,88 @@ export function AdminRefereeView({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               {/* Left 7 cols: Live Scoreboard & Discipline-specific Controls */}
               <div className="lg:col-span-7 space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label htmlFor="ref-match-select" className="text-xs font-medium uppercase tracking-wider text-neutral-500">
-                    Encuentro asignado ({activeReferee.disciplinaLabel})
-                  </label>
-                  <select
-                    id="ref-match-select"
-                    value={activeMatch.id}
-                    onChange={(e) => {
-                      setSelectedMatchId(e.target.value);
-                      setAiResult(null);
-                      setScoresheetImage(null);
-                      setAiError(null);
-                      setValidationBanner(null);
-                    }}
-                    className="sm:w-96 bg-white border border-neutral-300 px-3 py-2 text-sm font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                  >
-                    {refereeMatches.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        [{m.status === 'EN_VIVO' ? 'EN VIVO' : m.status === 'FINALIZADO' ? 'FINAL' : 'PROG'}] {DISCIPLINE_MAP[m.disciplineId].nombreCorto} · {teamMap.get(m.homeTeamId)?.nombre} vs {teamMap.get(m.awayTeamId)?.nombre}
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-3 bg-[#f5f6f8] border border-neutral-200 p-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <select
+                      value={refDisciplineFilter}
+                      onChange={(e) => {
+                        setRefDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
+                        setRefGroupFilter('ALL');
+                      }}
+                      aria-label="Filtrar encuentro arbitral por disciplina"
+                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
+                    >
+                      <option value="ALL">Todas las disciplinas ({refereeSportMatches.length})</option>
+                      {refereeDisciplines.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.nombreCorto}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={refGroupFilter}
+                      onChange={(e) => setRefGroupFilter(e.target.value)}
+                      aria-label="Filtrar encuentro arbitral por grupo"
+                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
+                    >
+                      <option value="ALL">Todos los grupos</option>
+                      {refereeGroups.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={refStageFilter}
+                      onChange={(e) => setRefStageFilter(e.target.value as 'ALL' | MatchPhase)}
+                      aria-label="Filtrar encuentro arbitral por fase"
+                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
+                    >
+                      <option value="ALL">Todas las fases</option>
+                      {refereeStages.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label
+                      htmlFor="ref-match-select"
+                      className="text-xs font-medium uppercase tracking-wider text-neutral-600"
+                    >
+                      Encuentro ({refereeMatches.length} disponibles)
+                    </label>
+                    <select
+                      id="ref-match-select"
+                      value={activeMatch.id}
+                      onChange={(e) => {
+                        setSelectedMatchId(e.target.value);
+                        setAiResult(null);
+                        setScoresheetImage(null);
+                        setAiError(null);
+                        setValidationBanner(null);
+                      }}
+                      className="sm:w-[26rem] bg-white border border-neutral-300 px-3 py-2 text-sm font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                    >
+                      {refereeMatches.length === 0 ? (
+                        <option value={activeMatch.id}>
+                          Sin encuentros con estos filtros (manteniendo actual)
+                        </option>
+                      ) : (
+                        refereeMatches.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            [{m.status === 'EN_VIVO' ? 'EN VIVO' : m.status === 'FINALIZADO' ? 'FINAL' : 'PROG'}]{' '}
+                            {DISCIPLINE_MAP[m.disciplineId].nombreCorto} · {m.fase} ({m.groupName}) ·{' '}
+                            {teamMap.get(m.homeTeamId)?.nombre} vs {teamMap.get(m.awayTeamId)?.nombre}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
                 </div>
 
                 {/* Live Broadcast Scoreboard */}

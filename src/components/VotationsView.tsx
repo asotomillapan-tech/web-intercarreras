@@ -19,6 +19,7 @@ import {
   getEligiblePlayersForPosition,
   getPositionsForSport,
 } from '../domain/awardsEngine';
+import { filterMatchesByOrg } from '../domain/matchFilterEngine';
 import {
   canVoteMatchMvp,
   computeMatchMvpStandings,
@@ -28,9 +29,11 @@ import type {
   AppUserProfile,
   DisciplineId,
   Match,
+  MatchPhase,
   Player,
   TournamentState,
 } from '../types/tournament';
+import { MatchFilterBar } from './MatchFilterBar';
 import { TeamCrest } from './TeamCrest';
 
 type VotationTab = 'potm' | 'mvp' | 'posiciones' | 'toty';
@@ -67,6 +70,8 @@ export function VotationsView({
   onSubmitTotyBallot,
 }: VotationsViewProps) {
   const [activeTab, setActiveTab] = useState<VotationTab>('potm');
+  const [potmGroupFilter, setPotmGroupFilter] = useState<'ALL' | string>('ALL');
+  const [potmStageFilter, setPotmStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [selectedPositionKey, setSelectedPositionKey] = useState<string>('');
   const [showAllPlayersForPosition, setShowAllPlayersForPosition] = useState(false);
   const [totyDraft, setTotyDraft] = useState<Record<string, string>>({});
@@ -84,6 +89,8 @@ export function VotationsView({
     if (!sportPositions.some((p) => p.key === selectedPositionKey)) {
       setSelectedPositionKey(sportPositions[0]?.key ?? '');
     }
+    setPotmGroupFilter('ALL');
+    setPotmStageFilter('ALL');
     setShowAllPlayersForPosition(false);
     setFeedbackMsg(null);
   }, [selectedDiscipline, sportPositions, selectedPositionKey]);
@@ -111,6 +118,15 @@ export function VotationsView({
     [state.matches, selectedDiscipline]
   );
 
+  const filteredPotmMatches = useMemo(
+    () =>
+      filterMatchesByOrg(disciplineMatches, {
+        groupName: potmGroupFilter,
+        fase: potmStageFilter,
+      }),
+    [disciplineMatches, potmGroupFilter, potmStageFilter]
+  );
+
   // Sync user's existing TOTY ballot into local draft when discipline or user changes
   const existingTotyBallot = useMemo(() => {
     if (!currentUser) return undefined;
@@ -128,7 +144,7 @@ export function VotationsView({
     const openNow: Match[] = [];
     const finalized: Match[] = [];
     const upcoming: Match[] = [];
-    disciplineMatches.forEach((m) => {
+    filteredPotmMatches.forEach((m) => {
       if (canVoteMatchMvp(m)) {
         openNow.push(m);
       } else if (shouldRevealPublicMatchData(m)) {
@@ -138,7 +154,7 @@ export function VotationsView({
       }
     });
     return { openNow, finalized, upcoming };
-  }, [disciplineMatches]);
+  }, [filteredPotmMatches]);
 
   // --- Championship MVP Aggregation ---
   const nomineeIds = state.awardNominees[selectedDiscipline] ?? [];
@@ -420,6 +436,17 @@ export function VotationsView({
            ================================================================ */}
         {activeTab === 'potm' && (
           <div className="space-y-8">
+            <MatchFilterBar
+              idPrefix="potm"
+              matches={disciplineMatches}
+              scopedDiscipline={selectedDiscipline}
+              groupFilter={potmGroupFilter}
+              onGroupChange={setPotmGroupFilter}
+              stageFilter={potmStageFilter}
+              onStageChange={setPotmStageFilter}
+              compact
+            />
+
             {/* Active Voting Window */}
             <section className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 pb-3">

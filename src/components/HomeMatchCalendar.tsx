@@ -6,9 +6,11 @@ import {
   ChevronRight,
   Clock,
   Filter,
+  Layers,
   Lock,
   MapPin,
   RotateCcw,
+  Users,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
@@ -22,6 +24,12 @@ import {
   pickInitialCalendarMonth,
 } from '../domain/calendarEngine';
 import {
+  extractMatchGroups,
+  extractMatchStages,
+  filterMatchesByOrg,
+  MATCH_STAGE_ORDER,
+} from '../domain/matchFilterEngine';
+import {
   canRefereeMatches,
   canVoteMatchMvp,
   shouldRevealPublicMatchData,
@@ -30,6 +38,7 @@ import type {
   AppUserProfile,
   DisciplineId,
   Match,
+  MatchPhase,
   Team,
 } from '../types/tournament';
 
@@ -58,6 +67,8 @@ export function HomeMatchCalendar({
   );
 
   const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
+  const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
+  const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [venueFilter, setVenueFilter] = useState<'ALL' | string>('ALL');
   const [statusMode, setStatusMode] = useState<'PROGRAMADO' | 'ALL'>('PROGRAMADO');
   const [userToggledStatus, setUserToggledStatus] = useState(false);
@@ -85,30 +96,50 @@ export function HomeMatchCalendar({
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
   const isOfficial = canRefereeMatches(currentUser);
 
-  const venues = useMemo(() => {
-    const scope =
-      disciplineFilter === 'ALL'
-        ? matches
-        : matches.filter((m) => m.disciplineId === disciplineFilter);
-    return extractCalendarVenues(scope);
+  const availableGroups = useMemo(
+    () => extractMatchGroups(matches, { disciplineId: disciplineFilter }),
+    [matches, disciplineFilter]
+  );
+
+  const availableStages = useMemo(() => {
+    const present = extractMatchStages(matches, { disciplineId: disciplineFilter });
+    return present.length > 0 ? present : MATCH_STAGE_ORDER;
   }, [matches, disciplineFilter]);
 
-  // Reset venue if selected venue no longer exists under the chosen discipline
+  const venues = useMemo(() => {
+    const scope = filterMatchesByOrg(matches, {
+      disciplineId: disciplineFilter,
+      groupName: groupFilter,
+      fase: stageFilter,
+    });
+    return extractCalendarVenues(scope);
+  }, [matches, disciplineFilter, groupFilter, stageFilter]);
+
+  useEffect(() => {
+    if (groupFilter !== 'ALL' && !availableGroups.includes(groupFilter)) {
+      setGroupFilter('ALL');
+    }
+  }, [groupFilter, availableGroups]);
+
+  // Reset venue if selected venue no longer exists under the chosen filters
   useEffect(() => {
     if (venueFilter !== 'ALL' && !venues.includes(venueFilter)) {
       setVenueFilter('ALL');
     }
   }, [venueFilter, venues]);
 
-  const filteredMatches = useMemo(
-    () =>
-      filterCalendarMatches(matches, {
-        disciplineId: disciplineFilter,
-        venue: venueFilter,
-        statusFilter: statusMode,
-      }),
-    [matches, disciplineFilter, venueFilter, statusMode]
-  );
+  const filteredMatches = useMemo(() => {
+    const orgScoped = filterMatchesByOrg(matches, {
+      disciplineId: disciplineFilter,
+      groupName: groupFilter,
+      fase: stageFilter,
+    });
+    return filterCalendarMatches(orgScoped, {
+      disciplineId: disciplineFilter,
+      venue: venueFilter,
+      statusFilter: statusMode,
+    });
+  }, [matches, disciplineFilter, groupFilter, stageFilter, venueFilter, statusMode]);
 
   const monthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
 
@@ -163,6 +194,8 @@ export function HomeMatchCalendar({
 
   const handleResetFilters = () => {
     setDisciplineFilter('ALL');
+    setGroupFilter('ALL');
+    setStageFilter('ALL');
     setVenueFilter('ALL');
     setSelectedDateIso(null);
     setUserToggledStatus(false);
@@ -173,7 +206,11 @@ export function HomeMatchCalendar({
   };
 
   const hasActiveFilters =
-    disciplineFilter !== 'ALL' || venueFilter !== 'ALL' || selectedDateIso !== null;
+    disciplineFilter !== 'ALL' ||
+    groupFilter !== 'ALL' ||
+    stageFilter !== 'ALL' ||
+    venueFilter !== 'ALL' ||
+    selectedDateIso !== null;
 
   const selectedDateLabel = selectedDateIso
     ? formatCalendarDateEs(selectedDateIso).fullDateLabel
@@ -238,8 +275,8 @@ export function HomeMatchCalendar({
       </div>
 
       {/* Filters Toolbar */}
-      <div className="bg-[#f5f6f8] border border-neutral-200 p-4 mb-6 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-        <div className="md:col-span-5">
+      <div className="bg-[#f5f6f8] border border-neutral-200 p-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+        <div className="lg:col-span-3">
           <label
             htmlFor="cal-filter-discipline"
             className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
@@ -252,11 +289,12 @@ export function HomeMatchCalendar({
             value={disciplineFilter}
             onChange={(e) => {
               setDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
+              setGroupFilter('ALL');
               setSelectedDateIso(null);
             }}
             className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
           >
-            <option value="ALL">Todas las disciplinas ({DISCIPLINES.length})</option>
+            <option value="ALL">Todas ({DISCIPLINES.length})</option>
             {DISCIPLINES.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.nombre}
@@ -265,7 +303,59 @@ export function HomeMatchCalendar({
           </select>
         </div>
 
-        <div className="md:col-span-5">
+        <div className="lg:col-span-2">
+          <label
+            htmlFor="cal-filter-group"
+            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
+          >
+            <Users className="w-3.5 h-3.5 text-[#707ef9]" />
+            <span>Grupo</span>
+          </label>
+          <select
+            id="cal-filter-group"
+            value={availableGroups.includes(groupFilter) ? groupFilter : 'ALL'}
+            onChange={(e) => {
+              setGroupFilter(e.target.value);
+              setSelectedDateIso(null);
+            }}
+            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+          >
+            <option value="ALL">Todos ({availableGroups.length})</option>
+            {availableGroups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="lg:col-span-2">
+          <label
+            htmlFor="cal-filter-stage"
+            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
+          >
+            <Layers className="w-3.5 h-3.5 text-[#707ef9]" />
+            <span>Fase</span>
+          </label>
+          <select
+            id="cal-filter-stage"
+            value={stageFilter}
+            onChange={(e) => {
+              setStageFilter(e.target.value as 'ALL' | MatchPhase);
+              setSelectedDateIso(null);
+            }}
+            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+          >
+            <option value="ALL">Todas las fases</option>
+            {availableStages.map((st) => (
+              <option key={st} value={st}>
+                {st === 'Grupos' ? 'Fase de Grupos' : st}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="lg:col-span-3">
           <label
             htmlFor="cal-filter-venue"
             className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
@@ -291,7 +381,7 @@ export function HomeMatchCalendar({
           </select>
         </div>
 
-        <div className="md:col-span-2 flex items-center justify-end gap-2">
+        <div className="lg:col-span-2 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={handleResetFilters}

@@ -792,6 +792,100 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidLeyendasStats(stats) {
+      return stats is map
+        && stats.keys().hasAll(['g', 'a', 'm', 'pts', 'reb', 'ast', 'blk', 'ace'])
+        && stats.keys().hasOnly(['g', 'a', 'm', 'pts', 'reb', 'ast', 'blk', 'ace'])
+        && stats.g is int && stats.g >= 0 && stats.g <= 1000
+        && stats.a is int && stats.a >= 0 && stats.a <= 1000
+        && stats.m is int && stats.m >= 0 && stats.m <= 500
+        && stats.pts is int && stats.pts >= 0 && stats.pts <= 15000
+        && stats.reb is int && stats.reb >= 0 && stats.reb <= 5000
+        && stats.ast is int && stats.ast >= 0 && stats.ast <= 5000
+        && stats.blk is int && stats.blk >= 0 && stats.blk <= 3000
+        && stats.ace is int && stats.ace >= 0 && stats.ace <= 3000;
+    }
+
+    function isValidLeyendasEntry(data) {
+      return data.keys().hasAll([
+          'id',
+          'uid',
+          'playerName',
+          'career',
+          'sportKey',
+          'branch',
+          'pos',
+          'ovr',
+          'maxOvr',
+          'score',
+          'legacyTitle',
+          'legacyDesc',
+          'titlesCount',
+          'awardsCount',
+          'capsCount',
+          'semestersPlayed',
+          'stats',
+          'finalTeam',
+          'stints',
+          'trophies',
+          'awards',
+          'weekKey',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'uid',
+          'playerName',
+          'career',
+          'sportKey',
+          'branch',
+          'pos',
+          'ovr',
+          'maxOvr',
+          'score',
+          'legacyTitle',
+          'legacyDesc',
+          'titlesCount',
+          'awardsCount',
+          'capsCount',
+          'semestersPlayed',
+          'stats',
+          'finalTeam',
+          'finalTeamId',
+          'finalTeamEscudo',
+          'stints',
+          'trophies',
+          'awards',
+          'weekKey',
+          'createdAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.uid)
+        && data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 80
+        && data.career is string && data.career.size() >= 2 && data.career.size() <= 120
+        && data.sportKey in ['futbol', 'basquet', 'voley']
+        && data.branch in ['hombre', 'mujer']
+        && data.pos is string && data.pos.size() >= 1 && data.pos.size() <= 12
+        && data.ovr is int && data.ovr >= 50 && data.ovr <= 110
+        && data.maxOvr is int && data.maxOvr >= 50 && data.maxOvr <= 110
+        && data.score is int && data.score >= 0 && data.score <= 100000
+        && data.legacyTitle is string && data.legacyTitle.size() >= 2 && data.legacyTitle.size() <= 100
+        && data.legacyDesc is string && data.legacyDesc.size() >= 2 && data.legacyDesc.size() <= 220
+        && data.titlesCount is int && data.titlesCount >= 0 && data.titlesCount <= 60
+        && data.awardsCount is int && data.awardsCount >= 0 && data.awardsCount <= 40
+        && data.capsCount is int && data.capsCount >= 0 && data.capsCount <= 200
+        && data.semestersPlayed is int && data.semestersPlayed >= 1 && data.semestersPlayed <= 40
+        && isValidLeyendasStats(data.stats)
+        && data.finalTeam is string && data.finalTeam.size() >= 2 && data.finalTeam.size() <= 100
+        && (!('finalTeamId' in data) || isValidId(data.finalTeamId))
+        && (!('finalTeamEscudo' in data) || (data.finalTeamEscudo is string && data.finalTeamEscudo.size() <= 160000))
+        && data.stints is list && data.stints.size() <= 15
+        && data.trophies is list && data.trophies.size() <= 60
+        && data.awards is list && data.awards.size() <= 40
+        && data.weekKey is string && data.weekKey.size() >= 7 && data.weekKey.size() <= 16
+        && data.createdAt is timestamp;
+    }
+
     // --- Collection 1: /users/{userId} (PII isolated to owner or admin) ---
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
@@ -1632,6 +1726,23 @@ service cloud.firestore {
         );
 
       allow delete: if isValidId(ballotId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+    }
+
+    // --- Collection 17: /leyendas_leaderboard/{entryId} (LEYENDAS Weekly Global Ranking) ---
+    match /leyendas_leaderboard/{entryId} {
+      allow get: if isValidId(entryId);
+      allow list: if resource.data.weekKey is string && resource.data.weekKey.size() <= 16;
+
+      allow create: if isVerified()
+        && isValidId(entryId)
+        && isValidLeyendasEntry(incoming())
+        && incoming().id == entryId
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time;
+
+      allow update: if false;
+
+      allow delete: if isValidId(entryId) && (isAdmin() || (isVerified() && existing().uid == request.auth.uid));
     }
   }
 }

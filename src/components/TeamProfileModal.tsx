@@ -17,9 +17,11 @@ import {
   computeTeamMatchProgression,
 } from '../domain/tournamentEngine';
 import { TeamProgressionChart } from './TeamProgressionChart';
+import { extractMatchStages, MATCH_STAGE_ORDER } from '../domain/matchFilterEngine';
 import type {
   AppUserProfile,
   Match,
+  MatchPhase,
   MatchStatus,
   MvpVoteRecord,
   Player,
@@ -55,6 +57,7 @@ export function TeamProfileModal({
   onAdminEditMatch,
 }: TeamProfileModalProps) {
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
+  const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
 
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
 
@@ -104,9 +107,16 @@ export function TeamProfileModal({
   const isAdmin = currentUser?.role === 'admin';
   const selectedUfroCount = roster.filter((p) => p.esSeleccionadoUfro).length;
 
+  const availableTeamStages = useMemo(() => {
+    const teamMatches = historicalStats.history.map((h) => h.match);
+    const present = extractMatchStages(teamMatches);
+    return present.length > 0 ? present : MATCH_STAGE_ORDER;
+  }, [historicalStats.history]);
+
   const filteredHistory = historicalStats.history.filter((item) => {
-    if (statusFilter === 'ALL') return true;
-    return item.match.status === statusFilter;
+    if (statusFilter !== 'ALL' && item.match.status !== statusFilter) return false;
+    if (stageFilter !== 'ALL' && item.match.fase !== stageFilter) return false;
+    return true;
   });
 
   const favorLabel =
@@ -340,37 +350,53 @@ export function TeamProfileModal({
                 </h3>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1 bg-[#f5f6f8] p-1 border border-neutral-200">
-                {(
-                  [
-                    { id: 'ALL', label: `Todos (${historicalStats.history.length})` },
-                    {
-                      id: 'FINALIZADO',
-                      label: `Finalizados (${historicalStats.history.filter((h) => h.match.status === 'FINALIZADO').length})`,
-                    },
-                    {
-                      id: 'EN_VIVO',
-                      label: `En juego (${historicalStats.history.filter((h) => h.match.status === 'EN_VIVO').length})`,
-                    },
-                    {
-                      id: 'PROGRAMADO',
-                      label: `Programados (${historicalStats.history.filter((h) => h.match.status === 'PROGRAMADO').length})`,
-                    },
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setStatusFilter(tab.id)}
-                    className={`px-3 py-1.5 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer ${
-                      statusFilter === tab.id
-                        ? 'bg-[#0d0d0d] text-white'
-                        : 'text-neutral-600 hover:text-[#0d0d0d]'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Filtrar historial por fase"
+                  value={stageFilter}
+                  onChange={(e) => setStageFilter(e.target.value as 'ALL' | MatchPhase)}
+                  className="bg-white border border-neutral-300 px-3 py-1.5 text-xs font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                >
+                  <option value="ALL">Todas las fases</option>
+                  {availableTeamStages.map((st) => (
+                    <option key={st} value={st}>
+                      {st === 'Grupos' ? 'Fase de Grupos' : st}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex flex-wrap items-center gap-1 bg-[#f5f6f8] p-1 border border-neutral-200">
+                  {(
+                    [
+                      { id: 'ALL', label: `Todos (${historicalStats.history.length})` },
+                      {
+                        id: 'FINALIZADO',
+                        label: `Finalizados (${historicalStats.history.filter((h) => h.match.status === 'FINALIZADO').length})`,
+                      },
+                      {
+                        id: 'EN_VIVO',
+                        label: `En juego (${historicalStats.history.filter((h) => h.match.status === 'EN_VIVO').length})`,
+                      },
+                      {
+                        id: 'PROGRAMADO',
+                        label: `Programados (${historicalStats.history.filter((h) => h.match.status === 'PROGRAMADO').length})`,
+                      },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setStatusFilter(tab.id)}
+                      className={`px-3 py-1.5 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer ${
+                        statusFilter === tab.id
+                          ? 'bg-[#0d0d0d] text-white'
+                          : 'text-neutral-600 hover:text-[#0d0d0d]'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

@@ -1021,6 +1021,63 @@
         }
       },
       "required": ["disciplineId", "temporada", "voterUid", "selections", "createdAt", "updatedAt"]
+    },
+    "LeyendasLeaderboardEntry": {
+      "title": "LeyendasLeaderboardEntry",
+      "description": "Registro inmutable de carrera completada en el minijuego LEYENDAS UFRO para el Top Global Semanal.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "career": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "sportKey": { "type": "string", "enum": ["futbol", "basquet", "voley"] },
+        "branch": { "type": "string", "enum": ["hombre", "mujer"] },
+        "pos": { "type": "string", "minLength": 1, "maxLength": 12 },
+        "ovr": { "type": "integer" },
+        "maxOvr": { "type": "integer" },
+        "score": { "type": "integer" },
+        "legacyTitle": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "legacyDesc": { "type": "string", "minLength": 2, "maxLength": 220 },
+        "titlesCount": { "type": "integer" },
+        "awardsCount": { "type": "integer" },
+        "capsCount": { "type": "integer" },
+        "semestersPlayed": { "type": "integer" },
+        "stats": { "type": "object" },
+        "finalTeam": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "finalTeamId": { "type": "string", "maxLength": 128 },
+        "finalTeamEscudo": { "type": "string", "maxLength": 160000 },
+        "stints": { "type": "array" },
+        "trophies": { "type": "array" },
+        "awards": { "type": "array" },
+        "weekKey": { "type": "string", "minLength": 7, "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "uid",
+        "playerName",
+        "career",
+        "sportKey",
+        "branch",
+        "pos",
+        "ovr",
+        "maxOvr",
+        "score",
+        "legacyTitle",
+        "legacyDesc",
+        "titlesCount",
+        "awardsCount",
+        "capsCount",
+        "semestersPlayed",
+        "stats",
+        "finalTeam",
+        "stints",
+        "trophies",
+        "awards",
+        "weekKey",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -1087,6 +1144,10 @@
     "/news/{newsId}": {
       "schema": { "$ref": "#/entities/NewsArticle" },
       "description": "Noticias del Campeonato y anuncios destacados gestionados por Prensa Oficial y Administradores."
+    },
+    "/leyendas_leaderboard/{entryId}": {
+      "schema": { "$ref": "#/entities/LeyendasLeaderboardEntry" },
+      "description": "Ranking Global Semanal del minijuego LEYENDAS UFRO (registros inmutables por carrera finalizada)."
     }
   }
 }

@@ -1,16 +1,23 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeftRight, Award, Lock, Medal, Star, Trophy } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  filterMatchesByOrg,
+  groupMatchesByOrg,
+  type MatchGroupByMode,
+} from '../domain/matchFilterEngine';
 import { canVoteMatchMvp, shouldRevealPublicMatchData } from '../domain/rbacEngine';
 import { buildFullPlayoffTree, computeStandings } from '../domain/tournamentEngine';
 import type {
   AppUserProfile,
   DisciplineId,
   Match,
+  MatchPhase,
   PlayoffBracketSlot,
   StandingsRow,
   TournamentState,
 } from '../types/tournament';
+import { MatchFilterBar } from './MatchFilterBar';
 
 interface StandingsViewProps {
   state: TournamentState;
@@ -46,8 +53,11 @@ export function StandingsView({
   onToggleFavoriteTeam,
   onOpenAuth,
 }: StandingsViewProps) {
-  const [subTab, setSubTab] = useState<'grupos' | 'playoffs'>('grupos');
+  const [subTab, setSubTab] = useState<'grupos' | 'playoffs' | 'partidos'>('grupos');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
+  const [matchGroupFilter, setMatchGroupFilter] = useState<'ALL' | string>('ALL');
+  const [matchStageFilter, setMatchStageFilter] = useState<'ALL' | MatchPhase>('ALL');
+  const [matchGroupBy, setMatchGroupBy] = useState<MatchGroupByMode>('fase');
 
   const meta = DISCIPLINE_MAP[selectedDiscipline];
   const config = state.configs[selectedDiscipline];
@@ -103,6 +113,28 @@ export function StandingsView({
   const displayedGroups =
     selectedGroup === 'ALL' || !groups.includes(selectedGroup) ? groups : [selectedGroup];
 
+  const organizedDisciplineMatches = useMemo(() => {
+    const filtered = filterMatchesByOrg(disciplineMatches, {
+      groupName: matchGroupFilter,
+      fase: matchStageFilter,
+    }).sort((a, b) => {
+      const rank = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'PROGRAMADO' ? 1 : 2);
+      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
+      return `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`);
+    });
+    return groupMatchesByOrg(
+      filtered,
+      matchGroupBy,
+      Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<DisciplineId, string>,
+      DISCIPLINES.map((d) => d.id)
+    );
+  }, [disciplineMatches, matchGroupFilter, matchStageFilter, matchGroupBy]);
+
+  const totalFilteredMatches = useMemo(
+    () => organizedDisciplineMatches.reduce((acc, sec) => acc + sec.matches.length, 0),
+    [organizedDisciplineMatches]
+  );
+
   const isVolley = meta.sportType === 'voleibol';
   const isBasket = meta.sportType === 'basquetbol' || meta.sportType === 'basquetbol3x3';
 
@@ -129,7 +161,7 @@ export function StandingsView({
               </p>
             </div>
 
-            <div className="flex items-center gap-1 bg-white/5 p-1 self-start lg:self-auto">
+            <div className="flex flex-wrap lg:flex-nowrap items-center gap-1 bg-white/5 p-1 self-start lg:self-auto shrink-0">
               <button
                 type="button"
                 onClick={() => setSubTab('grupos')}
@@ -152,6 +184,17 @@ export function StandingsView({
               >
                 Llave de Playoffs (Top {config.formatoPlayoff})
               </button>
+              <button
+                type="button"
+                onClick={() => setSubTab('partidos')}
+                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                  subTab === 'partidos'
+                    ? 'bg-[#707ef9] text-white'
+                    : 'text-neutral-300 hover:text-white'
+                }`}
+              >
+                Partidos ({disciplineMatches.length})
+              </button>
             </div>
           </div>
 
@@ -167,6 +210,8 @@ export function StandingsView({
                   onClick={() => {
                     onSelectDiscipline(d.id);
                     setSelectedGroup('ALL');
+                    setMatchGroupFilter('ALL');
+                    setMatchStageFilter('ALL');
                   }}
                   className={`px-3.5 py-2 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer ${
                     active
@@ -383,9 +428,9 @@ export function StandingsView({
                             onClick={() => onOpenMatchModal(m)}
                             className="text-left border border-neutral-200 p-3.5 hover:border-[#707ef9] transition-colors bg-white cursor-pointer"
                           >
-                            <div className="flex items-center justify-between text-[11px] text-neutral-500 mb-2">
-                              <span className="tabular-nums">
-                                {m.fecha} · {m.hora}
+                            <div className="flex items-center justify-between text-[11px] text-neutral-500 mb-2 gap-2">
+                              <span className="tabular-nums truncate">
+                                {m.fase} · {m.fecha} · {m.hora}
                               </span>
                               <span
                                 className={
@@ -430,6 +475,149 @@ export function StandingsView({
                 </section>
               );
             })}
+          </div>
+        ) : subTab === 'partidos' ? (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-neutral-200 pb-4">
+              <div>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                  Partidos de {meta.nombre}
+                </h2>
+                <p className="text-sm text-neutral-600 mt-1">
+                  Filtra y organiza todos los encuentros de esta disciplina por grupo y fase.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                {totalFilteredMatches} de {disciplineMatches.length} encuentros
+              </span>
+            </div>
+
+            <MatchFilterBar
+              idPrefix="standings-matches"
+              matches={disciplineMatches}
+              scopedDiscipline={selectedDiscipline}
+              groupFilter={matchGroupFilter}
+              onGroupChange={setMatchGroupFilter}
+              stageFilter={matchStageFilter}
+              onStageChange={setMatchStageFilter}
+              groupBy={matchGroupBy}
+              onGroupByChange={setMatchGroupBy}
+              onReset={() => {
+                setMatchGroupFilter('ALL');
+                setMatchStageFilter('ALL');
+                setMatchGroupBy('fase');
+              }}
+            />
+
+            {organizedDisciplineMatches.length === 0 ? (
+              <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-2">
+                <p className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
+                  Sin encuentros con los filtros actuales
+                </p>
+                <p className="text-xs text-neutral-600">
+                  Cambia el grupo o la fase para revisar el fixture de {meta.nombre}.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {organizedDisciplineMatches.map((section) => (
+                  <section key={section.key} className="space-y-3">
+                    {matchGroupBy !== 'none' && (
+                      <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                        <h3 className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                          {section.label}
+                        </h3>
+                        <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                          {section.matches.length}{' '}
+                          {section.matches.length === 1 ? 'partido' : 'partidos'}
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {section.matches.map((m) => {
+                        const reveal = shouldRevealPublicMatchData(m);
+                        const votingOpen = canVoteMatchMvp(m);
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => onOpenMatchModal(m)}
+                            className="text-left border border-neutral-200 p-4 hover:border-[#707ef9] transition-colors bg-white cursor-pointer space-y-2.5"
+                          >
+                            <div className="flex items-center justify-between text-[11px] text-neutral-500 gap-2">
+                              <span className="truncate font-medium text-[#0d0d0d]">
+                                {m.fase}
+                                {m.groupName && m.groupName !== '-' ? ` · ${m.groupName}` : ''}
+                                {m.fase !== 'Grupos' &&
+                                (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA')
+                                  ? ` · ${m.playoffLeg}`
+                                  : ''}
+                              </span>
+                              <span
+                                className={
+                                  votingOpen
+                                    ? 'text-[#707ef9] font-bold inline-flex items-center gap-1 shrink-0'
+                                    : 'shrink-0'
+                                }
+                              >
+                                {votingOpen ? (
+                                  <>
+                                    <Award className="w-3 h-3" />
+                                    <span>Votar MVP</span>
+                                  </>
+                                ) : reveal ? (
+                                  'Final'
+                                ) : (
+                                  'Programado'
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d]">
+                                <span className="truncate pr-2">
+                                  {teamMap.get(m.homeTeamId)?.nombre ?? m.homeTeamId}
+                                </span>
+                                <span className="tabular-nums font-bold text-sm">
+                                  {reveal ? (
+                                    m.homeScore
+                                  ) : votingOpen ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d]">
+                                <span className="truncate pr-2">
+                                  {teamMap.get(m.awayTeamId)?.nombre ?? m.awayTeamId}
+                                </span>
+                                <span className="tabular-nums font-bold text-sm">
+                                  {reveal ? (
+                                    m.awayScore
+                                  ) : votingOpen ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-2 border-t border-neutral-100 tabular-nums">
+                              <span>
+                                {formatShortMatchDate(m.fecha)} · {m.hora}
+                              </span>
+                              <span className="truncate max-w-[140px]">{m.cancha}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           /* Full Single-Elimination Playoff Bracket Tree + 3rd Place Match */

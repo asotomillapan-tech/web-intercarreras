@@ -40,6 +40,7 @@ import {
   saveFirestoreAwardNominees,
   saveFirestoreChampionshipMvpVote,
   saveFirestoreDisciplineConfig,
+  saveFirestoreLeyendasEntry,
   saveFirestoreMatch,
   saveFirestoreMvpVote,
   saveFirestoreNewsArticle,
@@ -82,6 +83,7 @@ import type {
   ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
+  LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
   Match,
@@ -852,6 +854,27 @@ function AppContent() {
     }
   };
 
+  const handleSaveLeyendasEntry = async (entry: LeyendasLeaderboardEntry) => {
+    if (!currentUser) {
+      setAuthModalOpen(true);
+      throw new Error('Debes iniciar sesión con Google para publicar en el Top Global.');
+    }
+    try {
+      await saveFirestoreLeyendasEntry(entry);
+      setState((prev) => {
+        const filtered = prev.leyendasLeaderboard.filter((item) => item.id !== entry.id);
+        const next = [entry, ...filtered].sort((a, b) => b.score - a.score);
+        return {
+          ...prev,
+          leyendasLeaderboard: next,
+        };
+      });
+    } catch (err) {
+      reportCloudError('Error publicando carrera en el Top Global de LEYENDAS', err);
+      throw err;
+    }
+  };
+
   const handleUpdatePlayer = (updatedPlayer: Player) => {
     if (!currentUser) return;
     setState((prev) => ({
@@ -1427,7 +1450,14 @@ function AppContent() {
           />
         )}
 
-        {activeSection === 'minijuegos' && <MinigamesView state={state} />}
+        {activeSection === 'minijuegos' && (
+          <MinigamesView
+            state={state}
+            currentUser={currentUser}
+            onOpenAuth={() => setAuthModalOpen(true)}
+            onSaveLeyendasEntry={handleSaveLeyendasEntry}
+          />
+        )}
 
         {activeSection === 'galeria' && (
           <GalleryView

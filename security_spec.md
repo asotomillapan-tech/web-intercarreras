@@ -21,6 +21,10 @@
     - `/championship_mvp_votes/{voteId}` enforces deterministic 1-vote-per-user-per-discipline (`voteId == disciplineId + '_' + request.auth.uid`, `voterUid == request.auth.uid`) for verified accounts only.
     - `/position_award_votes/{voteId}` enforces deterministic 1-vote-per-user-per-position (`voteId == disciplineId + '_' + positionKey + '_' + request.auth.uid`).
     - `/toty_ballots/{ballotId}` enforces deterministic 1-ballot-per-user-per-discipline (`ballotId == disciplineId + '_' + request.auth.uid`) with bounded `selections` map (`1..10` entries).
+17. **LEYENDAS Minigame Weekly Leaderboard Integrity**:
+    - `/leyendas_leaderboard/{entryId}` is publicly readable (`get` with `isValidId`, `list` gated by valid `weekKey`) so visitors can browse the Weekly Global Ranking.
+    - `create` requires verified Google Auth (`isVerified()`), strict schema validation (`isValidLeyendasEntry`), `incoming().uid == request.auth.uid`, `incoming().id == entryId`, bounded stats/scores (`score <= 100000`, `ovr <= 110`, `maxOvr <= 110`, `stints.size() <= 15`, `trophies.size() <= 60`, `awards.size() <= 40`), and `incoming().createdAt == request.time`.
+    - `update` is strictly `false` (immutable completed-career records); `delete` is allowed only for `isAdmin()` or the owning verified user (`existing().uid == request.auth.uid`).
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
 1. **Self-Admin Escalation on Create**: `POST /users/{uid}` with `role: 'admin'` by non-bootstrapped user -> DENIED.
@@ -39,5 +43,6 @@
     - Delegate mutating an already `APROBADA` or `RECHAZADA` transfer -> DENIED (Terminal State Lock).
     - Public visitor reading a `PENDIENTE` or `RECHAZADA` transfer document -> DENIED.
 11. **Unauthorized News Publishing / Draft Leak / Nominee Tampering**: Non-press creating `/news/{id}`, or non-admin mutating `/award_nominees/{disciplineId}` or exceeding 5 nominees -> DENIED.
-12. **Ballot Stuffing & Resource Poisoning**: Authenticated user creating `/championship_mvp_votes/f7-h-1_otherUid`, `/toty_ballots/f7-h-1_fake` with spoofed `voterUid`, or uploading `/teams/{id}.escudo` > 160 KB -> DENIED.
+12. **Ballot Stuffing, Leaderboard Spoofing & Resource Poisoning**: Authenticated user creating `/championship_mvp_votes/f7-h-1_otherUid`, `/toty_ballots/f7-h-1_fake`, submitting `/leyendas_leaderboard/{id}` with spoofed `uid`, `score: 999999`, or trying to `update` an existing leaderboard record -> DENIED.
+
 

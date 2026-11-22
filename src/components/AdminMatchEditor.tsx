@@ -11,9 +11,18 @@ import {
   X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  extractMatchGroups,
+  extractMatchStages,
+  filterMatchesByOrg,
+  groupMatchesByOrg,
+  MATCH_STAGE_ORDER,
+  type MatchGroupByMode,
+} from '../domain/matchFilterEngine';
 import type {
   DisciplineId,
   Match,
+  MatchPhase,
   MatchPlayoffLeg,
   MatchStatus,
   PeriodScore,
@@ -50,6 +59,9 @@ export function AdminMatchEditor({
   onAddMatch,
 }: AdminMatchEditorProps) {
   const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
+  const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
+  const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
+  const [groupBy, setGroupBy] = useState<MatchGroupByMode>('none');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
   const [query, setQuery] = useState('');
 
@@ -75,11 +87,32 @@ export function AdminMatchEditor({
     }
   }, [initialEditMatchId, state.matches]);
 
+  const availableGroups = useMemo(
+    () =>
+      extractMatchGroups(state.matches, {
+        disciplineId: disciplineFilter,
+        fase: stageFilter,
+      }),
+    [state.matches, disciplineFilter, stageFilter]
+  );
+
+  const availableStages = useMemo(() => {
+    const present = extractMatchStages(state.matches, {
+      disciplineId: disciplineFilter,
+      groupName: groupFilter,
+    });
+    return present.length > 0 ? present : MATCH_STAGE_ORDER;
+  }, [state.matches, disciplineFilter, groupFilter]);
+
   const filteredMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return state.matches
+    const orgFiltered = filterMatchesByOrg(state.matches, {
+      disciplineId: disciplineFilter,
+      groupName: groupFilter,
+      fase: stageFilter,
+    });
+    return orgFiltered
       .filter((m) => {
-        if (disciplineFilter !== 'ALL' && m.disciplineId !== disciplineFilter) return false;
         if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
         if (!q) return true;
         const homeName = teamMap.get(m.homeTeamId)?.nombre.toLowerCase() ?? '';
@@ -89,6 +122,7 @@ export function AdminMatchEditor({
           awayName.includes(q) ||
           m.cancha.toLowerCase().includes(q) ||
           m.groupName.toLowerCase().includes(q) ||
+          m.fase.toLowerCase().includes(q) ||
           m.fecha.includes(q)
         );
       })
@@ -98,7 +132,18 @@ export function AdminMatchEditor({
         if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
         return `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`);
       });
-  }, [state.matches, disciplineFilter, statusFilter, query, teamMap]);
+  }, [state.matches, disciplineFilter, groupFilter, stageFilter, statusFilter, query, teamMap]);
+
+  const groupedMatchSections = useMemo(
+    () =>
+      groupMatchesByOrg(
+        filteredMatches,
+        groupBy,
+        Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<DisciplineId, string>,
+        DISCIPLINES.map((d) => d.id)
+      ),
+    [filteredMatches, groupBy]
+  );
 
   const disciplineTeamsForEdit = useMemo(() => {
     if (!editingMatch) return [];
@@ -805,44 +850,91 @@ export function AdminMatchEditor({
       )}
 
       {/* Filters Toolbar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-[#f5f6f8] border border-neutral-200 p-4">
-        <div className="relative">
-          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por equipo, cancha, grupo o fecha..."
-            aria-label="Buscar partidos"
-            className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-          />
+      <div className="space-y-3 bg-[#f5f6f8] border border-neutral-200 p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por equipo, cancha, grupo o fecha..."
+              aria-label="Buscar partidos"
+              className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+            />
+          </div>
+
+          <select
+            value={disciplineFilter}
+            onChange={(e) => {
+              setDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
+              setGroupFilter('ALL');
+            }}
+            aria-label="Filtrar partidos por disciplina"
+            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="ALL">Todas las disciplinas ({state.matches.length})</option>
+            {DISCIPLINES.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.nombre}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | MatchStatus)}
+            aria-label="Filtrar partidos por estado"
+            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="ALL">Todos los estados</option>
+            <option value="FINALIZADO">Finalizados — Partidos Pasados ({pastCount})</option>
+            <option value="EN_VIVO">En Vivo ({liveCount})</option>
+            <option value="PROGRAMADO">Programados ({scheduledCount})</option>
+          </select>
         </div>
 
-        <select
-          value={disciplineFilter}
-          onChange={(e) => setDisciplineFilter(e.target.value as 'ALL' | DisciplineId)}
-          aria-label="Filtrar partidos por disciplina"
-          className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-        >
-          <option value="ALL">Todas las disciplinas ({state.matches.length})</option>
-          {DISCIPLINES.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.nombre}
-            </option>
-          ))}
-        </select>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-neutral-200">
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            aria-label="Filtrar partidos por grupo"
+            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="ALL">Todos los grupos / llaves</option>
+            {availableGroups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as 'ALL' | MatchStatus)}
-          aria-label="Filtrar partidos por estado"
-          className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-        >
-          <option value="ALL">Todos los estados</option>
-          <option value="FINALIZADO">Finalizados — Partidos Pasados ({pastCount})</option>
-          <option value="EN_VIVO">En Vivo ({liveCount})</option>
-          <option value="PROGRAMADO">Programados ({scheduledCount})</option>
-        </select>
+          <select
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value as 'ALL' | MatchPhase)}
+            aria-label="Filtrar partidos por fase"
+            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="ALL">Todas las fases</option>
+            {availableStages.map((stage) => (
+              <option key={stage} value={stage}>
+                {stage}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as MatchGroupByMode)}
+            aria-label="Organizar partidos por"
+            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="none">Organizar: Sin agrupar</option>
+            <option value="disciplina">Organizar por: Disciplina</option>
+            <option value="grupo">Organizar por: Grupo</option>
+            <option value="fase">Organizar por: Fase</option>
+          </select>
+        </div>
       </div>
 
       {/* Matches List */}
@@ -857,69 +949,86 @@ export function AdminMatchEditor({
           </p>
         </div>
       ) : (
-        <div className="border border-neutral-200 divide-y divide-neutral-200">
-          {filteredMatches.map((m) => {
-            const home = teamMap.get(m.homeTeamId);
-            const away = teamMap.get(m.awayTeamId);
-            const disc = DISCIPLINE_MAP[m.disciplineId];
-            return (
-              <div
-                key={m.id}
-                className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#f9fafb]"
-              >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span
-                      className={`px-2 py-0.5 font-display uppercase tracking-wider text-[11px] ${
-                        m.status === 'FINALIZADO'
-                          ? 'bg-[#0d0d0d] text-white'
-                          : m.status === 'EN_VIVO'
-                          ? 'bg-[#707ef9] text-white'
-                          : 'bg-[#f5f6f8] text-neutral-600 border border-neutral-300'
-                      }`}
-                    >
-                      {m.status === 'FINALIZADO'
-                        ? 'FINALIZADO'
-                        : m.status === 'EN_VIVO'
-                        ? 'EN VIVO'
-                        : 'PROGRAMADO'}
-                    </span>
-                    <span className="font-medium text-[#707ef9]">{disc.nombreCorto}</span>
-                    <span className="text-neutral-500">
-                      {m.fase} · J{m.jornada} · {m.groupName}
-                    </span>
-                    {m.fase !== 'Grupos' && (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA') && (
-                      <span className="px-1.5 py-0.5 bg-[#707ef9]/15 text-[#4250d6] font-display font-bold uppercase tracking-wider text-[10px]">
-                        {m.playoffLeg === 'IDA' ? 'IDA' : 'VUELTA'}
-                      </span>
-                    )}
-                    <span className="text-neutral-400 inline-flex items-center gap-1 tabular-nums">
-                      <Calendar className="w-3 h-3" />
-                      {m.fecha} {m.hora}
-                    </span>
-                  </div>
-
-                  <p className="text-sm font-bold text-[#0d0d0d]">
-                    {home?.nombre ?? m.homeTeamId}{' '}
-                    <span className="font-display text-xl px-2 py-0.5 mx-1 bg-[#f5f6f8] border border-neutral-200 tabular-nums">
-                      {m.homeScore} — {m.awayScore}
-                    </span>{' '}
-                    {away?.nombre ?? m.awayTeamId}
-                  </p>
-                  <p className="text-xs text-neutral-500">{m.cancha}</p>
+        <div className="space-y-6">
+          {groupedMatchSections.map((section) => (
+            <div key={section.key} className="space-y-2">
+              {groupBy !== 'none' && (
+                <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                  <h3 className="font-display text-xl uppercase tracking-wide text-[#0d0d0d]">
+                    {section.label}
+                  </h3>
+                  <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                    {section.matches.length}{' '}
+                    {section.matches.length === 1 ? 'partido' : 'partidos'}
+                  </span>
                 </div>
+              )}
+              <div className="border border-neutral-200 divide-y divide-neutral-200">
+                {section.matches.map((m) => {
+                  const home = teamMap.get(m.homeTeamId);
+                  const away = teamMap.get(m.awayTeamId);
+                  const disc = DISCIPLINE_MAP[m.disciplineId];
+                  return (
+                    <div
+                      key={m.id}
+                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#f9fafb]"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span
+                            className={`px-2 py-0.5 font-display uppercase tracking-wider text-[11px] ${
+                              m.status === 'FINALIZADO'
+                                ? 'bg-[#0d0d0d] text-white'
+                                : m.status === 'EN_VIVO'
+                                ? 'bg-[#707ef9] text-white'
+                                : 'bg-[#f5f6f8] text-neutral-600 border border-neutral-300'
+                            }`}
+                          >
+                            {m.status === 'FINALIZADO'
+                              ? 'FINALIZADO'
+                              : m.status === 'EN_VIVO'
+                              ? 'EN VIVO'
+                              : 'PROGRAMADO'}
+                          </span>
+                          <span className="font-medium text-[#707ef9]">{disc.nombreCorto}</span>
+                          <span className="text-neutral-500">
+                            {m.fase} · J{m.jornada} · {m.groupName}
+                          </span>
+                          {m.fase !== 'Grupos' && (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA') && (
+                            <span className="px-1.5 py-0.5 bg-[#707ef9]/15 text-[#4250d6] font-display font-bold uppercase tracking-wider text-[10px]">
+                              {m.playoffLeg === 'IDA' ? 'IDA' : 'VUELTA'}
+                            </span>
+                          )}
+                          <span className="text-neutral-400 inline-flex items-center gap-1 tabular-nums">
+                            <Calendar className="w-3 h-3" />
+                            {m.fecha} {m.hora}
+                          </span>
+                        </div>
 
-                <button
-                  type="button"
-                  onClick={() => startEditing(m)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display uppercase tracking-widest text-xs transition-colors cursor-pointer self-start md:self-auto shrink-0"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>{m.status === 'FINALIZADO' ? 'Modificar partido pasado' : 'Editar partido'}</span>
-                </button>
+                        <p className="text-sm font-bold text-[#0d0d0d]">
+                          {home?.nombre ?? m.homeTeamId}{' '}
+                          <span className="font-display text-xl px-2 py-0.5 mx-1 bg-[#f5f6f8] border border-neutral-200 tabular-nums">
+                            {m.homeScore} — {m.awayScore}
+                          </span>{' '}
+                          {away?.nombre ?? m.awayTeamId}
+                        </p>
+                        <p className="text-xs text-neutral-500">{m.cancha}</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => startEditing(m)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display uppercase tracking-widest text-xs transition-colors cursor-pointer self-start md:self-auto shrink-0"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>{m.status === 'FINALIZADO' ? 'Modificar partido pasado' : 'Editar partido'}</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
     </div>

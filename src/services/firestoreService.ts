@@ -22,6 +22,7 @@ import type {
   ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
+  LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
   Match,
@@ -112,6 +113,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     champMvpRes,
     posAwardsRes,
     totyRes,
+    leyendasRes,
   ] = await Promise.allSettled([
     getDoc(doc(db, 'settings', 'tournament')),
     getDocs(query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
@@ -126,6 +128,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'championship_mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'position_award_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'leyendas_leaderboard'), where('weekKey', '>=', ''))),
   ]);
 
   const result: Partial<TournamentState> = {};
@@ -416,6 +419,51 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
         updatedAt: toIso(data.updatedAt),
       };
     });
+  }
+
+  if (leyendasRes.status === 'fulfilled') {
+    result.leyendasLeaderboard = leyendasRes.value.docs
+      .map((d) => {
+        const data = d.data();
+        const rawStats = (data.stats && typeof data.stats === 'object' ? data.stats : {}) as Record<string, unknown>;
+        return {
+          id: String(data.id || d.id),
+          uid: String(data.uid || ''),
+          playerName: String(data.playerName || 'Leyenda UFRO'),
+          career: String(data.career || 'Carrera UFRO'),
+          sportKey: (data.sportKey === 'basquet' || data.sportKey === 'voley' ? data.sportKey : 'futbol') as LeyendasLeaderboardEntry['sportKey'],
+          branch: (data.branch === 'mujer' ? 'mujer' : 'hombre') as LeyendasLeaderboardEntry['branch'],
+          pos: String(data.pos || 'DEL'),
+          ovr: Number(data.ovr) || 70,
+          maxOvr: Number(data.maxOvr) || Number(data.ovr) || 70,
+          score: Number(data.score) || 0,
+          legacyTitle: String(data.legacyTitle || 'Guerrero Universitario UFRO'),
+          legacyDesc: String(data.legacyDesc || ''),
+          titlesCount: Number(data.titlesCount) || 0,
+          awardsCount: Number(data.awardsCount) || 0,
+          capsCount: Number(data.capsCount) || 0,
+          semestersPlayed: Number(data.semestersPlayed) || 1,
+          stats: {
+            g: Number(rawStats.g) || 0,
+            a: Number(rawStats.a) || 0,
+            m: Number(rawStats.m) || 0,
+            pts: Number(rawStats.pts) || 0,
+            reb: Number(rawStats.reb) || 0,
+            ast: Number(rawStats.ast) || 0,
+            blk: Number(rawStats.blk) || 0,
+            ace: Number(rawStats.ace) || 0,
+          },
+          finalTeam: String(data.finalTeam || ''),
+          finalTeamId: typeof data.finalTeamId === 'string' ? data.finalTeamId : undefined,
+          finalTeamEscudo: typeof data.finalTeamEscudo === 'string' ? data.finalTeamEscudo : undefined,
+          stints: Array.isArray(data.stints) ? data.stints : [],
+          trophies: Array.isArray(data.trophies) ? data.trophies : [],
+          awards: Array.isArray(data.awards) ? data.awards : [],
+          weekKey: String(data.weekKey || ''),
+          createdAt: toIso(data.createdAt),
+        } satisfies LeyendasLeaderboardEntry;
+      })
+      .sort((a, b) => b.score - a.score);
   }
 
   return result;
@@ -1669,4 +1717,76 @@ export async function saveFirestoreTotyBallot(ballot: TotyBallotRecord): Promise
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
+
+export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry): Promise<void> {
+  const safeId = entry.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128) || `ley_${Date.now()}`;
+  const path = `leyendas_leaderboard/${safeId}`;
+  try {
+    const ref = doc(db, 'leyendas_leaderboard', safeId);
+    const clampInt = (n: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, Math.trunc(Number(n) || 0)));
+
+    const payload: Record<string, unknown> = {
+      id: safeId,
+      uid: entry.uid.slice(0, 128),
+      playerName: (entry.playerName || 'Leyenda UFRO').trim().slice(0, 80),
+      career: (entry.career || 'Carrera UFRO').trim().slice(0, 120),
+      sportKey: entry.sportKey,
+      branch: entry.branch,
+      pos: (entry.pos || 'DEL').trim().slice(0, 12),
+      ovr: clampInt(entry.ovr, 50, 110),
+      maxOvr: clampInt(entry.maxOvr, 50, 110),
+      score: clampInt(entry.score, 0, 100000),
+      legacyTitle: (entry.legacyTitle || 'Guerrero Universitario UFRO').trim().slice(0, 100),
+      legacyDesc: (entry.legacyDesc || 'Carrera universitaria UFRO').trim().slice(0, 220),
+      titlesCount: clampInt(entry.titlesCount, 0, 60),
+      awardsCount: clampInt(entry.awardsCount, 0, 40),
+      capsCount: clampInt(entry.capsCount, 0, 200),
+      semestersPlayed: clampInt(entry.semestersPlayed, 1, 40),
+      stats: {
+        g: clampInt(entry.stats.g, 0, 1000),
+        a: clampInt(entry.stats.a, 0, 1000),
+        m: clampInt(entry.stats.m, 0, 500),
+        pts: clampInt(entry.stats.pts, 0, 15000),
+        reb: clampInt(entry.stats.reb, 0, 5000),
+        ast: clampInt(entry.stats.ast, 0, 5000),
+        blk: clampInt(entry.stats.blk, 0, 3000),
+        ace: clampInt(entry.stats.ace, 0, 3000),
+      },
+      finalTeam: (entry.finalTeam || 'Club UFRO').trim().slice(0, 100),
+      stints: entry.stints.slice(0, 15).map((s) => ({
+        team: s.team.slice(0, 100),
+        ...(s.teamId ? { teamId: s.teamId.slice(0, 128) } : {}),
+        ...(s.sigla ? { sigla: s.sigla.slice(0, 8) } : {}),
+        div: s.div.slice(0, 24),
+        years: s.years.slice(0, 20),
+      })),
+      trophies: entry.trophies.slice(0, 60).map((t) => ({
+        id: t.id.slice(0, 60),
+        title: t.title.slice(0, 100),
+        year: clampInt(t.year, 2000, 2100),
+        team: t.team.slice(0, 100),
+      })),
+      awards: entry.awards.slice(0, 40).map((a) => ({
+        id: a.id.slice(0, 60),
+        title: a.title.slice(0, 100),
+        year: clampInt(a.year, 2000, 2100),
+      })),
+      weekKey: (entry.weekKey || '2026-W01').slice(0, 16),
+      createdAt: serverTimestamp(),
+    };
+
+    if (entry.finalTeamId && /^[a-zA-Z0-9_-]{1,128}$/.test(entry.finalTeamId)) {
+      payload.finalTeamId = entry.finalTeamId;
+    }
+    if (entry.finalTeamEscudo && entry.finalTeamEscudo.length <= 160000) {
+      payload.finalTeamEscudo = entry.finalTeamEscudo;
+    }
+
+    await setDoc(ref, payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
 
