@@ -12,7 +12,9 @@ import {
   aggregatePositionAwardVotes,
   computeCommunityToty,
   getPositionsForSport,
+  getTotyFormationForSport,
   matchPlayerToPositionKey,
+  normalizeTotyBallotSelections,
 } from './awardsEngine.ts';
 
 const sampleTeams: Team[] = [
@@ -71,10 +73,13 @@ const makePlayer = (id: string, nombre: string, posicion: string, teamId = 't1')
 
 const samplePlayers: Player[] = [
   makePlayer('p-gk', 'Lucas', 'Portero', 't1'),
-  makePlayer('p-def', 'Matías', 'Defensa Central', 't1'),
-  makePlayer('p-mid', 'Diego', 'Volante Mixto', 't2'),
+  makePlayer('p-def-1', 'Matías', 'Defensa Central', 't1'),
+  makePlayer('p-def-2', 'Felipe', 'Defensa Lateral', 't2'),
+  makePlayer('p-mid-1', 'Diego', 'Volante Mixto', 't2'),
+  makePlayer('p-mid-2', 'Sebastián', 'Mediocampista', 't1'),
   makePlayer('p-fw-a', 'Jugador A', 'Delantero', 't1'),
   makePlayer('p-fw-b', 'Jugador B', 'Extremo / Delantero', 't2'),
+  makePlayer('p-fw-c', 'Jugador C', 'Delantero Centro', 't1'),
 ];
 
 test('sport positions cover football, basketball 5x5, basketball 3x3, and volleyball', () => {
@@ -94,6 +99,33 @@ test('sport positions cover football, basketball 5x5, basketball 3x3, and volley
     getPositionsForSport('voleibol').map((p) => p.key),
     ['armador', 'punta', 'central', 'opuesto', 'libero']
   );
+});
+
+test('TOTY formations match full lineups: F7 (1-2-2-2 = 7), Basket 5x5 (quintet = 5), Basket 3x3 (3), Volley (6 + Libero = 7)', () => {
+  const f7 = getTotyFormationForSport('futbol7');
+  assert.equal(f7.slots.length, 7);
+  assert.equal(f7.slots.filter((s) => s.positionKey === 'arquero').length, 1);
+  assert.equal(f7.slots.filter((s) => s.positionKey === 'defensa').length, 2);
+  assert.equal(f7.slots.filter((s) => s.positionKey === 'mediocampista').length, 2);
+  assert.equal(f7.slots.filter((s) => s.positionKey === 'delantero').length, 2);
+
+  const basket = getTotyFormationForSport('basquetbol');
+  assert.equal(basket.slots.length, 5);
+  assert.deepEqual(
+    basket.slots.map((s) => s.positionKey),
+    ['base', 'escolta', 'alero', 'ala_pivot', 'pivot']
+  );
+
+  const basket3x3 = getTotyFormationForSport('basquetbol3x3');
+  assert.equal(basket3x3.slots.length, 3);
+
+  const volley = getTotyFormationForSport('voleibol');
+  assert.equal(volley.slots.length, 7);
+  assert.equal(volley.slots.filter((s) => s.positionKey === 'armador').length, 1);
+  assert.equal(volley.slots.filter((s) => s.positionKey === 'punta').length, 2);
+  assert.equal(volley.slots.filter((s) => s.positionKey === 'central').length, 2);
+  assert.equal(volley.slots.filter((s) => s.positionKey === 'opuesto').length, 1);
+  assert.equal(volley.slots.filter((s) => s.positionKey === 'libero').length, 1);
 });
 
 test('matchPlayerToPositionKey maps specific keywords before generic ones', () => {
@@ -136,7 +168,6 @@ test('aggregateChampionshipMvpVotes counts only votes for the 5 admin nominees',
       teamId: 't1',
       createdAt: '2026-05-01T10:10:00Z',
     },
-    // Non-nominated player vote should be excluded from official 5-nominee tally
     {
       id: 'f7-h-1_u4',
       disciplineId: 'f7-h-1',
@@ -151,7 +182,7 @@ test('aggregateChampionshipMvpVotes counts only votes for the 5 admin nominees',
 
   const res = aggregateChampionshipMvpVotes(
     'f7-h-1',
-    ['p-gk', 'p-def', 'p-mid', 'p-fw-a', 'p-fw-b'],
+    ['p-gk', 'p-def-1', 'p-mid-1', 'p-fw-a', 'p-fw-b'],
     votes,
     samplePlayers,
     sampleTeams
@@ -194,8 +225,25 @@ test('aggregatePositionAwardVotes ranks players per position', () => {
   assert.equal(gkAward.leader?.playerId, 'p-gk');
 });
 
-test('computeCommunityToty picks the highest-voted player per position (Jugador B 12 votes > Jugador A 10 votes)', () => {
+test('normalizeTotyBallotSelections migrates legacy single-position keys and removes duplicates', () => {
+  const migrated = normalizeTotyBallotSelections(
+    {
+      arquero: 'p-gk',
+      defensa: 'p-def-1',
+      delantero_1: 'p-fw-a',
+      delantero_2: 'p-fw-a', // duplicate should be dropped
+    },
+    'futbol7'
+  );
+  assert.equal(migrated.arquero, 'p-gk');
+  assert.equal(migrated.defensa_1, 'p-def-1');
+  assert.equal(migrated.delantero_1, 'p-fw-a');
+  assert.equal(migrated.delantero_2, undefined);
+});
+
+test('computeCommunityToty pools multi-slot positions in F7 1-2-2-2 and picks top distinct winners per line', () => {
   const ballots: TotyBallotRecord[] = [];
+  // 10 voters pick p-fw-a & p-fw-b (reversed order across ballots to verify slot-agnostic pooling)
   for (let i = 0; i < 10; i++) {
     ballots.push({
       id: `f7-h-1_userA_${i}`,
@@ -204,13 +252,17 @@ test('computeCommunityToty picks the highest-voted player per position (Jugador 
       voterUid: `userA_${i}`,
       selections: {
         arquero: 'p-gk',
-        defensa: 'p-def',
-        mediocampista: 'p-mid',
-        delantero: 'p-fw-a',
+        defensa_1: 'p-def-1',
+        defensa_2: 'p-def-2',
+        mediocampista_1: 'p-mid-1',
+        mediocampista_2: 'p-mid-2',
+        delantero_1: 'p-fw-a',
+        delantero_2: 'p-fw-b',
       },
       updatedAt: '2026-05-02T12:00:00Z',
     });
   }
+  // 12 voters pick p-fw-b & p-fw-c (so p-fw-b has 22 votes, p-fw-c has 12, p-fw-a has 10)
   for (let i = 0; i < 12; i++) {
     ballots.push({
       id: `f7-h-1_userB_${i}`,
@@ -219,9 +271,12 @@ test('computeCommunityToty picks the highest-voted player per position (Jugador 
       voterUid: `userB_${i}`,
       selections: {
         arquero: 'p-gk',
-        defensa: 'p-def',
-        mediocampista: 'p-mid',
-        delantero: 'p-fw-b',
+        defensa_1: 'p-def-2',
+        defensa_2: 'p-def-1',
+        mediocampista_1: 'p-mid-2',
+        mediocampista_2: 'p-mid-1',
+        delantero_1: 'p-fw-b',
+        delantero_2: 'p-fw-c',
       },
       updatedAt: '2026-05-02T12:05:00Z',
     });
@@ -229,10 +284,18 @@ test('computeCommunityToty picks the highest-voted player per position (Jugador 
 
   const toty = computeCommunityToty('f7-h-1', 'futbol7', ballots, samplePlayers, sampleTeams);
   assert.equal(toty.totalBallots, 22);
-  const delanteroSlot = toty.slots.find((s) => s.position.key === 'delantero');
-  assert.ok(delanteroSlot);
-  assert.equal(delanteroSlot.winner?.playerId, 'p-fw-b');
-  assert.equal(delanteroSlot.winner?.votes, 12);
-  assert.equal(delanteroSlot.runnerUps[0]?.playerId, 'p-fw-a');
-  assert.equal(delanteroSlot.runnerUps[0]?.votes, 10);
+  assert.equal(toty.slots.length, 7);
+
+  const del1 = toty.slots.find((s) => s.slot.slotKey === 'delantero_1');
+  const del2 = toty.slots.find((s) => s.slot.slotKey === 'delantero_2');
+  assert.equal(del1?.winner?.playerId, 'p-fw-b');
+  assert.equal(del1?.winner?.votes, 22);
+  assert.equal(del2?.winner?.playerId, 'p-fw-c');
+  assert.equal(del2?.winner?.votes, 12);
+  assert.equal(del1?.runnerUps[0]?.playerId, 'p-fw-a');
+  assert.equal(del1?.runnerUps[0]?.votes, 10);
+
+  // All 7 starters must be distinct players
+  const winnerIds = toty.slots.map((s) => s.winner?.playerId).filter(Boolean);
+  assert.equal(new Set(winnerIds).size, 7);
 });
