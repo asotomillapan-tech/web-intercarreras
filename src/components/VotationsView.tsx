@@ -5,11 +5,13 @@ import {
   Clock,
   Crown,
   Lock,
+  Search,
   ShieldCheck,
   Sparkles,
   Star,
   Trophy,
   Users,
+  X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
@@ -31,12 +33,227 @@ import type {
   Match,
   MatchPhase,
   Player,
+  Team,
   TournamentState,
 } from '../types/tournament';
 import { MatchFilterBar } from './MatchFilterBar';
 import { TeamCrest } from './TeamCrest';
 
 type VotationTab = 'potm' | 'mvp' | 'posiciones' | 'toty';
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function playerMatchesQuery(player: Player, team: Team | undefined, rawQuery: string): boolean {
+  const q = normalizeSearchText(rawQuery);
+  if (!q) return true;
+  const haystack = normalizeSearchText(
+    `${player.nombre} ${player.apellidoPaterno} ${player.apellidoMaterno ?? ''} #${player.dorsal} ${player.dorsal} ${player.posicion} ${player.carrera} ${team?.nombre ?? ''} ${team?.sigla ?? ''}`
+  );
+  return q.split(/\s+/).every((token) => haystack.includes(token));
+}
+
+interface TotyPlayerSearchPickerProps {
+  posKey: string;
+  shortCode: string;
+  label: string;
+  matched: Player[];
+  all: Player[];
+  teamMap: Map<string, Team>;
+  selectedPlayerId: string;
+  onSelect: (playerId: string) => void;
+}
+
+function TotyPlayerSearchPicker({
+  posKey,
+  shortCode,
+  label,
+  matched,
+  all,
+  teamMap,
+  selectedPlayerId,
+  onSelect,
+}: TotyPlayerSearchPickerProps) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const selectedPlayer = useMemo(
+    () => all.find((p) => p.id === selectedPlayerId),
+    [all, selectedPlayerId]
+  );
+  const selectedTeam = selectedPlayer ? teamMap.get(selectedPlayer.teamId) : undefined;
+
+  const matchedIdSet = useMemo(() => new Set(matched.map((p) => p.id)), [matched]);
+
+  const results = useMemo(() => {
+    const q = normalizeSearchText(query);
+    if (!q) {
+      // Show specialists first, then rest of discipline
+      const rest = all.filter((p) => !matchedIdSet.has(p.id));
+      return [...matched, ...rest].slice(0, 20);
+    }
+    const filtered = all.filter((p) => playerMatchesQuery(p, teamMap.get(p.teamId), q));
+    // Rank position specialists first among search hits
+    return filtered.sort((a, b) => {
+      const aSpec = matchedIdSet.has(a.id) ? 0 : 1;
+      const bSpec = matchedIdSet.has(b.id) ? 0 : 1;
+      return aSpec - bSpec;
+    });
+  }, [query, matched, all, matchedIdSet, teamMap]);
+
+  return (
+    <div className="space-y-1.5 relative">
+      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-[#0d0d0d]">
+        <label htmlFor={`toty-search-${posKey}`}>
+          {shortCode} · {label}
+        </label>
+        {matched.length > 0 && (
+          <span className="font-normal text-[11px] text-neutral-500">
+            {matched.length} en posición
+          </span>
+        )}
+      </div>
+
+      {selectedPlayer && !open ? (
+        <div className="border border-[#707ef9] bg-[#707ef9]/5 px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <TeamCrest
+              escudo={selectedTeam?.escudo}
+              sigla={selectedTeam?.sigla ?? 'EQ'}
+              nombre={selectedTeam?.nombre ?? selectedPlayer.teamId}
+              size="xs"
+            />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#0d0d0d] truncate">
+                #{selectedPlayer.dorsal} {selectedPlayer.nombre} {selectedPlayer.apellidoPaterno}
+              </p>
+              <p className="text-[11px] text-neutral-500 truncate">
+                {selectedTeam?.nombre ?? selectedPlayer.teamId} · {selectedPlayer.posicion}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setOpen(true);
+              }}
+              className="text-[11px] font-medium text-[#707ef9] hover:underline cursor-pointer"
+            >
+              Cambiar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onSelect('');
+                setQuery('');
+              }}
+              aria-label={`Quitar selección de ${label}`}
+              className="p-1 text-neutral-400 hover:text-red-600 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              id={`toty-search-${posKey}`}
+              type="text"
+              value={query}
+              onFocus={() => setOpen(true)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
+              placeholder={`Buscar jugador para ${label} (nombre, dorsal o equipo)...`}
+              className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white focus:border-[#707ef9] focus:outline-none"
+            />
+            {(query || open) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setOpen(false);
+                }}
+                aria-label="Cerrar búsqueda"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {open && (
+            <div
+              role="listbox"
+              aria-label={`Opciones de jugadores para ${label}`}
+              className="border border-neutral-300 bg-white max-h-52 overflow-y-auto divide-y divide-neutral-100 shadow-lg"
+            >
+              {results.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-neutral-500 text-center">
+                  Sin jugadores que coincidan con &ldquo;{query}&rdquo;.
+                </p>
+              ) : (
+                results.map((p) => {
+                  const tm = teamMap.get(p.teamId);
+                  const isSpec = matchedIdSet.has(p.id);
+                  const isCurrent = p.id === selectedPlayerId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isCurrent}
+                      onClick={() => {
+                        onSelect(p.id);
+                        setQuery('');
+                        setOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-[#f5f6f8] cursor-pointer ${
+                        isCurrent ? 'bg-[#707ef9]/10' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <TeamCrest
+                          escudo={tm?.escudo}
+                          sigla={tm?.sigla ?? 'EQ'}
+                          nombre={tm?.nombre ?? p.teamId}
+                          size="xs"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#0d0d0d] truncate">
+                            #{p.dorsal} {p.nombre} {p.apellidoPaterno}
+                          </p>
+                          <p className="text-[11px] text-neutral-500 truncate">
+                            {tm?.nombre ?? p.teamId} · {p.posicion}
+                          </p>
+                        </div>
+                      </div>
+                      {isSpec && (
+                        <span className="text-[10px] font-mono uppercase text-[#707ef9] font-semibold shrink-0">
+                          Posición
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface VotationsViewProps {
   state: TournamentState;
@@ -77,6 +294,8 @@ export function VotationsView({
   const [potmStageFilter, setPotmStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [selectedPositionKey, setSelectedPositionKey] = useState<string>('');
   const [showAllPlayersForPosition, setShowAllPlayersForPosition] = useState(false);
+  const [positionPlayerSearch, setPositionPlayerSearch] = useState('');
+  const [positionTeamFilter, setPositionTeamFilter] = useState<'ALL' | string>('ALL');
   const [totyDraft, setTotyDraft] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
@@ -96,6 +315,8 @@ export function VotationsView({
     setPotmGroupFilter('ALL');
     setPotmStageFilter('ALL');
     setShowAllPlayersForPosition(false);
+    setPositionPlayerSearch('');
+    setPositionTeamFilter('ALL');
     setFeedbackMsg(null);
   }, [selectedDiscipline, sportPositions, selectedPositionKey]);
 
@@ -208,10 +429,38 @@ export function VotationsView({
     );
   }, [disciplinePlayers, discMeta.sportType, activePositionStanding]);
 
-  const positionCandidatesToDisplay =
-    !showAllPlayersForPosition && eligibleForActivePosition.matched.length > 0
+  const disciplineTeams = useMemo(
+    () =>
+      state.teams
+        .filter((t) => t.disciplineId === selectedDiscipline)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+    [state.teams, selectedDiscipline]
+  );
+
+  const positionCandidatesBase = useMemo(() => {
+    // When user types a manual search query, search across ALL discipline players (ranking position matches first)
+    // so they immediately find any player they look up by name/dorsal/team!
+    if (positionPlayerSearch.trim().length > 0) {
+      const matchedIds = new Set(eligibleForActivePosition.matched.map((p) => p.id));
+      return [...eligibleForActivePosition.all].sort((a, b) => {
+        const aSpec = matchedIds.has(a.id) ? 0 : 1;
+        const bSpec = matchedIds.has(b.id) ? 0 : 1;
+        return aSpec - bSpec;
+      });
+    }
+    return !showAllPlayersForPosition && eligibleForActivePosition.matched.length > 0
       ? eligibleForActivePosition.matched
       : eligibleForActivePosition.all;
+  }, [eligibleForActivePosition, showAllPlayersForPosition, positionPlayerSearch]);
+
+  const positionCandidatesToDisplay = useMemo(
+    () =>
+      positionCandidatesBase.filter((pl) => {
+        if (positionTeamFilter !== 'ALL' && pl.teamId !== positionTeamFilter) return false;
+        return playerMatchesQuery(pl, teamMap.get(pl.teamId), positionPlayerSearch);
+      }),
+    [positionCandidatesBase, positionTeamFilter, positionPlayerSearch, teamMap]
+  );
 
   const userPositionVote = useMemo(() => {
     if (!currentUser || !activePositionStanding) return undefined;
@@ -927,7 +1176,7 @@ export function VotationsView({
                 )}
               </div>
 
-              {/* Right: Eligible Candidates to Vote */}
+              {/* Right: Eligible Candidates to Vote with Manual Player Search */}
               <div className="lg:col-span-7 bg-white border border-neutral-200 p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-3">
                   <div>
@@ -935,13 +1184,15 @@ export function VotationsView({
                       Elegir {activePositionStanding.position.awardTitle}
                     </h3>
                     <p className="text-xs text-neutral-600">
-                      {eligibleForActivePosition.matched.length > 0 && !showAllPlayersForPosition
-                        ? `Mostrando ${eligibleForActivePosition.matched.length} jugadores registrados en posición ${activePositionStanding.position.label}.`
-                        : `Mostrando todos los jugadores inscritos en ${discMeta.nombreCorto} (${eligibleForActivePosition.all.length}).`}
+                      {positionPlayerSearch.trim()
+                        ? `Búsqueda manual en ${discMeta.nombreCorto}: ${positionCandidatesToDisplay.length} coincidencia(s).`
+                        : eligibleForActivePosition.matched.length > 0 && !showAllPlayersForPosition
+                        ? `Mostrando ${positionCandidatesToDisplay.length} jugador(es) en posición ${activePositionStanding.position.label}.`
+                        : `Mostrando ${positionCandidatesToDisplay.length} de ${eligibleForActivePosition.all.length} jugadores inscritos en ${discMeta.nombreCorto}.`}
                     </p>
                   </div>
 
-                  {eligibleForActivePosition.matched.length > 0 && (
+                  {eligibleForActivePosition.matched.length > 0 && !positionPlayerSearch.trim() && (
                     <button
                       type="button"
                       onClick={() => setShowAllPlayersForPosition((v) => !v)}
@@ -954,10 +1205,68 @@ export function VotationsView({
                   )}
                 </div>
 
+                {/* Manual Player Search + Team Filter */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                  <div className="sm:col-span-7 relative">
+                    <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      id="votations-position-player-search"
+                      type="text"
+                      value={positionPlayerSearch}
+                      onChange={(e) => setPositionPlayerSearch(e.target.value)}
+                      placeholder="Buscar jugador por nombre, apellido, dorsal o equipo..."
+                      aria-label="Buscar jugador manualmente para votar"
+                      className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+                    />
+                    {positionPlayerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setPositionPlayerSearch('')}
+                        aria-label="Limpiar búsqueda de jugador"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <select
+                      aria-label="Filtrar candidatos por equipo"
+                      value={positionTeamFilter}
+                      onChange={(e) => setPositionTeamFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+                    >
+                      <option value="ALL">Todos los equipos ({disciplineTeams.length})</option>
+                      {disciplineTeams.map((tm) => (
+                        <option key={tm.id} value={tm.id}>
+                          {tm.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 {positionCandidatesToDisplay.length === 0 ? (
-                  <p className="text-sm text-neutral-500 py-6 text-center">
-                    No hay jugadores inscritos aún en {discMeta.nombre}.
-                  </p>
+                  <div className="py-8 text-center space-y-2 border border-dashed border-neutral-200 bg-[#f5f6f8]">
+                    <p className="text-sm text-neutral-600">
+                      {positionPlayerSearch.trim() || positionTeamFilter !== 'ALL'
+                        ? 'No se encontraron jugadores con ese criterio de búsqueda.'
+                        : `No hay jugadores inscritos aún en ${discMeta.nombre}.`}
+                    </p>
+                    {(positionPlayerSearch.trim() || positionTeamFilter !== 'ALL') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPositionPlayerSearch('');
+                          setPositionTeamFilter('ALL');
+                        }}
+                        className="text-xs font-bold uppercase tracking-wider text-[#707ef9] hover:underline cursor-pointer"
+                      >
+                        Limpiar búsqueda
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[540px] overflow-y-auto pr-1">
                     {positionCandidatesToDisplay.map((pl) => {
@@ -1135,57 +1444,22 @@ export function VotationsView({
                     const pickedId = totyDraft[pos.key] ?? '';
 
                     return (
-                      <div key={pos.key} className="space-y-1.5">
-                        <label
-                          htmlFor={`toty-select-${pos.key}`}
-                          className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-[#0d0d0d]"
-                        >
-                          <span>
-                            {pos.shortCode} · {pos.label}
-                          </span>
-                          {matched.length > 0 && (
-                            <span className="font-normal text-[11px] text-neutral-500">
-                              {matched.length} en posición
-                            </span>
-                          )}
-                        </label>
-                        <select
-                          id={`toty-select-${pos.key}`}
-                          value={pickedId}
-                          onChange={(e) =>
-                            setTotyDraft((prev) => ({
-                              ...prev,
-                              [pos.key]: e.target.value,
-                            }))
-                          }
-                          className="w-full px-3 py-2.5 text-sm border border-neutral-300 bg-white focus:border-[#707ef9] focus:outline-none"
-                        >
-                          <option value="">— Selecciona un jugador —</option>
-                          {matched.length > 0 && (
-                            <optgroup label={`Especialistas (${pos.label})`}>
-                              {matched.map((p) => {
-                                const tm = teamMap.get(p.teamId);
-                                return (
-                                  <option key={p.id} value={p.id}>
-                                    #{p.dorsal} {p.nombre} {p.apellidoPaterno} ({tm?.sigla ?? 'EQ'})
-                                  </option>
-                                );
-                              })}
-                            </optgroup>
-                          )}
-                          <optgroup label="Todos los jugadores de la disciplina">
-                            {all.map((p) => {
-                              const tm = teamMap.get(p.teamId);
-                              return (
-                                <option key={`all-${p.id}`} value={p.id}>
-                                  #{p.dorsal} {p.nombre} {p.apellidoPaterno} — {tm?.sigla ?? 'EQ'} (
-                                  {p.posicion})
-                                </option>
-                              );
-                            })}
-                          </optgroup>
-                        </select>
-                      </div>
+                      <TotyPlayerSearchPicker
+                        key={`${selectedDiscipline}-${pos.key}`}
+                        posKey={pos.key}
+                        shortCode={pos.shortCode}
+                        label={pos.label}
+                        matched={matched}
+                        all={all}
+                        teamMap={teamMap}
+                        selectedPlayerId={pickedId}
+                        onSelect={(playerId) =>
+                          setTotyDraft((prev) => ({
+                            ...prev,
+                            [pos.key]: playerId,
+                          }))
+                        }
+                      />
                     );
                   })}
 

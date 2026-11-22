@@ -65,6 +65,88 @@
   flex-shrink: 0;
 }
 
+/* LEYENDAS compositor-only tactile card & HUD animations */
+@keyframes leyendasCardDeal {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes leyendasOvrPop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes leyendasDeltaFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes leyendasShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+.leyendas-card-deal {
+  opacity: 0;
+  animation: leyendasCardDeal 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.leyendas-card-hover {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, background-color 160ms ease, box-shadow 180ms ease;
+  will-change: transform;
+}
+
+.leyendas-card-hover:hover:not(:disabled) {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 24px -10px rgba(13, 13, 13, 0.2);
+}
+
+.leyendas-card-hover:active:not(:disabled) {
+  transform: translateY(-1px) scale(0.99);
+}
+
+.leyendas-ovr-pop {
+  animation: leyendasOvrPop 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.leyendas-delta-float {
+  animation: leyendasDeltaFloat 1600ms ease-out forwards;
+}
+
+.leyendas-shake {
+  animation: leyendasShake 320ms ease-in-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyGradualOvrDelta,
+  buildCareerTryoutList,
   buildLeaderboardEntryFromCareer,
   buildLeyendasTeamsFromTournament,
   buildTryoutPool,
@@ -9,15 +11,20 @@ import {
   computeCreativeLegacyBanner,
   createInitialCareerState,
   drawSemesterFocusCards,
+  evaluateCoachRenewal,
   evaluateSportsScholarship,
+  evaluateVisualMiniGameOutcome,
   formatWeeklyCountdown,
+  getCareerExclusiveEvent,
   getChileWeekInfo,
   getPostgradEligibility,
   getTrialAcceptanceChance,
+  getVisualMiniGameScenario,
   inferCareerYears,
   pickContextualKeyMoment,
   pickSemesterEvent,
   resolveKeyMomentChoice,
+  rollSportInjury,
   simulateSemesterFull,
 } from './leyendasEngine.ts';
 import type { Match, Team } from '../types/tournament.ts';
@@ -32,6 +39,42 @@ const SAMPLE_TEAMS: Team[] = [
     facultad: 'Facultad de Ingeniería y Ciencias',
     groupName: 'Grupo A',
     logrosAnteriores: 'Campeón 2025',
+  },
+  {
+    id: 'eq-ind-2',
+    nombre: 'Industrial B',
+    sigla: 'INB',
+    disciplineId: 'f7-h-2',
+    carrera: 'Ingeniería Civil Industrial',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo A',
+  },
+  {
+    id: 'eq-ind-3',
+    nombre: 'Industrial C',
+    sigla: 'INC',
+    disciplineId: 'f7-h-3',
+    carrera: 'Ingeniería Civil Industrial',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo A',
+  },
+  {
+    id: 'eq-ind-4',
+    nombre: 'Industrial Mechones',
+    sigla: 'INM',
+    disciplineId: 'f7-h-3',
+    carrera: 'Ingeniería Civil Industrial',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo B',
+  },
+  {
+    id: 'eq-ind-5',
+    nombre: 'Industrial Seniors',
+    sigla: 'INS',
+    disciplineId: 'f7-h-2',
+    carrera: 'Ingeniería Civil Industrial',
+    facultad: 'Facultad de Ingeniería y Ciencias',
+    groupName: 'Grupo B',
   },
   {
     id: 'eq-med-1',
@@ -87,7 +130,6 @@ describe('leyendasEngine', () => {
     assert.ok(med && med.isRealTeam);
     assert.ok(ind.ovr > med.ovr, 'Winning champion team should have higher OVR than losing team');
 
-    // Empty discipline (voley-h) must still have at least 8 clubs
     const voleyH = clubs.filter((c) => c.disciplineId === 'voley-h');
     assert.ok(voleyH.length >= 8);
   });
@@ -99,10 +141,27 @@ describe('leyendasEngine', () => {
     assert.equal(inferCareerYears('Periodismo'), 5);
   });
 
+  it('returns ALL clubs of the selected career in tryouts without a 4-club cap', () => {
+    const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
+    const dir = buildCareerTryoutList(clubs, 'futbol', 'hombre', 'Ingeniería Civil Industrial');
+    assert.ok(
+      dir.careerClubs.length >= 5,
+      `Expected all 5+ Industrial clubs, got ${dir.careerClubs.length}`
+    );
+    assert.ok(dir.careerClubs.some((c) => c.realTeamId === 'eq-ind-1'));
+    assert.ok(dir.careerClubs.some((c) => c.realTeamId === 'eq-ind-5'));
+    assert.ok(dir.otherCampusClubs.length > 0);
+
+    // Even a career with 0 pre-existing teams still gets its own canonical career club
+    const customDir = buildCareerTryoutList(clubs, 'voley', 'mujer', 'Biotecnología');
+    assert.equal(customDir.careerClubs.length, 1);
+    assert.equal(customDir.careerClubs[0].carrera, 'Biotecnología');
+  });
+
   it('activates Mathias Bello 90 OVR easter egg and builds tryout pools', () => {
     const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
-    const pool = buildTryoutPool(clubs, 'futbol', 'hombre', 'Ingeniería Civil Industrial', () => 0.4);
-    assert.equal(pool.length, 4);
+    const pool = buildTryoutPool(clubs, 'futbol', 'hombre', 'Ingeniería Civil Industrial');
+    assert.ok(pool.length >= 5);
     assert.ok(pool.some((c) => c.realTeamId === 'eq-ind-1'));
 
     const career = createInitialCareerState({
@@ -120,11 +179,123 @@ describe('leyendasEngine', () => {
     assert.ok(career.hasScholarship);
   });
 
+  it('applies gradual OVR progression with no abrupt jumps and elite diminishing returns', () => {
+    const bigRaw = applyGradualOvrDelta(68, 9, 99);
+    assert.ok(bigRaw.appliedDelta <= 3, 'Single step OVR gain must be capped at +3');
+    assert.equal(bigRaw.nextOvr, 71);
+
+    const elite = applyGradualOvrDelta(96, 3, 105);
+    assert.equal(elite.appliedDelta, 1, 'At >=95 OVR gains must progress smoothly by +1');
+    assert.equal(elite.nextOvr, 97);
+
+    const bigDrop = applyGradualOvrDelta(75, -8, 99);
+    assert.equal(bigDrop.appliedDelta, -3, 'Single step OVR drop must be capped at -3');
+  });
+
+  it('provides distinct career-exclusive UFRO events across diverse careers', () => {
+    const odo = getCareerExclusiveEvent('Odontología', 0);
+    const inf = getCareerExclusiveEvent('Ingeniería Civil Informática', 0);
+    const kine = getCareerExclusiveEvent('Kinesiología', 1);
+    const agro = getCareerExclusiveEvent('Agronomía', 0);
+    const der = getCareerExclusiveEvent('Derecho', 0);
+    assert.match(odo.tag, /ODONTOLOGÍA/i);
+    assert.match(inf.tag, /INFORMÁTICA/i);
+    assert.match(kine.tag, /SALUD/i);
+    assert.match(agro.tag, /MAQUEHUE|AGRO/i);
+    assert.match(der.tag, /DERECHO/i);
+  });
+
   it('computes trial acceptance chance with own-career bonus', () => {
     const base = getTrialAcceptanceChance(66, 78, false);
     const own = getTrialAcceptanceChance(66, 78, true);
     assert.ok(own > base);
     assert.ok(base >= 16 && own <= 96);
+  });
+
+  it('handles injuries, recovery events, and coach non-renewal cleanly', () => {
+    const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
+    const topTeam = clubs.find((c) => c.realTeamId === 'eq-ind-1')!;
+    const initial = createInitialCareerState({
+      playerName: 'Diego Cárdenas',
+      careerName: 'Medicina',
+      sportKey: 'futbol',
+      branch: 'hombre',
+      pos: 'DEL',
+      team: topTeam,
+      allClubs: clubs,
+      rng: () => 0.5,
+    });
+
+    const inj = rollSportInjury('futbol', 'MEDIA', () => 0.2);
+    assert.equal(inj.severity, 'MEDIA');
+    assert.ok(inj.name.length > 5);
+
+    const injuredCareer = { ...initial, activeInjury: inj };
+    const recoveryEvent = pickSemesterEvent(injuredCareer, () => 0.5);
+    assert.equal(recoveryEvent.category, 'LESION');
+    assert.equal(recoveryEvent.options.length, 2);
+
+    // Underperforming Reserva player at a high-OVR club gets released by DT
+    const weakCareer = {
+      ...initial,
+      ovr: 64,
+      role: 'Reserva' as const,
+      team: { ...topTeam, ovr: 85 },
+    };
+    const cutRes = evaluateCoachRenewal({
+      career: weakCareer,
+      perfRoll: 62,
+      wasInjured: true,
+      momentSuccess: false,
+      rng: () => 0.1,
+    });
+    assert.equal(cutRes.renewed, false);
+    assert.ok(cutRes.coachQuote.length > 20);
+
+    // Star player is renewed
+    const starCareer = { ...initial, ovr: 89, role: 'Figura' as const };
+    const keepRes = evaluateCoachRenewal({
+      career: starCareer,
+      perfRoll: 84,
+      wasInjured: false,
+      momentSuccess: true,
+      rng: () => 0.01,
+    });
+    assert.equal(keepRes.renewed, true);
+  });
+
+  it('creates and evaluates sport-specific visual mini-games (penalty kick, save, buzzer beater, spike)', () => {
+    const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
+    const team = clubs.find((c) => c.realTeamId === 'eq-ind-1')!;
+    const delCareer = createInitialCareerState({
+      playerName: 'Lucas Morales',
+      careerName: 'Ingeniería Civil Industrial',
+      sportKey: 'futbol',
+      branch: 'hombre',
+      pos: 'DEL',
+      team,
+      allClubs: clubs,
+      rng: () => 0.5,
+    });
+
+    const penKick = getVisualMiniGameScenario(delCareer, () => 0.5);
+    assert.equal(penKick.kind, 'penalty_kick');
+    const penPerfect = evaluateVisualMiniGameOutcome(penKick, 'PERFECT');
+    assert.equal(penPerfect.success, true);
+    assert.equal(penPerfect.ovrDelta, 2);
+
+    const penMiss = evaluateVisualMiniGameOutcome(penKick, 'MISS');
+    assert.equal(penMiss.success, false);
+    assert.equal(penMiss.ovrDelta, -1);
+
+    const arqScenario = getVisualMiniGameScenario({ ...delCareer, pos: 'ARQ' }, () => 0.5);
+    assert.equal(arqScenario.kind, 'penalty_save');
+
+    const bkScenario = getVisualMiniGameScenario({ ...delCareer, sportKey: 'basquet', pos: 'BASE' }, () => 0.5);
+    assert.equal(bkScenario.kind, 'buzzer_beater');
+
+    const vlScenario = getVisualMiniGameScenario({ ...delCareer, sportKey: 'voley', pos: 'PUN' }, () => 0.5);
+    assert.equal(vlScenario.kind, 'volleyball_spike');
   });
 
   it('draws 4 tiered focus cards and resolves key moments & full semesters cleanly', () => {
@@ -156,8 +327,8 @@ describe('leyendasEngine', () => {
       career: initial,
       allClubs: clubs,
       focusCard: cards[0],
-      eventDelta: { ovrDelta: 3, gpaDelta: 0.2, statBonus: 2 },
-      momentDelta: { ovrDelta: res.ovrDelta, statBoost: res.statBoost },
+      eventDelta: { ovrDelta: 2, gpaDelta: 0.2, statBonus: 2 },
+      momentDelta: { ovrDelta: res.ovrDelta, statBoost: res.statBoost, success: res.success },
       rng: () => 0.4,
     });
 
@@ -165,6 +336,7 @@ describe('leyendasEngine', () => {
     assert.equal(afterS1.semester, 2);
     assert.ok(afterS1.stats.m > 0);
     assert.ok(afterS1.lastSemesterCelebration !== null);
+    assert.ok(afterS1.ovr - initial.ovr <= 3, 'OVR must grow smoothly per semester');
   });
 
   it('evaluates sports scholarship, postgrad eligibility, legacy banner, and weekly ranking', () => {
@@ -207,5 +379,29 @@ describe('leyendasEngine', () => {
     const view = buildWeeklyLeaderboardViews([entry], week.weekKey, 'futbol-m');
     assert.equal(view.length, 1);
     assert.equal(view[0].playerName, 'Valentina Millapán');
+  });
+
+  it('never generates a recurring rival with the exact same name as the player', () => {
+    const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
+    const team = clubs.find((c) => c.realTeamId === 'eq-ind-1')!;
+    for (let step = 0; step < 20; step++) {
+      const seed = (step + 0.01) / 20;
+      const career = createInitialCareerState({
+        playerName: 'Lucas Morales',
+        careerName: 'Ingeniería Civil Industrial',
+        sportKey: 'futbol',
+        branch: 'hombre',
+        pos: 'DEL',
+        team,
+        allClubs: clubs,
+        rng: () => seed,
+      });
+      assert.ok(career.rival !== null);
+      assert.notEqual(
+        career.rival.name.toLowerCase(),
+        career.playerName.toLowerCase(),
+        'Rival name must never duplicate player name'
+      );
+    }
   });
 });

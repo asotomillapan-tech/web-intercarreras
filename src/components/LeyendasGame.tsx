@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Award,
   CheckCircle2,
   Clock,
   Crown,
-  Flame,
   GraduationCap,
   Image as ImageIcon,
   Medal,
@@ -22,10 +23,10 @@ import {
 } from 'lucide-react';
 import { UFRO_CAREERS } from '../data/ufroSeed';
 import {
+  applyGradualOvrDelta,
+  buildCareerTryoutList,
   buildLeaderboardEntryFromCareer,
   buildLeyendasTeamsFromTournament,
-  buildFallbackTryoutTeams,
-  buildTryoutPool,
   buildWeeklyLeaderboardViews,
   calculateCareerLeaderboardScore,
   computeCreativeLegacyBanner,
@@ -37,12 +38,11 @@ import {
   getPlayerAge,
   getSportPositions,
   getTrialAcceptanceChance,
+  getVisualMiniGameScenario,
   inferCareerYears,
-  pickContextualKeyMoment,
   pickSemesterEvent,
   RANDOM_NAMES_FEMALE,
   RANDOM_NAMES_MALE,
-  resolveKeyMomentChoice,
   simulateSemesterFull,
   SPORT_CONFIG,
   type LeyendasBranch,
@@ -51,8 +51,8 @@ import {
   type LeyendasEventOption,
   type LeyendasFocusCard,
   type LeyendasGameEvent,
-  type LeyendasKeyMoment,
-  type LeyendasKeyMomentChoice,
+  type LeyendasMiniGameOutcome,
+  type LeyendasMiniGameScenario,
   type LeyendasRankingCategory,
   type LeyendasSportKey,
 } from '../domain/leyendasEngine';
@@ -61,6 +61,7 @@ import type {
   LeyendasLeaderboardEntry,
   TournamentState,
 } from '../types/tournament';
+import { LeyendasMiniGame } from './LeyendasMiniGame';
 import { LeyendasPosterModal } from './LeyendasPosterModal';
 import { LeyendasTrophyIcon } from './LeyendasTrophyIcon';
 import { TeamCrest } from './TeamCrest';
@@ -82,6 +83,7 @@ type SemesterPhase =
   | 'MOMENT'
   | 'CELEBRATION'
   | 'LOAN'
+  | 'RELEASED'
   | 'TRANSFER'
   | 'POSTGRAD';
 
@@ -152,14 +154,18 @@ export function LeyendasGame({
   );
   const [creationError, setCreationError] = useState<string | null>(null);
 
-  // Tryouts State
-  const [tryoutClubs, setTryoutClubs] = useState<LeyendasClub[]>([]);
-  const [fallbackClubs, setFallbackClubs] = useState<LeyendasClub[]>([]);
+  // Tryouts State (ALL teams of career + optional other campus clubs)
+  const [careerTryoutClubs, setCareerTryoutClubs] = useState<LeyendasClub[]>([]);
+  const [otherCampusClubs, setOtherCampusClubs] = useState<LeyendasClub[]>([]);
+  const [showOtherCampusTryouts, setShowOtherCampusTryouts] = useState(false);
+  const [rejectedClubIds, setRejectedClubIds] = useState<string[]>([]);
   const [tryoutNotice, setTryoutNotice] = useState<string | null>(null);
   const [previewOvr, setPreviewOvr] = useState<number>(66);
 
   // Active Career Loop State
   const [career, setCareer] = useState<LeyendasCareerState | null>(null);
+  const [displayedOvr, setDisplayedOvr] = useState<number>(66);
+  const [ovrToast, setOvrToast] = useState<{ id: number; delta: number } | null>(null);
   const [semPhase, setSemPhase] = useState<SemesterPhase>('FOCUS');
   const [focusCards, setFocusCards] = useState<LeyendasFocusCard[]>([]);
   const [chosenFocus, setChosenFocus] = useState<LeyendasFocusCard | null>(null);
@@ -171,9 +177,10 @@ export function LeyendasGame({
     teamOvrBoost?: number;
     extraSemester?: boolean;
     injuryTriggered?: boolean;
+    rehabCompleted?: boolean;
     narrative: string;
   } | null>(null);
-  const [activeMoment, setActiveMoment] = useState<LeyendasKeyMoment | null>(null);
+  const [activeMiniGame, setActiveMiniGame] = useState<LeyendasMiniGameScenario | null>(null);
   const [momentNarrative, setMomentNarrative] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
 
@@ -193,6 +200,25 @@ export function LeyendasGame({
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // Scroll smoothly to top when transitioning between major LEYENDAS screens
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [screen]);
+
+  // Smooth step-by-step animated OVR counter (never snaps abruptly)
+  useEffect(() => {
+    if (!career) return;
+    if (displayedOvr === career.ovr) return;
+    const step = career.ovr > displayedOvr ? 1 : -1;
+    const timer = window.setInterval(() => {
+      setDisplayedOvr((curr) => {
+        if (curr === career.ovr) return curr;
+        return curr + step;
+      });
+    }, 95);
+    return () => window.clearInterval(timer);
+  }, [career, displayedOvr]);
 
   // Keep position valid when sport changes
   const sportPositions = useMemo(() => getSportPositions(sportKey), [sportKey]);
@@ -227,6 +253,25 @@ export function LeyendasGame({
     setLocalHof(saveLocalHof(entry));
   }, [career]);
 
+  const triggerOvrDeltaToast = (delta: number) => {
+    if (delta === 0) return;
+    setOvrToast({ id: Date.now() + Math.random(), delta });
+  };
+
+  const applyIncrementalOvr = (baseCareer: LeyendasCareerState, rawDelta: number): LeyendasCareerState => {
+    const cap = baseCareer.trophies.length >= 2 || baseCareer.ovr >= 94 ? 105 : 99;
+    const { nextOvr, appliedDelta } = applyGradualOvrDelta(baseCareer.ovr, rawDelta, cap);
+    if (appliedDelta !== 0) {
+      triggerOvrDeltaToast(appliedDelta);
+    }
+    return {
+      ...baseCareer,
+      ovr: nextOvr,
+      maxOvr: Math.max(baseCareer.maxOvr, nextOvr),
+      lastOvrDelta: appliedDelta,
+    };
+  };
+
   const handleRandomName = () => {
     const pool = branch === 'mujer' ? RANDOM_NAMES_FEMALE : RANDOM_NAMES_MALE;
     const picked = pool[Math.floor(Math.random() * pool.length)];
@@ -245,11 +290,13 @@ export function LeyendasGame({
       allClubs,
     });
     setCareer(nextCareer);
+    setDisplayedOvr(nextCareer.ovr);
+    setOvrToast(null);
     setFocusCards(drawSemesterFocusCards());
     setChosenFocus(null);
     setActiveEvent(null);
     setEventResult(null);
-    setActiveMoment(null);
+    setActiveMiniGame(null);
     setMomentNarrative(null);
     setSemPhase('FOCUS');
     setSubmittedGlobal(false);
@@ -267,9 +314,11 @@ export function LeyendasGame({
     setCreationError(null);
     const isEgg = trimmed.toLowerCase() === 'mathias bello';
     setPreviewOvr(isEgg ? 90 : 66);
-    const pool = buildTryoutPool(allClubs, sportKey, branch, selectedCareer);
-    setTryoutClubs(pool);
-    setFallbackClubs([]);
+    const directory = buildCareerTryoutList(allClubs, sportKey, branch, selectedCareer);
+    setCareerTryoutClubs(directory.careerClubs);
+    setOtherCampusClubs(directory.otherCampusClubs);
+    setShowOtherCampusTryouts(false);
+    setRejectedClubIds([]);
     setTryoutNotice(null);
     setScreen('tryouts');
   };
@@ -278,9 +327,8 @@ export function LeyendasGame({
     const trimmed = playerName.trim() || (branch === 'mujer' ? RANDOM_NAMES_FEMALE[0] : RANDOM_NAMES_MALE[0]);
     if (!playerName.trim()) setPlayerName(trimmed);
     setCreationError(null);
-    const scoped = allClubs.filter((c) => c.sportKey === sportKey && c.branch === branch);
-    const lowerOrMid = scoped.filter((c) => c.ovr <= 80);
-    const pool = lowerOrMid.length > 0 ? lowerOrMid : scoped;
+    const directory = buildCareerTryoutList(allClubs, sportKey, branch, selectedCareer);
+    const pool = directory.careerClubs.length > 0 ? directory.careerClubs : directory.otherCampusClubs;
     const chosen = pool[Math.floor(Math.random() * pool.length)] ?? allClubs[0];
     if (chosen) {
       launchCareerWithClub(chosen);
@@ -288,24 +336,37 @@ export function LeyendasGame({
   };
 
   const handleAttemptTryout = (club: LeyendasClub, guaranteed = false) => {
-    const isOwnCareer = club.carrera.toLowerCase() === selectedCareer.toLowerCase();
+    const isOwnCareer = club.carrera.toLowerCase().trim() === selectedCareer.toLowerCase().trim();
     const chance = guaranteed ? 100 : getTrialAcceptanceChance(previewOvr, club.ovr, isOwnCareer);
     if (Math.random() * 100 <= chance) {
       launchCareerWithClub(club);
     } else {
-      setTryoutNotice(
-        `${club.name} (${club.ovr} OVR) agradeció tu participación en pruebas mechonas, pero por ahora el plantel está completo. Elige un club de Plan B para debutar este semestre.`
-      );
-      setFallbackClubs(buildFallbackTryoutTeams(allClubs, sportKey, branch, club.id));
+      const nextRejected = rejectedClubIds.includes(club.id)
+        ? rejectedClubIds
+        : [...rejectedClubIds, club.id];
+      setRejectedClubIds(nextRejected);
+
+      const remainingCareerClubs = careerTryoutClubs.filter((c) => !nextRejected.includes(c.id));
+      if (remainingCareerClubs.length > 0) {
+        setTryoutNotice(
+          `${club.name} (${club.ovr} OVR) agradeció tu prueba mechona, pero por ahora no hubo cupo en ese plantel. Aún puedes seguir probándote en los otros ${remainingCareerClubs.length} equipo(s) de tu carrera.`
+        );
+      } else {
+        setTryoutNotice(
+          `Completaste las pruebas en todos los equipos de ${selectedCareer}. Puedes usar tu Segunda Oportunidad (Repesca garantizada) en un club de tu carrera o explorar otros clubes del campus.`
+        );
+      }
     }
   };
 
-  // --- Gameplay Step Handlers ---
+  // --- Gameplay Step Handlers (Gradual OVR updates at each beat) ---
 
   const handleChooseFocus = (card: LeyendasFocusCard) => {
     if (!career) return;
+    const updated = applyIncrementalOvr(career, card.ovrDelta);
+    setCareer(updated);
     setChosenFocus(card);
-    setActiveEvent(pickSemesterEvent(career));
+    setActiveEvent(pickSemesterEvent(updated));
     setEventResult(null);
     setSemPhase('EVENT');
   };
@@ -317,12 +378,19 @@ export function LeyendasGame({
     const ovrDelta = succeeded ? opt.ovrDelta : opt.altOvrDelta ?? 0;
     const gpaDelta = succeeded ? opt.gpaDelta : opt.altGpaDelta ?? 0;
     const extraSemester = !succeeded && Boolean(opt.extraSemester);
-    const injuryProb = Math.max(0, (opt.injuryChance ?? 0) + chosenFocus.injuryRiskDelta);
+    const rehabCompleted = activeEvent?.category === 'LESION' && opt.id === 'opt-rehab-segura';
+    const injuryProb = rehabCompleted
+      ? 0
+      : Math.max(0, (opt.injuryChance ?? 0) + (chosenFocus.injuryRiskDelta > 0 ? chosenFocus.injuryRiskDelta * 0.5 : 0));
     const injuryTriggered = injuryProb > 0 && Math.random() < injuryProb;
     const narrative =
       (succeeded ? opt.outcomeSuccess : opt.outcomeFail || opt.outcomeSuccess) +
-      (injuryTriggered ? ' Además sufriste una molestia física que limitó tus minutos.' : '');
+      (injuryTriggered
+        ? ' Además sufriste una lesión que afectará tu continuidad.'
+        : '');
 
+    const updated = applyIncrementalOvr(career, ovrDelta);
+    setCareer(updated);
     setEventResult({
       ovrDelta,
       gpaDelta,
@@ -330,25 +398,34 @@ export function LeyendasGame({
       teamOvrBoost: succeeded ? opt.teamOvrBoost : 0,
       extraSemester,
       injuryTriggered,
+      rehabCompleted,
       narrative,
     });
-    setActiveMoment(pickContextualKeyMoment(career));
+    setActiveMiniGame(getVisualMiniGameScenario(updated));
     setMomentNarrative(null);
     setSemPhase('MOMENT');
   };
 
-  const handleChooseKeyMoment = (choice: LeyendasKeyMomentChoice) => {
+  const handleCompleteMiniGame = (outcome: LeyendasMiniGameOutcome) => {
     if (!career || !chosenFocus || !eventResult) return;
-    const resolved = resolveKeyMomentChoice(career.ovr, choice);
-    setMomentNarrative(resolved.narrative);
+    setMomentNarrative(`${outcome.headline} — ${outcome.narrative}`);
+    const afterMomentOvr = applyIncrementalOvr(career, outcome.ovrDelta);
 
     const nextCareer = simulateSemesterFull({
-      career,
+      career: afterMomentOvr,
       allClubs,
       focusCard: chosenFocus,
       eventDelta: eventResult,
-      momentDelta: { ovrDelta: resolved.ovrDelta, statBoost: resolved.statBoost },
+      momentDelta: {
+        ovrDelta: outcome.ovrDelta,
+        statBoost: outcome.statBoost,
+        success: outcome.success,
+      },
+      incrementalOvrAlreadyApplied: true,
     });
+    if (nextCareer.ovr !== afterMomentOvr.ovr) {
+      triggerOvrDeltaToast(nextCareer.ovr - afterMomentOvr.ovr);
+    }
     setCareer(nextCareer);
     setSemPhase('CELEBRATION');
   };
@@ -364,6 +441,10 @@ export function LeyendasGame({
       setSemPhase('LOAN');
       return;
     }
+    if (career.pendingReleaseNotice) {
+      setSemPhase('RELEASED');
+      return;
+    }
     if (career.pendingTransferOffers.length > 0) {
       setSemPhase('TRANSFER');
       return;
@@ -376,7 +457,7 @@ export function LeyendasGame({
     setChosenFocus(null);
     setActiveEvent(null);
     setEventResult(null);
-    setActiveMoment(null);
+    setActiveMiniGame(null);
     setMomentNarrative(null);
     setSemPhase('FOCUS');
   };
@@ -423,26 +504,30 @@ export function LeyendasGame({
           years: String(career.year),
         },
       ];
+      const wasReleased = Boolean(career.pendingReleaseNotice);
       setCareer({
         ...career,
         team: newClub,
         stints: nextStints,
         pendingTransferOffers: [],
+        pendingReleaseNotice: null,
         timeline: [
           {
             id: `tl-tr-${career.year}`,
             year: career.year,
             semester: 1,
-            badge: 'FICHAJE',
+            badge: wasReleased ? 'NUEVO COMIENZO' : 'FICHAJE',
             title: `Nuevo refuerzo de ${newClub.name} (${newClub.div})`,
-            detail: `Cambiaste de camiseta para el nuevo año universitario.`,
+            detail: wasReleased
+              ? `Firmaste como agente libre para relanzar tu carrera universitaria.`
+              : `Cambiaste de camiseta para el nuevo año universitario.`,
             tone: 'accent',
           },
           ...career.timeline,
         ],
       });
     } else {
-      setCareer({ ...career, pendingTransferOffers: [] });
+      setCareer({ ...career, pendingTransferOffers: [], pendingReleaseNotice: null });
     }
     startNextSemesterCycle();
   };
@@ -867,99 +952,158 @@ export function LeyendasGame({
           </div>
         )}
 
-        {/* ==================== STEP 1B: PRUEBAS MECHONAS ==================== */}
-        {screen === 'tryouts' && (
-          <div className="bg-white border border-neutral-200 p-6 sm:p-8 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-neutral-200 pb-4">
-              <div>
-                <p className="text-xs font-mono uppercase tracking-widest text-[#707ef9]">
-                  Paso 2 de 2 · Pruebas Mechonas {SPORT_CONFIG[sportKey].name}
-                </p>
-                <h2 className="font-display text-3xl font-bold uppercase text-[#0d0d0d] mt-1">
-                  Elige tu Club para Probarte
-                </h2>
-                <p className="text-xs text-neutral-600 mt-1">
-                  Postulas como <strong>{playerName}</strong> ({pos} · {selectedCareer}). Tu carrera
-                  te otorga ventaja en clubes de la misma carrera.
-                </p>
+        {/* ==================== STEP 1B: PRUEBAS MECHONAS (ALL CAREER TEAMS) ==================== */}
+        {screen === 'tryouts' && (() => {
+          const allCareerRejected =
+            careerTryoutClubs.length > 0 &&
+            careerTryoutClubs.every((c) => rejectedClubIds.includes(c.id));
+          const activeList = showOtherCampusTryouts ? otherCampusClubs : careerTryoutClubs;
+
+          return (
+            <div className="bg-white border border-neutral-200 p-6 sm:p-8 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-neutral-200 pb-4">
+                <div>
+                  <p className="text-xs font-mono uppercase tracking-widest text-[#707ef9]">
+                    Paso 2 de 2 · Pruebas Mechonas {SPORT_CONFIG[sportKey].name}
+                  </p>
+                  <h2 className="font-display text-3xl font-bold uppercase text-[#0d0d0d] mt-1">
+                    Equipos de {selectedCareer}
+                  </h2>
+                  <p className="text-xs text-neutral-600 mt-1">
+                    Postulas como <strong>{playerName}</strong> ({pos} · OVR inicial {previewOvr}). Se muestran{' '}
+                    <strong>todos los equipos disponibles de tu carrera ({careerTryoutClubs.length})</strong>. Si un plantel no tiene cupo, puedes seguir probándote en los demás equipos de tu carrera.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setScreen('create')}
+                  className="text-xs font-medium text-neutral-600 hover:text-[#0d0d0d] cursor-pointer self-start sm:self-auto"
+                >
+                  ← Cambiar ficha
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setScreen('create')}
-                className="text-xs font-medium text-neutral-600 hover:text-[#0d0d0d] cursor-pointer self-start sm:self-auto"
-              >
-                ← Cambiar ficha
-              </button>
-            </div>
 
-            {tryoutNotice && (
-              <div className="bg-amber-50 border border-amber-300 p-4 text-xs text-amber-950">
-                {tryoutNotice}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(fallbackClubs.length > 0 ? fallbackClubs : tryoutClubs).map((club) => {
-                const isOwn = club.carrera.toLowerCase() === selectedCareer.toLowerCase();
-                const isFallback = fallbackClubs.length > 0;
-                const chance = isFallback
-                  ? 100
-                  : getTrialAcceptanceChance(previewOvr, club.ovr, isOwn);
-
-                return (
-                  <div
-                    key={club.id}
-                    className="border border-neutral-200 p-5 flex flex-col justify-between gap-4 hover:border-[#707ef9] transition-colors bg-white"
+              {/* Career vs Other Campus Tabs */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex border border-neutral-200 bg-[#f5f6f8] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowOtherCampusTryouts(false)}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                      !showOtherCampusTryouts
+                        ? 'bg-[#0d0d0d] text-white'
+                        : 'text-neutral-600 hover:text-[#0d0d0d]'
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <TeamCrest
-                          escudo={club.escudo}
-                          sigla={club.sigla}
-                          nombre={club.name}
-                          size="md"
-                        />
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono uppercase">
-                            <span className="text-[#707ef9] font-bold">{club.div}</span>
-                            {club.isRealTeam && (
-                              <span className="text-emerald-700 font-bold">· Equipo Real UFRO</span>
-                            )}
-                            {isOwn && <span className="text-[#0d0d0d] font-bold">· Tu Carrera</span>}
+                    Tu Carrera ({careerTryoutClubs.length})
+                  </button>
+                  {otherCampusClubs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowOtherCampusTryouts(true)}
+                      className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                        showOtherCampusTryouts
+                          ? 'bg-[#0d0d0d] text-white'
+                          : 'text-neutral-600 hover:text-[#0d0d0d]'
+                      }`}
+                    >
+                      Otros Clubes del Campus ({otherCampusClubs.length})
+                    </button>
+                  )}
+                </div>
+
+                {allCareerRejected && !showOtherCampusTryouts && (
+                  <span className="text-xs font-mono font-bold text-emerald-700">
+                    Repesca desbloqueada: 100% de cupo en tu carrera
+                  </span>
+                )}
+              </div>
+
+              {tryoutNotice && (
+                <div role="status" className="bg-amber-50 border border-amber-300 p-4 text-xs text-amber-950">
+                  {tryoutNotice}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {activeList.map((club, idx) => {
+                  const isOwn =
+                    club.carrera.toLowerCase().trim() === selectedCareer.toLowerCase().trim();
+                  const wasRejected = rejectedClubIds.includes(club.id);
+                  const canRepesca = wasRejected && allCareerRejected && !showOtherCampusTryouts;
+                  const chance = canRepesca
+                    ? 100
+                    : getTrialAcceptanceChance(previewOvr, club.ovr, isOwn);
+
+                  return (
+                    <div
+                      key={club.id}
+                      style={{ animationDelay: `${Math.min(idx * 45, 360)}ms` }}
+                      className={`leyendas-card-deal leyendas-card-hover border p-5 flex flex-col justify-between gap-4 bg-white ${
+                        wasRejected && !canRepesca
+                          ? 'border-neutral-200 bg-neutral-50 opacity-75'
+                          : 'border-neutral-200 hover:border-[#707ef9]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <TeamCrest
+                            escudo={club.escudo}
+                            sigla={club.sigla}
+                            nombre={club.name}
+                            size="md"
+                          />
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono uppercase">
+                              <span className="text-[#707ef9] font-bold">{club.div}</span>
+                              {club.isRealTeam && (
+                                <span className="text-emerald-700 font-bold">· Equipo Real UFRO</span>
+                              )}
+                              {isOwn && <span className="text-[#0d0d0d] font-bold">· Tu Carrera</span>}
+                            </div>
+                            <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
+                              {club.name}
+                            </h3>
+                            <p className="text-xs text-neutral-500 truncate">{club.carrera}</p>
                           </div>
-                          <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
-                            {club.name}
-                          </h3>
-                          <p className="text-xs text-neutral-500 truncate">{club.carrera}</p>
+                        </div>
+
+                        <div className="bg-[#0d0d0d] text-white px-3 py-1.5 text-center shrink-0">
+                          <p className="text-[9px] font-mono uppercase text-neutral-400">OVR</p>
+                          <p className="font-display text-2xl font-bold tabular-nums">{club.ovr}</p>
                         </div>
                       </div>
 
-                      <div className="bg-[#0d0d0d] text-white px-3 py-1.5 text-center shrink-0">
-                        <p className="text-[9px] font-mono uppercase text-neutral-400">OVR</p>
-                        <p className="font-display text-2xl font-bold tabular-nums">{club.ovr}</p>
+                      <div className="flex items-center justify-between gap-3 pt-3 border-t border-neutral-200">
+                        <span className="text-xs text-neutral-600 tabular-nums">
+                          {canRepesca
+                            ? 'Repesca Mechona Garantizada (100%)'
+                            : wasRejected
+                            ? 'Sin cupo en esta prueba · Prueba en otro equipo'
+                            : `Probabilidad de quedar: ${chance}%`}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={wasRejected && !canRepesca}
+                          onClick={() => handleAttemptTryout(club, canRepesca)}
+                          className={`px-4 py-2 font-display font-bold uppercase tracking-widest text-xs transition-colors ${
+                            wasRejected && !canRepesca
+                              ? 'bg-neutral-200 text-neutral-500 cursor-not-allowed'
+                              : canRepesca
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                              : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white cursor-pointer'
+                          }`}
+                        >
+                          {canRepesca ? 'Firmar Repesca' : wasRejected ? 'No Seleccionado' : 'Probarme'}
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center justify-between gap-3 pt-3 border-t border-neutral-200">
-                      <span className="text-xs text-neutral-600 tabular-nums">
-                        {isFallback
-                          ? 'Cupo de Rescate Garantizado (100%)'
-                          : `Probabilidad de quedar: ${chance}%`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleAttemptTryout(club, isFallback)}
-                        className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
-                      >
-                        {isFallback ? 'Firmar ahora' : 'Probarme'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ==================== STEP 2 & 3: ACTIVE CAREER OR RETIRED LEGACY ==================== */}
         {screen === 'career' && career && (
@@ -987,19 +1131,13 @@ export function LeyendasGame({
                       <span className="text-neutral-500">·</span>
                       <span className="text-neutral-300">{career.postgradStage}</span>
                       {career.onLoan && (
-                        <span className="bg-amber-400 text-[#0d0d0d] px-1.5 py-0.5 font-bold">
-                          A PRÉSTAMO
-                        </span>
+                        <span className="text-amber-300 font-bold">· A PRÉSTAMO</span>
                       )}
                       {career.hasScholarship && (
-                        <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-1.5 py-0.5 font-bold">
-                          BECA DEPORTIVA
-                        </span>
+                        <span className="text-emerald-300 font-bold">· BECA DEPORTIVA</span>
                       )}
                       {career.climbedFromThirdToFirst && (
-                        <span className="bg-[#707ef9] text-white px-1.5 py-0.5 font-bold">
-                          3ª → 1ª
-                        </span>
+                        <span className="text-[#707ef9] font-bold">· ASCENSO 3ª → 1ª</span>
                       )}
                     </div>
                     <h2 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight truncate">
@@ -1012,20 +1150,37 @@ export function LeyendasGame({
                   </div>
                 </div>
 
-                {/* Right HUD Metrics */}
+                {/* Right HUD Metrics with Smooth Animated Rolling OVR */}
                 <div className="lg:col-span-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div
-                    className={`p-3 border text-center ${
-                      career.ovr >= 100
+                    key={`ovr-box-${ovrToast?.id ?? 'static'}`}
+                    className={`relative p-3 border text-center ${
+                      displayedOvr >= 100
                         ? 'bg-amber-400 text-[#0d0d0d] border-amber-300'
                         : 'bg-[#18181f] border-white/15'
-                    }`}
+                    } ${ovrToast ? 'leyendas-ovr-pop' : ''}`}
                   >
-                    <p className={`text-[10px] font-mono uppercase ${career.ovr >= 100 ? 'text-[#0d0d0d]/80 font-bold' : 'text-neutral-400'}`}>
-                      {career.ovr >= 100 ? 'GOAT OVR' : 'OVR ACTUAL'}
+                    {ovrToast && (
+                      <span
+                        key={ovrToast.id}
+                        className={`leyendas-delta-float absolute -top-3 right-2 px-1.5 py-0.5 font-mono text-[11px] font-bold ${
+                          ovrToast.delta > 0
+                            ? 'bg-emerald-400 text-[#0d0d0d]'
+                            : 'bg-red-500 text-white'
+                        }`}
+                      >
+                        {ovrToast.delta > 0 ? `+${ovrToast.delta}` : ovrToast.delta} OVR
+                      </span>
+                    )}
+                    <p
+                      className={`text-[10px] font-mono uppercase ${
+                        displayedOvr >= 100 ? 'text-[#0d0d0d]/80 font-bold' : 'text-neutral-400'
+                      }`}
+                    >
+                      {displayedOvr >= 100 ? 'GOAT OVR' : 'OVR ACTUAL'}
                     </p>
                     <p className="font-display text-4xl font-bold tabular-nums leading-none mt-1">
-                      {career.ovr}
+                      {displayedOvr}
                     </p>
                   </div>
 
@@ -1057,8 +1212,26 @@ export function LeyendasGame({
                 </div>
               </div>
 
-              {/* Hidden GPA Narrative Bar + Recurring Rival Strip */}
-              <div className="mt-5 pt-4 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              {/* Active Injury Alert Strip */}
+              {career.activeInjury && (
+                <div className="mt-4 bg-red-500/15 border border-red-400/50 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2.5 text-red-200">
+                    <Activity className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>
+                      <strong className="uppercase text-white">
+                        Lesión Activa ({career.activeInjury.severity}): {career.activeInjury.name}
+                      </strong>{' '}
+                      — {career.activeInjury.description}
+                    </span>
+                  </div>
+                  <span className="font-mono text-[11px] text-red-300 uppercase">
+                    Clínica Kinesiológica UFRO
+                  </span>
+                </div>
+              )}
+
+              {/* Hidden GPA Narrative Bar + Physical Load + Recurring Rival Strip */}
+              <div className="mt-5 pt-4 border-t border-white/10 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                 {academicHint && (
                   <div className="flex items-start gap-2.5">
                     <GraduationCap
@@ -1081,15 +1254,42 @@ export function LeyendasGame({
                   </div>
                 )}
 
+                <div className="flex items-start gap-2.5">
+                  <Activity
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      career.activeInjury
+                        ? 'text-red-400'
+                        : career.injuryRisk >= 45
+                        ? 'text-amber-400'
+                        : 'text-emerald-400'
+                    }`}
+                  />
+                  <div>
+                    <span className="font-bold uppercase tracking-wider text-white">
+                      Estado Físico:{' '}
+                      {career.activeInjury
+                        ? `Lesionado (${career.activeInjury.severity})`
+                        : career.injuryRisk >= 45
+                        ? 'Fatiga Alta · Riesgo Lesión'
+                        : career.injuryRisk >= 25
+                        ? 'Carga Media'
+                        : 'Óptimo'}
+                    </span>
+                    <p className="text-neutral-400 mt-0.5 tabular-nums">
+                      Carga acumulada: {career.injuryRisk}% · Lesiones históricas: {career.injuriesCount}
+                    </p>
+                  </div>
+                </div>
+
                 {career.rival && (
                   <div className="flex items-start gap-2.5 md:justify-end">
                     <Swords className="w-4 h-4 text-[#707ef9] shrink-0 mt-0.5" />
                     <div className="md:text-right">
                       <span className="font-bold uppercase tracking-wider text-white">
-                        Rival Recurrente: {career.rival.name} ({career.rival.clubName})
+                        Rival: {career.rival.name} ({career.rival.clubName})
                       </span>
                       <p className="text-neutral-400 mt-0.5 tabular-nums">
-                        OVR {career.rival.ovr} · Historial H2H: {career.rival.h2hWins}G —{' '}
+                        OVR {career.rival.ovr} · H2H: {career.rival.h2hWins}G —{' '}
                         {career.rival.h2hLosses}P
                       </p>
                     </div>
@@ -1257,7 +1457,7 @@ export function LeyendasGame({
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 {/* Main Interactive Stage (8 cols) */}
                 <div className="lg:col-span-8 bg-white border border-neutral-200 p-6 sm:p-8 space-y-6">
-                  {/* PHASE 1: FOCUS CARDS */}
+                  {/* PHASE 1: ANIMATED FOCUS CARDS */}
                   {semPhase === 'FOCUS' && (
                     <div className="space-y-5">
                       <div className="border-b border-neutral-200 pb-4">
@@ -1268,18 +1468,25 @@ export function LeyendasGame({
                           Elige tu Enfoque de Semestre
                         </h3>
                         <p className="text-xs text-neutral-600 mt-1">
-                          Define cómo repartirás tu energía entre el Complejo Deportivo UFRO y tus
-                          ramos universitarios.
+                          Define cómo repartirás tu energía entre el Complejo Deportivo UFRO, tus
+                          ramos universitarios y tu recuperación física.
                         </p>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {focusCards.map((card) => (
+                        {focusCards.map((card, idx) => (
                           <button
-                            key={card.id}
+                            key={`${career.year}-${career.semester}-${card.id}`}
                             type="button"
                             onClick={() => handleChooseFocus(card)}
-                            className="text-left border border-neutral-200 hover:border-[#707ef9] p-5 bg-white hover:bg-[#f9fafb] transition-colors flex flex-col justify-between gap-4 cursor-pointer"
+                            style={{ animationDelay: `${idx * 65}ms` }}
+                            className={`leyendas-card-deal leyendas-card-hover text-left border-t-2 border-x border-b p-5 bg-white hover:bg-[#f9fafb] flex flex-col justify-between gap-4 cursor-pointer ${
+                              card.tier === 'ORO'
+                                ? 'border-t-amber-500 border-x-neutral-200 border-b-neutral-200 hover:border-amber-500'
+                                : card.tier === 'PLATA'
+                                ? 'border-t-[#707ef9] border-x-neutral-200 border-b-neutral-200 hover:border-[#707ef9]'
+                                : 'border-t-neutral-400 border-x-neutral-200 border-b-neutral-200 hover:border-[#0d0d0d]'
+                            }`}
                           >
                             <div className="space-y-2">
                               <div className="flex items-center justify-between gap-2 text-[11px] font-mono font-bold uppercase">
@@ -1295,7 +1502,7 @@ export function LeyendasGame({
                                   CARTA {card.tier}
                                 </span>
                                 <span className="tabular-nums text-[#0d0d0d]">
-                                  {card.ovrDelta >= 0 ? `+${card.ovrDelta}` : card.ovrDelta} OVR
+                                  {card.ovrDelta > 0 ? `+${card.ovrDelta}` : card.ovrDelta} OVR
                                 </span>
                               </div>
                               <h4 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
@@ -1303,7 +1510,7 @@ export function LeyendasGame({
                               </h4>
                               <p className="text-xs text-neutral-600">{card.subtitle}</p>
                             </div>
-                            <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] text-neutral-500">
+                            <div className="pt-3 border-t border-neutral-100 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
                               <span>{card.flair}</span>
                             </div>
                           </button>
@@ -1312,11 +1519,19 @@ export function LeyendasGame({
                     </div>
                   )}
 
-                  {/* PHASE 2: CAMPUS / CAREER EVENT */}
+                  {/* PHASE 2: CAMPUS / CAREER / INJURY EVENT */}
                   {semPhase === 'EVENT' && activeEvent && (
-                    <div className="space-y-6">
+                    <div key={activeEvent.id} className="space-y-6 leyendas-card-deal">
                       <div className="border-b border-neutral-200 pb-4">
-                        <span className="text-xs font-mono font-bold uppercase tracking-widest text-[#707ef9]">
+                        <span
+                          className={`text-xs font-mono font-bold uppercase tracking-widest ${
+                            activeEvent.category === 'LESION'
+                              ? 'text-red-600'
+                              : activeEvent.category === 'CARRERA'
+                              ? 'text-[#707ef9]'
+                              : 'text-neutral-600'
+                          }`}
+                        >
                           {activeEvent.tag}
                         </span>
                         <h3 className="font-display text-3xl font-bold uppercase text-[#0d0d0d] mt-1">
@@ -1328,12 +1543,13 @@ export function LeyendasGame({
                       </div>
 
                       <div className="grid grid-cols-1 gap-3">
-                        {activeEvent.options.map((opt) => (
+                        {activeEvent.options.map((opt, idx) => (
                           <button
                             key={opt.id}
                             type="button"
                             onClick={() => handleChooseEventOption(opt)}
-                            className="text-left p-5 border border-neutral-300 hover:border-[#707ef9] hover:bg-[#f5f6f8] transition-colors cursor-pointer space-y-1"
+                            style={{ animationDelay: `${idx * 65}ms` }}
+                            className="leyendas-card-deal leyendas-card-hover text-left p-5 border border-neutral-300 hover:border-[#707ef9] hover:bg-[#f5f6f8] cursor-pointer space-y-1"
                           >
                             <p className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
                               {opt.label}
@@ -1345,50 +1561,26 @@ export function LeyendasGame({
                     </div>
                   )}
 
-                  {/* PHASE 3: KEY MOMENT ON PITCH/COURT */}
-                  {semPhase === 'MOMENT' && activeMoment && (
-                    <div className="space-y-6">
+                  {/* PHASE 3: INTERACTIVE VISUAL MINI-GAME ON PITCH/COURT */}
+                  {semPhase === 'MOMENT' && activeMiniGame && (
+                    <div className="space-y-5">
                       {eventResult && (
-                        <div className="bg-[#f5f6f8] border border-neutral-200 p-4 text-xs text-neutral-700">
+                        <div className="bg-[#f5f6f8] border border-neutral-200 p-4 text-xs text-neutral-700 leyendas-card-deal">
                           <strong className="text-[#0d0d0d] uppercase">Resultado del evento:</strong>{' '}
                           {eventResult.narrative}
                         </div>
                       )}
 
-                      <div className="bg-[#0d0d0d] text-white p-6 space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-amber-400">
-                          <Flame className="w-4 h-4" />
-                          <span>Momento Clave en Cancha</span>
-                        </div>
-                        <h3 className="font-display text-3xl font-bold uppercase">
-                          {activeMoment.title}
-                        </h3>
-                        <p className="text-sm text-neutral-300">{activeMoment.context}</p>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        {activeMoment.choices.map((ch) => (
-                          <button
-                            key={ch.id}
-                            type="button"
-                            onClick={() => handleChooseKeyMoment(ch)}
-                            className="text-left p-4 border border-neutral-300 hover:border-[#707ef9] hover:bg-[#f5f6f8] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer"
-                          >
-                            <span className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
-                              {ch.label}
-                            </span>
-                            <span className="text-[11px] font-mono uppercase tracking-wider text-[#707ef9] font-bold shrink-0">
-                              Riesgo: {ch.riskTag}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+                      <LeyendasMiniGame
+                        scenario={activeMiniGame}
+                        onComplete={handleCompleteMiniGame}
+                      />
                     </div>
                   )}
 
                   {/* PHASE 4: SEMESTER CELEBRATION & SUMMARY */}
                   {semPhase === 'CELEBRATION' && career.lastSemesterCelebration && (
-                    <div className="space-y-6">
+                    <div className="space-y-6 leyendas-card-deal">
                       {momentNarrative && (
                         <div className="bg-[#f5f6f8] border border-neutral-200 p-4 text-xs text-neutral-700">
                           <strong className="text-[#0d0d0d] uppercase">Jugada decisiva:</strong>{' '}
@@ -1413,6 +1605,11 @@ export function LeyendasGame({
                           {career.lastSemesterCelebration.subheadline}
                         </p>
 
+                        {career.lastSemesterCelebration.injuryNote && (
+                          <p className="text-xs font-mono uppercase text-red-400 font-bold">
+                            ✚ {career.lastSemesterCelebration.injuryNote}
+                          </p>
+                        )}
                         {career.lastSemesterCelebration.promoted && (
                           <p className="text-xs font-mono uppercase text-emerald-400 font-bold">
                             ↑ {career.lastSemesterCelebration.promoted}
@@ -1468,6 +1665,8 @@ export function LeyendasGame({
                             ? 'Revisar Opción de Postgrado'
                             : career.pendingLoanOffers.length > 0
                             ? 'Ver Ofertas de Préstamo S2'
+                            : career.pendingReleaseNotice
+                            ? 'Reunión con el DT (Decisión de Contrato)'
                             : career.pendingTransferOffers.length > 0
                             ? 'Abrir Mercado de Pases'
                             : 'Avanzar al Siguiente Semestre'}
@@ -1479,7 +1678,7 @@ export function LeyendasGame({
 
                   {/* PHASE 5: LOAN CHOICE (S1 ELIMINATED) */}
                   {semPhase === 'LOAN' && (
-                    <div className="space-y-5">
+                    <div className="space-y-5 leyendas-card-deal">
                       <div className="border-b border-neutral-200 pb-4">
                         <p className="text-xs font-mono uppercase tracking-widest text-[#707ef9]">
                           Ventana Especial · Préstamo de Playoffs
@@ -1495,7 +1694,7 @@ export function LeyendasGame({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {career.pendingLoanOffers.map((club) => (
-                          <div key={club.id} className="border border-neutral-200 p-4 space-y-3">
+                          <div key={club.id} className="leyendas-card-hover border border-neutral-200 p-4 space-y-3">
                             <div className="flex items-center gap-3">
                               <TeamCrest escudo={club.escudo} sigla={club.sigla} nombre={club.name} size="sm" />
                               <div className="min-w-0">
@@ -1528,9 +1727,78 @@ export function LeyendasGame({
                     </div>
                   )}
 
+                  {/* PHASE 5B: COACH NON-RENEWAL (RELEASED INTO FREE AGENCY) */}
+                  {semPhase === 'RELEASED' && career.pendingReleaseNotice && (
+                    <div className="space-y-6 leyendas-card-deal">
+                      <div className="bg-[#0d0d0d] text-white border border-red-500/60 p-6 space-y-3 leyendas-shake">
+                        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-red-400">
+                          <AlertTriangle className="w-4 h-4" />
+                          <span>Decisión del Cuerpo Técnico · {career.team.name}</span>
+                        </div>
+                        <h3 className="font-display text-3xl sm:text-4xl font-bold uppercase">
+                          El DT no cuenta contigo para la próxima temporada
+                        </h3>
+                        <p className="text-sm text-neutral-200 italic">
+                          {career.pendingReleaseNotice.coachQuote}
+                        </p>
+                        <p className="text-xs text-neutral-400 pt-1">
+                          — <strong>{career.pendingReleaseNotice.coachName}</strong> ·{' '}
+                          {career.pendingReleaseNotice.reason}
+                        </p>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="border-b border-neutral-200 pb-2">
+                          <h4 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
+                            Agente Libre · Elige tu Nuevo Club para Relanzar tu Carrera
+                          </h4>
+                          <p className="text-xs text-neutral-600">
+                            Tu ciclo en {career.team.name} cerró. Firma con uno de estos equipos interesados para disputar la temporada {career.year}.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                          {career.pendingTransferOffers.map((offer, idx) => (
+                            <div
+                              key={offer.id}
+                              style={{ animationDelay: `${idx * 65}ms` }}
+                              className="leyendas-card-deal leyendas-card-hover border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <TeamCrest
+                                  escudo={offer.club.escudo}
+                                  sigla={offer.club.sigla}
+                                  nombre={offer.club.name}
+                                  size="md"
+                                />
+                                <div className="min-w-0">
+                                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#707ef9]">
+                                    {offer.tag} · {offer.club.div} · OVR {offer.club.ovr}
+                                  </span>
+                                  <h4 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
+                                    {offer.club.name}
+                                  </h4>
+                                  <p className="text-xs text-neutral-600">{offer.pitch}</p>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleTransferDecision(offer.club)}
+                                className="px-4 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs shrink-0 cursor-pointer"
+                              >
+                                Firmar ({offer.rolePromise})
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* PHASE 6: TRANSFER MARKET (END OF YEAR) */}
                   {semPhase === 'TRANSFER' && (
-                    <div className="space-y-5">
+                    <div className="space-y-5 leyendas-card-deal">
                       <div className="border-b border-neutral-200 pb-4">
                         <p className="text-xs font-mono uppercase tracking-widest text-[#707ef9]">
                           Mercado de Pases Intercarreras · Temporada {career.year}
@@ -1544,10 +1812,11 @@ export function LeyendasGame({
                       </div>
 
                       <div className="grid grid-cols-1 gap-3">
-                        {career.pendingTransferOffers.map((offer) => (
+                        {career.pendingTransferOffers.map((offer, idx) => (
                           <div
                             key={offer.id}
-                            className="border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                            style={{ animationDelay: `${idx * 65}ms` }}
+                            className="leyendas-card-deal leyendas-card-hover border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white"
                           >
                             <div className="flex items-center gap-3 min-w-0">
                               <TeamCrest

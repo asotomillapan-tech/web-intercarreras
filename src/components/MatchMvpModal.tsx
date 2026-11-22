@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Award, CheckCircle2, Clock, Lock, MapPin, ShieldCheck, Star, Trophy, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Award, CheckCircle2, Clock, Lock, MapPin, Search, ShieldCheck, Star, Trophy, X } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   canRefereeMatches,
@@ -40,6 +40,7 @@ export function MatchMvpModal({
   onOpenMatchInReferee,
   onToggleFavoriteTeam,
 }: MatchMvpModalProps) {
+  const [playerQuery, setPlayerQuery] = useState('');
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
 
   if (!match) return null;
@@ -50,8 +51,22 @@ export function MatchMvpModal({
   const revealData = shouldRevealPublicMatchData(match);
   const votingOpen = canVoteMatchMvp(match);
 
-  const homePlayers = players.filter((p) => p.teamId === match.homeTeamId);
-  const awayPlayers = players.filter((p) => p.teamId === match.awayTeamId);
+  const normQuery = playerQuery
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  const matchesRosterSearch = (p: Player) => {
+    if (!normQuery) return true;
+    const text = `${p.nombre} ${p.apellidoPaterno} #${p.dorsal} ${p.dorsal} ${p.posicion}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    return normQuery.split(/\s+/).every((tok) => text.includes(tok));
+  };
+
+  const homePlayers = players.filter((p) => p.teamId === match.homeTeamId && matchesRosterSearch(p));
+  const awayPlayers = players.filter((p) => p.teamId === match.awayTeamId && matchesRosterSearch(p));
 
   const mvpSummary = computeMatchMvpStandings(match.id, mvpVotes);
   const existingUserVote = currentUser
@@ -263,6 +278,28 @@ export function MatchMvpModal({
                     </span>
                   </div>
                 )}
+
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={playerQuery}
+                    onChange={(e) => setPlayerQuery(e.target.value)}
+                    placeholder="Buscar jugador del partido por nombre, apellido o dorsal..."
+                    aria-label="Buscar jugador del partido"
+                    className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+                  />
+                  {playerQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPlayerQuery('')}
+                      aria-label="Limpiar búsqueda"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {[
