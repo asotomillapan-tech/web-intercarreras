@@ -73,8 +73,12 @@ export function Footer({ onNavigate }: FooterProps) {
                 </button>
               </li>
               <li>
-                <button type="button" onClick={() => onNavigate('transferencias')} className="hover:text-[#707ef9] cursor-pointer">
-                  Mercado de transferencias post-grupos
+                <button
+                  type="button"
+                  onClick={() => onNavigate('transferencias-publicas')}
+                  className="hover:text-[#707ef9] cursor-pointer"
+                >
+                  Transferencias oficiales efectuadas
                 </button>
               </li>
               <li>

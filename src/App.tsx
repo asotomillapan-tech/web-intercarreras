@@ -22,17 +22,21 @@ import {
 } from './domain/sheetsMergeEngine';
 import {
   adminUpdateFirestoreUserRole,
+  approveFirestoreTransferRequest,
+  createFirestoreTransferRequest,
   deleteFirestoreMatchesForDiscipline,
   deleteFirestoreNewsArticle,
   deleteFirestorePhoto,
   deleteFirestorePlayer,
   deleteFirestoreTeam,
   ensureAllConfigsInFirestore,
-  executeFirestoreTransfer,
   listAllFirestoreNews,
+  listAllFirestoreTransfers,
+  listDelegateFirestoreTransfers,
   listFirestoreUsers,
   loadAuthorizedPlayerPrivateMap,
   loadPublicTournamentState,
+  rejectFirestoreTransferRequest,
   saveFirestoreDisciplineConfig,
   saveFirestoreMatch,
   saveFirestoreMvpVote,
@@ -61,6 +65,7 @@ import { Navbar, type NavSection } from './components/Navbar';
 import { NewsArticleModal } from './components/NewsArticleModal';
 import { PlayersView } from './components/PlayersView';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
+import { PublicTransfersView } from './components/PublicTransfersView';
 import { RegistrationView } from './components/RegistrationView';
 import { StandingsView } from './components/StandingsView';
 import { TeamProfileModal } from './components/TeamProfileModal';
@@ -234,17 +239,36 @@ function AppContent() {
         }
       }
 
-      // If signed-in user is an Admin, load all Firestore users & ensure 8 discipline configs exist
+      // If signed-in user is a Delegado with assigned team, load pending/rejected transfers involving their team
+      if (profile.role === 'delegado' && profile.delegatedTeamId) {
+        try {
+          const delegateTransfers = await listDelegateFirestoreTransfers(profile.delegatedTeamId);
+          setState((prev) => {
+            const byId = new Map(prev.transfers.map((t) => [t.id, t]));
+            delegateTransfers.forEach((tr) => byId.set(tr.id, tr));
+            return { ...prev, transfers: Array.from(byId.values()) };
+          });
+        } catch (err) {
+          console.error('Error cargando solicitudes de transferencia del delegado:', err);
+        }
+      }
+
+      // If signed-in user is an Admin, load all Firestore users, all transfers & ensure 8 discipline configs exist
       if (profile.role === 'admin') {
         try {
-          const [cloudUsers] = await Promise.all([
+          const [cloudUsers, allTransfers] = await Promise.all([
             listFirestoreUsers(),
+            listAllFirestoreTransfers().catch(() => null),
             ensureAllConfigsInFirestore(currentConfigs).catch(() => undefined),
           ]);
           setState((prev) => {
             const byUid = new Map(prev.users.map((u) => [u.uid, u]));
             cloudUsers.forEach((cu) => byUid.set(cu.uid, cu));
-            return { ...prev, users: Array.from(byUid.values()) };
+            return {
+              ...prev,
+              users: Array.from(byUid.values()),
+              transfers: allTransfers ?? prev.transfers,
+            };
           });
         } catch (err) {
           reportCloudError('Error cargando directorio de usuarios', err);
@@ -306,11 +330,12 @@ function AppContent() {
       },
       () => {
         setCurrentUserUid(null);
-        // Strip isolated PII and unpublished news drafts from memory on sign-out
+        // Strip isolated PII, unpublished news drafts, and private transfer requests from memory on sign-out
         setState((prev) => ({
           ...prev,
           users: [],
           news: prev.news.filter((n) => n.published),
+          transfers: prev.transfers.filter((t) => t.estado === 'APROBADA'),
           players: prev.players.map((p) => ({
             ...p,
             rut: '',
@@ -973,20 +998,51 @@ function AppContent() {
     })();
   };
 
-  const handleExecuteTransfer = (transfer: TransferRecord) => {
-    if (!currentUser) return;
+  const handleCreateTransferRequest = (transfer: TransferRecord) => {
+    if (!currentUser || currentUser.role !== 'delegado') return;
     const enrichedTransfer: TransferRecord = { ...transfer, createdByUid: currentUser.uid };
     setState((prev) => ({
       ...prev,
-      players: prev.players.map((p) =>
-        p.id === enrichedTransfer.playerId ? { ...p, teamId: enrichedTransfer.toTeamId } : p
-      ),
       transfers: [enrichedTransfer, ...prev.transfers],
     }));
-    queueMasterSyncForDiscipline(enrichedTransfer.disciplineId);
 
-    void executeFirestoreTransfer(enrichedTransfer, currentUser.uid).catch((err) =>
-      reportCloudError('Error registrando transferencia en Firestore', err)
+    void createFirestoreTransferRequest(enrichedTransfer, currentUser.uid).catch((err) =>
+      reportCloudError('Error enviando solicitud de transferencia en Firestore', err)
+    );
+  };
+
+  const handleApproveTransferRequest = (
+    updatedTransfer: TransferRecord,
+    isFromDelegate: boolean
+  ) => {
+    if (!currentUser || currentUser.role !== 'delegado') return;
+    setState((prev) => ({
+      ...prev,
+      players: prev.players.map((p) =>
+        p.id === updatedTransfer.playerId ? { ...p, teamId: updatedTransfer.toTeamId } : p
+      ),
+      transfers: prev.transfers.map((t) =>
+        t.id === updatedTransfer.id ? updatedTransfer : t
+      ),
+    }));
+    queueMasterSyncForDiscipline(updatedTransfer.disciplineId);
+
+    void approveFirestoreTransferRequest(updatedTransfer, currentUser.uid, isFromDelegate).catch(
+      (err) => reportCloudError('Error confirmando transferencia en Firestore', err)
+    );
+  };
+
+  const handleRejectTransferRequest = (updatedTransfer: TransferRecord) => {
+    if (!currentUser || currentUser.role !== 'delegado') return;
+    setState((prev) => ({
+      ...prev,
+      transfers: prev.transfers.map((t) =>
+        t.id === updatedTransfer.id ? updatedTransfer : t
+      ),
+    }));
+
+    void rejectFirestoreTransferRequest(updatedTransfer.id, currentUser.uid).catch((err) =>
+      reportCloudError('Error rechazando solicitud de transferencia en Firestore', err)
     );
   };
 
@@ -1218,9 +1274,20 @@ function AppContent() {
           <TransfersView
             state={state}
             currentUser={currentUser}
-            onExecuteTransfer={handleExecuteTransfer}
-            onOpenSheetsSync={handleOpenSheetsSync}
+            onCreateTransferRequest={handleCreateTransferRequest}
+            onApproveTransferRequest={handleApproveTransferRequest}
+            onRejectTransferRequest={handleRejectTransferRequest}
+            onNavigate={handleNavigate}
             onOpenAuth={() => setAuthModalOpen(true)}
+          />
+        )}
+
+        {activeSection === 'transferencias-publicas' && (
+          <PublicTransfersView
+            state={state}
+            currentUser={currentUser}
+            onInspectTeam={setInspectedTeamId}
+            onNavigate={handleNavigate}
           />
         )}
 

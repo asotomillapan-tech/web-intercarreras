@@ -132,6 +132,10 @@ export function canManageRegistrationsAndTransfers(user: AppUserProfile | null):
   return user?.role === 'admin' || user?.role === 'delegado';
 }
 
+export function canAccessDelegateTransfers(user: AppUserProfile | null): boolean {
+  return user?.role === 'delegado';
+}
+
 export function canUploadPhotos(user: AppUserProfile | null): boolean {
   return user?.role === 'admin' || user?.role === 'fotografo';
 }

@@ -4,8 +4,10 @@ import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
 import {
   buildFavoriteNotifications,
   canAccessAdminPanel,
+  canAccessDelegateTransfers,
   ROLE_META,
 } from '../domain/rbacEngine';
+import { getDelegateTransferActionRole } from '../domain/transfersEngine';
 import type { AppUserProfile, Match, TournamentState } from '../types/tournament';
 
 export type NavSection =
@@ -15,6 +17,7 @@ export type NavSection =
   | 'galeria'
   | 'inscripciones'
   | 'transferencias'
+  | 'transferencias-publicas'
   | 'cuenta'
   | 'panel'
   | 'privacidad';
@@ -28,13 +31,12 @@ interface NavbarProps {
   onOpenMatchModal: (match: Match) => void;
 }
 
-const NAV_ITEMS: Array<{ id: NavSection; label: string }> = [
+const BASE_NAV_ITEMS: Array<{ id: NavSection; label: string }> = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'posiciones', label: 'Posiciones' },
   { id: 'jugadores', label: 'Jugadores' },
   { id: 'galeria', label: 'Galería' },
   { id: 'inscripciones', label: 'Inscripciones' },
-  { id: 'transferencias', label: 'Transferencias' },
 ];
 
 export function Navbar({
@@ -65,6 +67,22 @@ export function Navbar({
   };
 
   const hasOfficialAccess = canAccessAdminPanel(currentUser);
+  const isDelegadoUser = canAccessDelegateTransfers(currentUser);
+
+  const visibleNavItems = useMemo(
+    () =>
+      isDelegadoUser
+        ? [...BASE_NAV_ITEMS, { id: 'transferencias' as NavSection, label: 'Transferencias' }]
+        : BASE_NAV_ITEMS,
+    [isDelegadoUser]
+  );
+
+  const pendingDelegateTransferCount = useMemo(() => {
+    if (!isDelegadoUser) return 0;
+    return state.transfers.filter(
+      (t) => getDelegateTransferActionRole(currentUser, t) === 'CAN_APPROVE'
+    ).length;
+  }, [isDelegadoUser, currentUser, state.transfers]);
 
   return (
     <header className="sticky top-0 z-40 bg-[#0d0d0d] text-white border-b border-white/10">
@@ -86,20 +104,27 @@ export function Navbar({
           </span>
         </button>
 
-        {/* Zone 2: 6 concise single-line nav links */}
+        {/* Zone 2: Concise single-line nav links (Transferencias visible exclusively to Delegados) */}
         <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-6">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
+            const showPendingCount =
+              item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleSelect(item.id)}
-                className={`relative h-16 flex items-center text-sm font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
+                className={`relative h-16 flex items-center gap-1.5 text-sm font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {showPendingCount && (
+                  <span className="min-w-[18px] h-[18px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
+                    {pendingDelegateTransferCount}
+                  </span>
+                )}
                 {isActive && (
                   <span
                     aria-hidden="true"
@@ -113,18 +138,25 @@ export function Navbar({
 
         {/* Medium desktop nav (compact spacing) */}
         <nav aria-label="Navegación principal compacta" className="hidden lg:flex xl:hidden items-center gap-4">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
+            const showPendingCount =
+              item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleSelect(item.id)}
-                className={`relative h-16 flex items-center text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`relative h-16 flex items-center gap-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {showPendingCount && (
+                  <span className="min-w-[16px] h-[16px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
+                    {pendingDelegateTransferCount}
+                  </span>
+                )}
                 {isActive && (
                   <span
                     aria-hidden="true"
@@ -271,20 +303,27 @@ export function Navbar({
           aria-label="Navegación móvil"
           className="lg:hidden bg-[#0d0d0d] border-t border-white/10 px-4 py-3 space-y-1"
         >
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
+            const showPendingCount =
+              item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleSelect(item.id)}
-                className={`w-full text-left px-3 py-3 text-sm font-medium transition-colors block cursor-pointer ${
+                className={`w-full text-left px-3 py-3 text-sm font-medium transition-colors flex items-center justify-between cursor-pointer ${
                   isActive
                     ? 'text-white bg-white/5 border-b border-[#707ef9]'
                     : 'text-neutral-300 hover:text-white'
                 }`}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {showPendingCount && (
+                  <span className="min-w-[18px] h-[18px] px-1.5 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
+                    {pendingDelegateTransferCount}
+                  </span>
+                )}
               </button>
             );
           })}

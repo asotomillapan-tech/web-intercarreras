@@ -522,7 +522,7 @@
     },
     "TransferRecord": {
       "title": "TransferRecord",
-      "description": "Registro público de transferencia entre equipos habilitada tras la fase de grupos (sin RUT PII).",
+      "description": "Solicitud y anuncio público oficial de transferencia entre equipos con aprobación mutua de ambos delegados (sin RUT PII).",
       "type": "object",
       "properties": {
         "id": {
@@ -583,7 +583,50 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "requestedByTeamId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "requestedByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "fromTeamApproved": {
+          "type": "boolean"
+        },
+        "fromTeamApprovedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "toTeamApproved": {
+          "type": "boolean"
+        },
+        "toTeamApprovedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rejectedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "rejectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
           "type": "string",
           "format": "date-time"
         }

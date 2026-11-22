@@ -10,6 +10,8 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
+  type QueryDocumentSnapshot,
   type Timestamp,
 } from 'firebase/firestore';
 import { DEFAULT_MASTER_SHEETS, INITIAL_CONFIGS } from '../data/ufroSeed';
@@ -109,7 +111,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'teams'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-    getDocs(query(collection(db, 'transfers'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'transfers'), where('estado', '==', 'APROBADA'))),
     getDocs(query(collection(db, 'mvp_votes'), where('matchId', '>=', ''))),
     getDocs(query(collection(db, 'photos'), where('season', '>=', ''))),
     getDocs(query(collection(db, 'news'), where('published', '==', true))),
@@ -270,23 +272,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
   }
 
   if (transfersRes.status === 'fulfilled') {
-    result.transfers = transfersRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: String(data.id || d.id),
-        disciplineId: data.disciplineId as DisciplineId,
-        playerId: String(data.playerId || ''),
-        playerName: String(data.playerName || ''),
-        fromTeamId: String(data.fromTeamId || ''),
-        fromTeamName: String(data.fromTeamName || ''),
-        toTeamId: String(data.toTeamId || ''),
-        toTeamName: String(data.toTeamName || ''),
-        fecha: String(data.fecha || ''),
-        motivo: String(data.motivo || ''),
-        estado: (data.estado as TransferRecord['estado']) || 'APROBADA',
-        createdByUid: typeof data.createdByUid === 'string' ? data.createdByUid : undefined,
-      };
-    });
+    result.transfers = transfersRes.value.docs.map((d) => mapTransferDoc(d));
   }
 
   if (votesRes.status === 'fulfilled') {
@@ -1067,31 +1053,82 @@ export async function deleteFirestoreMatchesForDiscipline(matchIds: string[]): P
   );
 }
 
-export async function executeFirestoreTransfer(
+function mapTransferDoc(d: QueryDocumentSnapshot): TransferRecord {
+  const data = d.data();
+  const estado = (data.estado as TransferRecord['estado']) || 'APROBADA';
+  return {
+    id: String(data.id || d.id),
+    disciplineId: data.disciplineId as DisciplineId,
+    playerId: String(data.playerId || ''),
+    playerName: String(data.playerName || ''),
+    fromTeamId: String(data.fromTeamId || ''),
+    fromTeamName: String(data.fromTeamName || ''),
+    toTeamId: String(data.toTeamId || ''),
+    toTeamName: String(data.toTeamName || ''),
+    fecha: String(data.fecha || ''),
+    motivo: String(data.motivo || ''),
+    estado,
+    createdByUid: typeof data.createdByUid === 'string' ? data.createdByUid : undefined,
+    requestedByTeamId: typeof data.requestedByTeamId === 'string' ? data.requestedByTeamId : undefined,
+    requestedByName: typeof data.requestedByName === 'string' ? data.requestedByName : undefined,
+    fromTeamApproved:
+      typeof data.fromTeamApproved === 'boolean'
+        ? data.fromTeamApproved
+        : estado === 'APROBADA',
+    fromTeamApprovedByUid:
+      typeof data.fromTeamApprovedByUid === 'string' ? data.fromTeamApprovedByUid : undefined,
+    toTeamApproved:
+      typeof data.toTeamApproved === 'boolean' ? data.toTeamApproved : estado === 'APROBADA',
+    toTeamApprovedByUid:
+      typeof data.toTeamApprovedByUid === 'string' ? data.toTeamApprovedByUid : undefined,
+    approvedAt: data.approvedAt ? toIso(data.approvedAt) : undefined,
+    rejectedByUid: typeof data.rejectedByUid === 'string' ? data.rejectedByUid : undefined,
+    rejectedAt: data.rejectedAt ? toIso(data.rejectedAt) : undefined,
+    updatedAt: data.updatedAt ? toIso(data.updatedAt) : data.createdAt ? toIso(data.createdAt) : undefined,
+  };
+}
+
+export async function listDelegateFirestoreTransfers(
+  delegatedTeamId: string
+): Promise<TransferRecord[]> {
+  try {
+    const [fromSnap, toSnap] = await Promise.all([
+      getDocs(query(collection(db, 'transfers'), where('fromTeamId', '==', delegatedTeamId))),
+      getDocs(query(collection(db, 'transfers'), where('toTeamId', '==', delegatedTeamId))),
+    ]);
+    const byId = new Map<string, TransferRecord>();
+    fromSnap.docs.forEach((d) => {
+      const rec = mapTransferDoc(d);
+      byId.set(rec.id, rec);
+    });
+    toSnap.docs.forEach((d) => {
+      const rec = mapTransferDoc(d);
+      byId.set(rec.id, rec);
+    });
+    return Array.from(byId.values());
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'transfers');
+    return [];
+  }
+}
+
+export async function listAllFirestoreTransfers(): Promise<TransferRecord[]> {
+  try {
+    const snap = await getDocs(collection(db, 'transfers'));
+    return snap.docs.map((d) => mapTransferDoc(d));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'transfers');
+    return [];
+  }
+}
+
+export async function createFirestoreTransferRequest(
   transfer: TransferRecord,
   actorUid: string
 ): Promise<void> {
   const transferPath = `transfers/${transfer.id}`;
   try {
-    await updateDoc(doc(db, 'players', transfer.playerId), {
-      teamId: transfer.toTeamId,
-      updatedAt: serverTimestamp(),
-    });
-    // Also update teamId in isolated private PII doc if present
-    try {
-      const privRef = doc(db, 'player_private', transfer.playerId);
-      const privSnap = await getDoc(privRef);
-      if (privSnap.exists()) {
-        await updateDoc(privRef, {
-          teamId: transfer.toTeamId,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    } catch {
-      // Non-fatal if private record is restricted
-    }
-
-    await setDoc(doc(db, 'transfers', transfer.id), {
+    const payload: Record<string, unknown> = {
       id: transfer.id,
       disciplineId: transfer.disciplineId,
       playerId: transfer.playerId,
@@ -1102,12 +1139,92 @@ export async function executeFirestoreTransfer(
       toTeamName: transfer.toTeamName.slice(0, 120),
       fecha: transfer.fecha.slice(0, 20),
       motivo: transfer.motivo.slice(0, 300),
-      estado: transfer.estado,
+      estado: 'PENDIENTE',
       createdByUid: actorUid,
+      requestedByTeamId: transfer.requestedByTeamId ?? transfer.fromTeamId,
+      fromTeamApproved: Boolean(transfer.fromTeamApproved),
+      toTeamApproved: Boolean(transfer.toTeamApproved),
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    if (transfer.requestedByName && transfer.requestedByName.trim()) {
+      payload.requestedByName = transfer.requestedByName.trim().slice(0, 120);
+    }
+    if (transfer.fromTeamApproved && transfer.fromTeamApprovedByUid) {
+      payload.fromTeamApprovedByUid = transfer.fromTeamApprovedByUid;
+    }
+    if (transfer.toTeamApproved && transfer.toTeamApprovedByUid) {
+      payload.toTeamApprovedByUid = transfer.toTeamApprovedByUid;
+    }
+
+    await setDoc(doc(db, 'transfers', transfer.id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, transferPath);
+  }
+}
+
+export async function approveFirestoreTransferRequest(
+  transfer: TransferRecord,
+  actorUid: string,
+  isFromDelegate: boolean
+): Promise<void> {
+  const transferPath = `transfers/${transfer.id}`;
+  try {
+    const batch = writeBatch(db);
+    const transferRef = doc(db, 'transfers', transfer.id);
+    const playerRef = doc(db, 'players', transfer.playerId);
+
+    const approvalPatch: Record<string, unknown> = {
+      estado: 'APROBADA',
+      fecha: transfer.fecha.slice(0, 20),
+      approvedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (isFromDelegate) {
+      approvalPatch.fromTeamApproved = true;
+      approvalPatch.fromTeamApprovedByUid = actorUid;
+    } else {
+      approvalPatch.toTeamApproved = true;
+      approvalPatch.toTeamApprovedByUid = actorUid;
+    }
+
+    batch.update(transferRef, approvalPatch);
+    batch.update(playerRef, {
+      teamId: transfer.toTeamId,
+      updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+
+    // Best-effort sync of teamId on isolated private student record
+    try {
+      await updateDoc(doc(db, 'player_private', transfer.playerId), {
+        teamId: transfer.toTeamId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Non-fatal if private record does not exist
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, transferPath);
+  }
+}
+
+export async function rejectFirestoreTransferRequest(
+  transferId: string,
+  actorUid: string
+): Promise<void> {
+  const transferPath = `transfers/${transferId}`;
+  try {
+    await updateDoc(doc(db, 'transfers', transferId), {
+      estado: 'RECHAZADA',
+      rejectedByUid: actorUid,
+      rejectedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, transferPath);
+    handleFirestoreError(error, OperationType.UPDATE, transferPath);
   }
 }
 

@@ -205,6 +205,16 @@ export interface TransferRecord {
   motivo: string;
   estado: 'APROBADA' | 'PENDIENTE' | 'RECHAZADA';
   createdByUid?: string;
+  requestedByTeamId?: string;
+  requestedByName?: string;
+  fromTeamApproved?: boolean;
+  fromTeamApprovedByUid?: string;
+  toTeamApproved?: boolean;
+  toTeamApprovedByUid?: string;
+  approvedAt?: string;
+  rejectedByUid?: string;
+  rejectedAt?: string;
+  updatedAt?: string;
 }
 
 export interface StandingsRow {

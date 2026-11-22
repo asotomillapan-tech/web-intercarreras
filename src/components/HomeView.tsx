@@ -39,6 +39,7 @@ import type {
   TournamentState,
 } from '../types/tournament';
 import { HomeMatchCalendar } from './HomeMatchCalendar';
+import { HomeTransfersSection } from './HomeTransfersSection';
 import type { NavSection } from './Navbar';
 
 interface HomeViewProps {
@@ -595,6 +596,15 @@ export function HomeView({
         currentUser={currentUser}
         onOpenMatchModal={onOpenMatchModal}
         onOpenMatchInReferee={onOpenMatchInReferee}
+      />
+
+      {/* Section 1D: Últimas Transferencias Oficiales Efectuadas */}
+      <HomeTransfersSection
+        transfers={state.transfers}
+        temporada={state.temporada}
+        currentUser={currentUser}
+        onInspectTeam={onInspectTeam}
+        onNavigate={onNavigate}
       />
 
       {/* Section 2: Match Center (Public Post-Match Results + Live-Hour MVP Voting) */}

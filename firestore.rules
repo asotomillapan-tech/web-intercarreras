@@ -506,7 +506,17 @@ service cloud.firestore {
           'motivo',
           'estado',
           'createdByUid',
-          'createdAt'
+          'requestedByTeamId',
+          'requestedByName',
+          'fromTeamApproved',
+          'fromTeamApprovedByUid',
+          'toTeamApproved',
+          'toTeamApprovedByUid',
+          'approvedAt',
+          'rejectedByUid',
+          'rejectedAt',
+          'createdAt',
+          'updatedAt'
         ])
         && isValidId(data.id)
         && isValidDiscipline(data.disciplineId)
@@ -521,7 +531,17 @@ service cloud.firestore {
         && data.motivo is string && data.motivo.size() >= 3 && data.motivo.size() <= 300
         && data.estado in ['APROBADA', 'PENDIENTE', 'RECHAZADA']
         && isValidId(data.createdByUid)
-        && data.createdAt is timestamp;
+        && (!('requestedByTeamId' in data) || isValidId(data.requestedByTeamId))
+        && (!('requestedByName' in data) || (data.requestedByName is string && data.requestedByName.size() >= 1 && data.requestedByName.size() <= 120))
+        && (!('fromTeamApproved' in data) || data.fromTeamApproved is bool)
+        && (!('fromTeamApprovedByUid' in data) || isValidId(data.fromTeamApprovedByUid))
+        && (!('toTeamApproved' in data) || data.toTeamApproved is bool)
+        && (!('toTeamApprovedByUid' in data) || isValidId(data.toTeamApprovedByUid))
+        && (!('approvedAt' in data) || data.approvedAt is timestamp)
+        && (!('rejectedByUid' in data) || isValidId(data.rejectedByUid))
+        && (!('rejectedAt' in data) || data.rejectedAt is timestamp)
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidMvpVote(data) {
@@ -925,9 +945,10 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          // Tier 2B: Delegado transfer execution when transfer window is open
+          // Tier 2B: Delegado transfer execution when transfer window is open (batched with mutual transfer approval)
           || (
             isDelegado()
+            && incoming().teamId != existing().teamId
             && (isDelegadoOf(existing().teamId) || isDelegadoOf(incoming().teamId))
             && exists(/databases/$(database)/documents/configs/$(existing().disciplineId))
             && get(/databases/$(database)/documents/configs/$(existing().disciplineId)).data.transferenciasAbiertas == true
@@ -1020,6 +1041,12 @@ service cloud.firestore {
             ])
           )
           || (
+            isDelegadoOf(incoming().teamId)
+            && exists(/databases/$(database)/documents/players/$(playerId))
+            && getAfter(/databases/$(database)/documents/players/$(playerId)).data.teamId == incoming().teamId
+            && incoming().diff(existing()).affectedKeys().hasOnly(['teamId', 'updatedAt'])
+          )
+          || (
             isLinkedPlayer(playerId)
             && incoming().teamId == existing().teamId
             && incoming().diff(existing()).affectedKeys().hasOnly([
@@ -1105,24 +1132,56 @@ service cloud.firestore {
       allow delete: if isValidId(matchId) && isAdmin();
     }
 
-    // --- Collection 9: /transfers/{transferId} (Post-Group Transfers) ---
+    // --- Collection 9: /transfers/{transferId} (Delegate-Only Requests, Mutual Approval, Public Effected Feed) ---
     match /transfers/{transferId} {
-      allow get: if isValidId(transferId);
-      allow list: if isValidDiscipline(resource.data.disciplineId);
+      allow get: if isValidId(transferId)
+        && (
+          existing().estado == 'APROBADA'
+          || isAdmin()
+          || isDelegadoOf(existing().fromTeamId)
+          || isDelegadoOf(existing().toTeamId)
+        );
+      allow list: if resource.data.estado == 'APROBADA'
+        || isAdmin()
+        || isDelegadoOf(resource.data.fromTeamId)
+        || isDelegadoOf(resource.data.toTeamId);
 
+      // Strictly ONLY delegates of either involved team may initiate a PENDIENTE transfer request
       allow create: if isVerified()
         && isValidId(transferId)
         && isValidTransfer(incoming())
         && incoming().id == transferId
         && incoming().createdByUid == request.auth.uid
         && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().estado == 'PENDIENTE'
+        && !('approvedAt' in incoming())
+        && !('rejectedByUid' in incoming())
+        && !('rejectedAt' in incoming())
+        && isDelegado()
+        && exists(/databases/$(database)/documents/configs/$(incoming().disciplineId))
+        && get(/databases/$(database)/documents/configs/$(incoming().disciplineId)).data.transferenciasAbiertas == true
+        && exists(/databases/$(database)/documents/players/$(incoming().playerId))
+        && get(/databases/$(database)/documents/players/$(incoming().playerId)).data.teamId == incoming().fromTeamId
+        && get(/databases/$(database)/documents/players/$(incoming().playerId)).data.disciplineId == incoming().disciplineId
+        && exists(/databases/$(database)/documents/teams/$(incoming().fromTeamId))
+        && exists(/databases/$(database)/documents/teams/$(incoming().toTeamId))
         && (
-          isAdmin()
+          (
+            isDelegadoOf(incoming().fromTeamId)
+            && incoming().requestedByTeamId == incoming().fromTeamId
+            && incoming().fromTeamApproved == true
+            && incoming().fromTeamApprovedByUid == request.auth.uid
+            && incoming().toTeamApproved == false
+            && !('toTeamApprovedByUid' in incoming())
+          )
           || (
-            isDelegado()
-            && (isDelegadoOf(incoming().fromTeamId) || isDelegadoOf(incoming().toTeamId))
-            && exists(/databases/$(database)/documents/configs/$(incoming().disciplineId))
-            && get(/databases/$(database)/documents/configs/$(incoming().disciplineId)).data.transferenciasAbiertas == true
+            isDelegadoOf(incoming().toTeamId)
+            && incoming().requestedByTeamId == incoming().toTeamId
+            && incoming().toTeamApproved == true
+            && incoming().toTeamApprovedByUid == request.auth.uid
+            && incoming().fromTeamApproved == false
+            && !('fromTeamApprovedByUid' in incoming())
           )
         );
 
@@ -1130,9 +1189,80 @@ service cloud.firestore {
         && isValidId(transferId)
         && isValidTransfer(incoming())
         && incoming().id == existing().id
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().playerId == existing().playerId
+        && incoming().fromTeamId == existing().fromTeamId
+        && incoming().toTeamId == existing().toTeamId
+        && incoming().createdByUid == existing().createdByUid
         && incoming().createdAt == existing().createdAt
-        && incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'motivo'])
-        && isAdmin();
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1A: Origin delegate accepts a pending request initiated by destination delegate (atomic with player teamId update)
+          (
+            existing().estado == 'PENDIENTE'
+            && existing().fromTeamApproved == false
+            && existing().toTeamApproved == true
+            && isDelegadoOf(existing().fromTeamId)
+            && exists(/databases/$(database)/documents/configs/$(existing().disciplineId))
+            && get(/databases/$(database)/documents/configs/$(existing().disciplineId)).data.transferenciasAbiertas == true
+            && incoming().fromTeamApproved == true
+            && incoming().fromTeamApprovedByUid == request.auth.uid
+            && incoming().toTeamApproved == true
+            && incoming().estado == 'APROBADA'
+            && incoming().approvedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'fromTeamApproved',
+              'fromTeamApprovedByUid',
+              'estado',
+              'fecha',
+              'approvedAt',
+              'updatedAt'
+            ])
+            && getAfter(/databases/$(database)/documents/players/$(existing().playerId)).data.teamId == existing().toTeamId
+          )
+          // Action 1B: Destination delegate accepts a pending request initiated by origin delegate (atomic with player teamId update)
+          || (
+            existing().estado == 'PENDIENTE'
+            && existing().toTeamApproved == false
+            && existing().fromTeamApproved == true
+            && isDelegadoOf(existing().toTeamId)
+            && exists(/databases/$(database)/documents/configs/$(existing().disciplineId))
+            && get(/databases/$(database)/documents/configs/$(existing().disciplineId)).data.transferenciasAbiertas == true
+            && incoming().toTeamApproved == true
+            && incoming().toTeamApprovedByUid == request.auth.uid
+            && incoming().fromTeamApproved == true
+            && incoming().estado == 'APROBADA'
+            && incoming().approvedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'toTeamApproved',
+              'toTeamApprovedByUid',
+              'estado',
+              'fecha',
+              'approvedAt',
+              'updatedAt'
+            ])
+            && getAfter(/databases/$(database)/documents/players/$(existing().playerId)).data.teamId == existing().toTeamId
+          )
+          // Action 2: Either involved delegate rejects or cancels a pending request (Terminal State Lock)
+          || (
+            existing().estado == 'PENDIENTE'
+            && (isDelegadoOf(existing().fromTeamId) || isDelegadoOf(existing().toTeamId))
+            && incoming().estado == 'RECHAZADA'
+            && incoming().rejectedByUid == request.auth.uid
+            && incoming().rejectedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'estado',
+              'rejectedByUid',
+              'rejectedAt',
+              'updatedAt'
+            ])
+          )
+          // Action 3: Admin editorial/status moderation
+          || (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'motivo', 'updatedAt'])
+          )
+        );
 
       allow delete: if isValidId(transferId) && isAdmin();
     }
