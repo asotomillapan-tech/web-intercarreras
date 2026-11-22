@@ -18,12 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
-import {
-  extractMatchGroups,
-  extractMatchStages,
-  filterMatchesByOrg,
-  MATCH_STAGE_ORDER,
-} from '../domain/matchFilterEngine';
+import { filterMatchesByOrg } from '../domain/matchFilterEngine';
 import {
   applyMatchLiveEvent,
   revertMatchLiveEvent,
@@ -66,6 +61,7 @@ import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
 import { AdminTeamsManager } from './AdminTeamsManager';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
+import { MatchFilterBar } from './MatchFilterBar';
 
 export type PanelSubTab =
   | 'arbitro'
@@ -345,23 +341,6 @@ export function AdminRefereeView({
       return d.sportType === activeReferee.sportType;
     });
   }, [activeReferee]);
-
-  const refereeGroups = useMemo(
-    () =>
-      extractMatchGroups(refereeSportMatches, {
-        disciplineId: refDisciplineFilter,
-        fase: refStageFilter,
-      }),
-    [refereeSportMatches, refDisciplineFilter, refStageFilter]
-  );
-
-  const refereeStages = useMemo(() => {
-    const present = extractMatchStages(refereeSportMatches, {
-      disciplineId: refDisciplineFilter,
-      groupName: refGroupFilter,
-    });
-    return present.length > 0 ? present : MATCH_STAGE_ORDER;
-  }, [refereeSportMatches, refDisciplineFilter, refGroupFilter]);
 
   const refereeMatches = useMemo(() => {
     return filterMatchesByOrg(refereeSportMatches, {
@@ -1001,53 +980,26 @@ export function AdminRefereeView({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               {/* Left 7 cols: Live Scoreboard & Discipline-specific Controls */}
               <div className="lg:col-span-7 space-y-6">
-                <div className="space-y-3 bg-[#f5f6f8] border border-neutral-200 p-3.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <select
-                      value={refDisciplineFilter}
-                      onChange={(e) => {
-                        setRefDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
-                        setRefGroupFilter('ALL');
-                      }}
-                      aria-label="Filtrar encuentro arbitral por disciplina"
-                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
-                    >
-                      <option value="ALL">Todas las disciplinas ({refereeSportMatches.length})</option>
-                      {refereeDisciplines.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.nombreCorto}
-                        </option>
-                      ))}
-                    </select>
+                <div className="space-y-3">
+                  <MatchFilterBar
+                    idPrefix="referee-matches"
+                    matches={refereeSportMatches}
+                    disciplineFilter={refDisciplineFilter}
+                    onDisciplineChange={(val) => {
+                      setRefDisciplineFilter(val);
+                      setRefGroupFilter('ALL');
+                    }}
+                    disciplineOptions={refereeDisciplines}
+                    groupFilter={refGroupFilter}
+                    onGroupChange={setRefGroupFilter}
+                    stageFilter={refStageFilter}
+                    onStageChange={setRefStageFilter}
+                    filteredCount={refereeMatches.length}
+                    totalCount={refereeSportMatches.length}
+                    compact
+                  />
 
-                    <select
-                      value={refGroupFilter}
-                      onChange={(e) => setRefGroupFilter(e.target.value)}
-                      aria-label="Filtrar encuentro arbitral por grupo"
-                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
-                    >
-                      <option value="ALL">Todos los grupos</option>
-                      {refereeGroups.map((g) => (
-                        <option key={g} value={g}>
-                          {g}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      value={refStageFilter}
-                      onChange={(e) => setRefStageFilter(e.target.value as 'ALL' | MatchPhase)}
-                      aria-label="Filtrar encuentro arbitral por fase"
-                      className="bg-white border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-[#0d0d0d]"
-                    >
-                      <option value="ALL">Todas las fases</option>
-                      {refereeStages.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <div className="bg-[#f5f6f8] border border-neutral-200 p-3.5">
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <label
@@ -1082,6 +1034,7 @@ export function AdminRefereeView({
                         ))
                       )}
                     </select>
+                  </div>
                   </div>
                 </div>
 

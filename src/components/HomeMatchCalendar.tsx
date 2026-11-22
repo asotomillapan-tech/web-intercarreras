@@ -5,14 +5,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Filter,
-  Layers,
   Lock,
   MapPin,
-  RotateCcw,
-  Users,
 } from 'lucide-react';
-import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import { DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   buildCalendarMonthGrid,
   extractCalendarVenues,
@@ -23,12 +19,7 @@ import {
   normalizeMatchDateToIso,
   pickInitialCalendarMonth,
 } from '../domain/calendarEngine';
-import {
-  extractMatchGroups,
-  extractMatchStages,
-  filterMatchesByOrg,
-  MATCH_STAGE_ORDER,
-} from '../domain/matchFilterEngine';
+import { extractMatchGroups, filterMatchesByOrg } from '../domain/matchFilterEngine';
 import {
   canRefereeMatches,
   canVoteMatchMvp,
@@ -41,6 +32,7 @@ import type {
   MatchPhase,
   Team,
 } from '../types/tournament';
+import { MatchFilterBar } from './MatchFilterBar';
 
 interface HomeMatchCalendarProps {
   matches: Match[];
@@ -96,15 +88,15 @@ export function HomeMatchCalendar({
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
   const isOfficial = canRefereeMatches(currentUser);
 
-  const availableGroups = useMemo(
-    () => extractMatchGroups(matches, { disciplineId: disciplineFilter }),
-    [matches, disciplineFilter]
+  const statusScopedMatches = useMemo(
+    () => (statusMode === 'PROGRAMADO' ? matches.filter((m) => m.status === 'PROGRAMADO') : matches),
+    [matches, statusMode]
   );
 
-  const availableStages = useMemo(() => {
-    const present = extractMatchStages(matches, { disciplineId: disciplineFilter });
-    return present.length > 0 ? present : MATCH_STAGE_ORDER;
-  }, [matches, disciplineFilter]);
+  const availableGroups = useMemo(
+    () => extractMatchGroups(statusScopedMatches, { disciplineId: disciplineFilter }),
+    [statusScopedMatches, disciplineFilter]
+  );
 
   const venues = useMemo(() => {
     const scope = filterMatchesByOrg(matches, {
@@ -274,124 +266,58 @@ export function HomeMatchCalendar({
         </div>
       </div>
 
-      {/* Filters Toolbar */}
-      <div className="bg-[#f5f6f8] border border-neutral-200 p-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-        <div className="lg:col-span-3">
-          <label
-            htmlFor="cal-filter-discipline"
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
-          >
-            <Filter className="w-3.5 h-3.5 text-[#707ef9]" />
-            <span>Disciplina</span>
-          </label>
-          <select
-            id="cal-filter-discipline"
-            value={disciplineFilter}
-            onChange={(e) => {
-              setDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
-              setGroupFilter('ALL');
-              setSelectedDateIso(null);
-            }}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
-          >
-            <option value="ALL">Todas ({DISCIPLINES.length})</option>
-            {DISCIPLINES.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="lg:col-span-2">
-          <label
-            htmlFor="cal-filter-group"
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
-          >
-            <Users className="w-3.5 h-3.5 text-[#707ef9]" />
-            <span>Grupo</span>
-          </label>
-          <select
-            id="cal-filter-group"
-            value={availableGroups.includes(groupFilter) ? groupFilter : 'ALL'}
-            onChange={(e) => {
-              setGroupFilter(e.target.value);
-              setSelectedDateIso(null);
-            }}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
-          >
-            <option value="ALL">Todos ({availableGroups.length})</option>
-            {availableGroups.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="lg:col-span-2">
-          <label
-            htmlFor="cal-filter-stage"
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
-          >
-            <Layers className="w-3.5 h-3.5 text-[#707ef9]" />
-            <span>Fase</span>
-          </label>
-          <select
-            id="cal-filter-stage"
-            value={stageFilter}
-            onChange={(e) => {
-              setStageFilter(e.target.value as 'ALL' | MatchPhase);
-              setSelectedDateIso(null);
-            }}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
-          >
-            <option value="ALL">Todas las fases</option>
-            {availableStages.map((st) => (
-              <option key={st} value={st}>
-                {st === 'Grupos' ? 'Fase de Grupos' : st}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="lg:col-span-3">
-          <label
-            htmlFor="cal-filter-venue"
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1.5"
-          >
-            <MapPin className="w-3.5 h-3.5 text-[#707ef9]" />
-            <span>Sede / Cancha</span>
-          </label>
-          <select
-            id="cal-filter-venue"
-            value={venueFilter}
-            onChange={(e) => {
-              setVenueFilter(e.target.value);
-              setSelectedDateIso(null);
-            }}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
-          >
-            <option value="ALL">Todas las sedes ({venues.length})</option>
-            {venues.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="lg:col-span-2 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={handleResetFilters}
-            disabled={!hasActiveFilters}
-            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-neutral-300 hover:border-[#0d0d0d] text-xs font-medium text-[#0d0d0d] cursor-pointer disabled:opacity-40"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Limpiar</span>
-          </button>
-        </div>
+      {/* Unified Advanced Match Filter Bar */}
+      <div className="mb-6">
+        <MatchFilterBar
+          idPrefix="cal-filter"
+          matches={statusScopedMatches}
+          disciplineFilter={disciplineFilter}
+          onDisciplineChange={(val) => {
+            setDisciplineFilter(val);
+            setSelectedDateIso(null);
+          }}
+          groupFilter={groupFilter}
+          onGroupChange={(val) => {
+            setGroupFilter(val);
+            setSelectedDateIso(null);
+          }}
+          stageFilter={stageFilter}
+          onStageChange={(val) => {
+            setStageFilter(val);
+            setSelectedDateIso(null);
+          }}
+          filteredCount={filteredMatches.length}
+          totalCount={statusScopedMatches.length}
+          hasExtraActiveFilters={venueFilter !== 'ALL' || selectedDateIso !== null}
+          onReset={handleResetFilters}
+          extraControls={
+            <div className="min-w-[175px] flex-1">
+              <label
+                htmlFor="cal-filter-venue"
+                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+              >
+                <MapPin className="w-3 h-3 text-[#707ef9]" />
+                <span>Sede / Cancha</span>
+              </label>
+              <select
+                id="cal-filter-venue"
+                value={venueFilter}
+                onChange={(e) => {
+                  setVenueFilter(e.target.value);
+                  setSelectedDateIso(null);
+                }}
+                className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+              >
+                <option value="ALL">Todas las sedes ({venues.length})</option>
+                {venues.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          }
+        />
       </div>
 
       {/* Main 12-Col Split: Monthly Calendar Grid + Chronological Date Agenda */}

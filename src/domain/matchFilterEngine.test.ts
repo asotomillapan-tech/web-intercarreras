@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Match } from '../types/tournament';
 import {
+  computeMatchFilterFacets,
   extractMatchGroups,
   extractMatchStages,
   filterMatchesByOrg,
@@ -119,5 +120,29 @@ describe('matchFilterEngine', () => {
       sections.map((s) => s.label),
       ['Fútbol 7 1ª Div.', 'Fútbol 7 Damas', 'Básquetbol Varones']
     );
+  });
+
+  it('computes simultaneous faceted counts across discipline, group, and stage', () => {
+    const facetsAll = computeMatchFilterFacets(sampleMatches, {
+      disciplineId: 'ALL',
+      groupName: 'ALL',
+      fase: 'ALL',
+    });
+    assert.equal(facetsAll.totalCount, 6);
+    assert.equal(facetsAll.matchingCount, 6);
+    assert.equal(facetsAll.disciplineCounts['f7-h-1'], 4);
+    assert.equal(facetsAll.disciplineCounts['f7-m'], 1);
+    assert.equal(facetsAll.stageCounts['Grupos'], 3);
+    assert.equal(facetsAll.groupCounts['Playoffs'], 3);
+
+    const facetsScoped = computeMatchFilterFacets(sampleMatches, {
+      disciplineId: 'f7-h-1',
+      groupName: 'Playoffs',
+      fase: 'Semifinal',
+    });
+    assert.equal(facetsScoped.matchingCount, 1);
+    assert.equal(facetsScoped.stageCounts['Semifinal'], 1);
+    assert.equal(facetsScoped.stageCounts['Final'], 1);
+    assert.equal(facetsScoped.stageCounts['Grupos'], undefined);
   });
 });

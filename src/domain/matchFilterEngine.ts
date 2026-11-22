@@ -163,3 +163,72 @@ export function groupMatchesByOrg(
     matches: bucket.matches,
   }));
 }
+
+export interface MatchFilterFacets {
+  totalCount: number;
+  matchingCount: number;
+  disciplineCounts: Partial<Record<DisciplineId, number>>;
+  groupCounts: Record<string, number>;
+  stageCounts: Partial<Record<MatchPhase, number>>;
+  availableGroups: string[];
+  availableStages: MatchPhase[];
+}
+
+/**
+ * Computes simultaneous faceted counts so Disciplina, Grupo, and Fase dropdowns
+ * reflect real match counts under the other active selections.
+ */
+export function computeMatchFilterFacets(
+  matches: Match[],
+  active: MatchOrgFilter
+): MatchFilterFacets {
+  const disc = active.disciplineId ?? 'ALL';
+  const group = active.groupName ?? 'ALL';
+  const fase = active.fase ?? 'ALL';
+
+  const availableGroups = extractMatchGroups(matches, { disciplineId: disc });
+  const effectiveGroup = group !== 'ALL' && availableGroups.includes(group) ? group : 'ALL';
+
+  const disciplineCounts: Partial<Record<DisciplineId, number>> = {};
+  const groupCounts: Record<string, number> = {};
+  const stageCounts: Partial<Record<MatchPhase, number>> = {};
+
+  let matchingCount = 0;
+
+  for (const m of matches) {
+    const gLabel = normalizeGroupLabel(m.groupName);
+    const matchDisc = disc === 'ALL' || m.disciplineId === disc;
+    const matchGroup = effectiveGroup === 'ALL' || gLabel === effectiveGroup;
+    const matchStage = fase === 'ALL' || m.fase === fase;
+
+    // Discipline facet: respects active stage (and group if matching)
+    if (matchStage && (effectiveGroup === 'ALL' || gLabel === effectiveGroup)) {
+      disciplineCounts[m.disciplineId] = (disciplineCounts[m.disciplineId] ?? 0) + 1;
+    }
+
+    // Group facet: respects active discipline & stage
+    if (matchDisc && matchStage && gLabel) {
+      groupCounts[gLabel] = (groupCounts[gLabel] ?? 0) + 1;
+    }
+
+    // Stage facet: respects active discipline & group
+    if (matchDisc && matchGroup && m.fase) {
+      stageCounts[m.fase] = (stageCounts[m.fase] ?? 0) + 1;
+    }
+
+    if (matchDisc && matchGroup && matchStage) {
+      matchingCount += 1;
+    }
+  }
+
+  return {
+    totalCount: matches.length,
+    matchingCount,
+    disciplineCounts,
+    groupCounts,
+    stageCounts,
+    availableGroups,
+    availableStages: MATCH_STAGE_ORDER,
+  };
+}
+

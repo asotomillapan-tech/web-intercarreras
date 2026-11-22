@@ -17,7 +17,7 @@ import {
   computeTeamMatchProgression,
 } from '../domain/tournamentEngine';
 import { TeamProgressionChart } from './TeamProgressionChart';
-import { extractMatchStages, MATCH_STAGE_ORDER } from '../domain/matchFilterEngine';
+import { filterMatchesByOrg } from '../domain/matchFilterEngine';
 import type {
   AppUserProfile,
   Match,
@@ -27,6 +27,7 @@ import type {
   Player,
   Team,
 } from '../types/tournament';
+import { MatchFilterBar } from './MatchFilterBar';
 import { TeamCrest } from './TeamCrest';
 
 interface TeamProfileModalProps {
@@ -57,6 +58,7 @@ export function TeamProfileModal({
   onAdminEditMatch,
 }: TeamProfileModalProps) {
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
+  const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
   const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
 
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
@@ -107,15 +109,18 @@ export function TeamProfileModal({
   const isAdmin = currentUser?.role === 'admin';
   const selectedUfroCount = roster.filter((p) => p.esSeleccionadoUfro).length;
 
-  const availableTeamStages = useMemo(() => {
-    const teamMatches = historicalStats.history.map((h) => h.match);
-    const present = extractMatchStages(teamMatches);
-    return present.length > 0 ? present : MATCH_STAGE_ORDER;
-  }, [historicalStats.history]);
+  const teamAllMatches = historicalStats.history.map((h) => h.match);
+  const orgAllowedMatchIds = new Set(
+    filterMatchesByOrg(teamAllMatches, {
+      disciplineId: team.disciplineId,
+      groupName: groupFilter,
+      fase: stageFilter,
+    }).map((m) => m.id)
+  );
 
   const filteredHistory = historicalStats.history.filter((item) => {
     if (statusFilter !== 'ALL' && item.match.status !== statusFilter) return false;
-    if (stageFilter !== 'ALL' && item.match.fase !== stageFilter) return false;
+    if (!orgAllowedMatchIds.has(item.match.id)) return false;
     return true;
   });
 
@@ -351,20 +356,6 @@ export function TeamProfileModal({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <select
-                  aria-label="Filtrar historial por fase"
-                  value={stageFilter}
-                  onChange={(e) => setStageFilter(e.target.value as 'ALL' | MatchPhase)}
-                  className="bg-white border border-neutral-300 px-3 py-1.5 text-xs font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                >
-                  <option value="ALL">Todas las fases</option>
-                  {availableTeamStages.map((st) => (
-                    <option key={st} value={st}>
-                      {st === 'Grupos' ? 'Fase de Grupos' : st}
-                    </option>
-                  ))}
-                </select>
-
                 <div className="flex flex-wrap items-center gap-1 bg-[#f5f6f8] p-1 border border-neutral-200">
                   {(
                     [
@@ -399,6 +390,28 @@ export function TeamProfileModal({
                 </div>
               </div>
             </div>
+
+            <MatchFilterBar
+              idPrefix="team-history"
+              matches={teamAllMatches}
+              disciplineFilter={team.disciplineId}
+              disciplineOptions={[disciplineMeta]}
+              allowAllDisciplines={false}
+              disciplineLocked
+              groupFilter={groupFilter}
+              onGroupChange={setGroupFilter}
+              stageFilter={stageFilter}
+              onStageChange={setStageFilter}
+              filteredCount={filteredHistory.length}
+              totalCount={historicalStats.history.length}
+              hasExtraActiveFilters={statusFilter !== 'ALL'}
+              onReset={() => {
+                setGroupFilter('ALL');
+                setStageFilter('ALL');
+                setStatusFilter('ALL');
+              }}
+              compact
+            />
 
             {filteredHistory.length === 0 ? (
               <div className="border border-neutral-200 bg-[#f5f6f8] p-8 text-center text-xs text-neutral-600">

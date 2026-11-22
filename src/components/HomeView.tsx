@@ -684,13 +684,19 @@ export function HomeView({
           <MatchFilterBar
             idPrefix="home-center"
             matches={state.matches}
-            scopedDiscipline={matchFilter}
+            disciplineFilter={matchFilter}
+            onDisciplineChange={(value) => {
+              setMatchFilter(value);
+              setMatchGroupFilter('ALL');
+            }}
             groupFilter={matchGroupFilter}
             onGroupChange={setMatchGroupFilter}
             stageFilter={matchStageFilter}
             onStageChange={setMatchStageFilter}
             groupBy={matchGroupBy}
             onGroupByChange={setMatchGroupBy}
+            filteredCount={visibleMatches.length}
+            totalCount={state.matches.length}
             onReset={() => {
               setMatchFilter('ALL');
               setMatchGroupFilter('ALL');

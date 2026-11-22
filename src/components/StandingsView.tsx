@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Award, Lock, Medal, Star, Trophy } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
@@ -55,9 +55,18 @@ export function StandingsView({
 }: StandingsViewProps) {
   const [subTab, setSubTab] = useState<'grupos' | 'playoffs' | 'partidos'>('grupos');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
+  const [matchDisciplineFilter, setMatchDisciplineFilter] = useState<'ALL' | DisciplineId>(
+    selectedDiscipline
+  );
   const [matchGroupFilter, setMatchGroupFilter] = useState<'ALL' | string>('ALL');
   const [matchStageFilter, setMatchStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [matchGroupBy, setMatchGroupBy] = useState<MatchGroupByMode>('fase');
+
+  useEffect(() => {
+    setMatchDisciplineFilter(selectedDiscipline);
+    setMatchGroupFilter('ALL');
+    setMatchStageFilter('ALL');
+  }, [selectedDiscipline]);
 
   const meta = DISCIPLINE_MAP[selectedDiscipline];
   const config = state.configs[selectedDiscipline];
@@ -114,7 +123,8 @@ export function StandingsView({
     selectedGroup === 'ALL' || !groups.includes(selectedGroup) ? groups : [selectedGroup];
 
   const organizedDisciplineMatches = useMemo(() => {
-    const filtered = filterMatchesByOrg(disciplineMatches, {
+    const filtered = filterMatchesByOrg(state.matches, {
+      disciplineId: matchDisciplineFilter,
       groupName: matchGroupFilter,
       fase: matchStageFilter,
     }).sort((a, b) => {
@@ -128,7 +138,7 @@ export function StandingsView({
       Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<DisciplineId, string>,
       DISCIPLINES.map((d) => d.id)
     );
-  }, [disciplineMatches, matchGroupFilter, matchStageFilter, matchGroupBy]);
+  }, [state.matches, matchDisciplineFilter, matchGroupFilter, matchStageFilter, matchGroupBy]);
 
   const totalFilteredMatches = useMemo(
     () => organizedDisciplineMatches.reduce((acc, sec) => acc + sec.matches.length, 0),
@@ -481,28 +491,42 @@ export function StandingsView({
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-neutral-200 pb-4">
               <div>
                 <h2 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                  Partidos de {meta.nombre}
+                  {matchDisciplineFilter === 'ALL'
+                    ? 'Partidos de Todas las Disciplinas'
+                    : `Partidos de ${meta.nombre}`}
                 </h2>
                 <p className="text-sm text-neutral-600 mt-1">
-                  Filtra y organiza todos los encuentros de esta disciplina por grupo y fase.
+                  Filtra y organiza simultáneamente los encuentros por disciplina, grupo y fase.
                 </p>
               </div>
               <span className="text-xs font-mono text-neutral-500 tabular-nums">
-                {totalFilteredMatches} de {disciplineMatches.length} encuentros
+                {totalFilteredMatches} de{' '}
+                {matchDisciplineFilter === 'ALL' ? state.matches.length : disciplineMatches.length}{' '}
+                encuentros
               </span>
             </div>
 
             <MatchFilterBar
               idPrefix="standings-matches"
-              matches={disciplineMatches}
-              scopedDiscipline={selectedDiscipline}
+              matches={state.matches}
+              disciplineFilter={matchDisciplineFilter}
+              onDisciplineChange={(val) => {
+                setMatchDisciplineFilter(val);
+                setMatchGroupFilter('ALL');
+                if (val !== 'ALL') {
+                  onSelectDiscipline(val);
+                }
+              }}
               groupFilter={matchGroupFilter}
               onGroupChange={setMatchGroupFilter}
               stageFilter={matchStageFilter}
               onStageChange={setMatchStageFilter}
               groupBy={matchGroupBy}
               onGroupByChange={setMatchGroupBy}
+              filteredCount={totalFilteredMatches}
+              totalCount={state.matches.length}
               onReset={() => {
+                setMatchDisciplineFilter(selectedDiscipline);
                 setMatchGroupFilter('ALL');
                 setMatchStageFilter('ALL');
                 setMatchGroupBy('fase');

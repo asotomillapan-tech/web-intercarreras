@@ -70,6 +70,9 @@ export function VotationsView({
   onSubmitTotyBallot,
 }: VotationsViewProps) {
   const [activeTab, setActiveTab] = useState<VotationTab>('potm');
+  const [potmDisciplineFilter, setPotmDisciplineFilter] = useState<'ALL' | DisciplineId>(
+    selectedDiscipline
+  );
   const [potmGroupFilter, setPotmGroupFilter] = useState<'ALL' | string>('ALL');
   const [potmStageFilter, setPotmStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [selectedPositionKey, setSelectedPositionKey] = useState<string>('');
@@ -84,11 +87,12 @@ export function VotationsView({
     [discMeta.sportType]
   );
 
-  // Keep selectedPositionKey valid when switching discipline/sport
+  // Keep selectedPositionKey & POTM filters valid when switching discipline/sport
   useEffect(() => {
     if (!sportPositions.some((p) => p.key === selectedPositionKey)) {
       setSelectedPositionKey(sportPositions[0]?.key ?? '');
     }
+    setPotmDisciplineFilter(selectedDiscipline);
     setPotmGroupFilter('ALL');
     setPotmStageFilter('ALL');
     setShowAllPlayersForPosition(false);
@@ -110,21 +114,22 @@ export function VotationsView({
     [state.players, selectedDiscipline]
   );
 
-  const disciplineMatches = useMemo(
+  const sortedAllMatches = useMemo(
     () =>
-      state.matches
-        .filter((m) => m.disciplineId === selectedDiscipline)
-        .sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`)),
-    [state.matches, selectedDiscipline]
+      [...state.matches].sort((a, b) =>
+        `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`)
+      ),
+    [state.matches]
   );
 
   const filteredPotmMatches = useMemo(
     () =>
-      filterMatchesByOrg(disciplineMatches, {
+      filterMatchesByOrg(sortedAllMatches, {
+        disciplineId: potmDisciplineFilter,
         groupName: potmGroupFilter,
         fase: potmStageFilter,
       }),
-    [disciplineMatches, potmGroupFilter, potmStageFilter]
+    [sortedAllMatches, potmDisciplineFilter, potmGroupFilter, potmStageFilter]
   );
 
   // Sync user's existing TOTY ballot into local draft when discipline or user changes
@@ -438,12 +443,26 @@ export function VotationsView({
           <div className="space-y-8">
             <MatchFilterBar
               idPrefix="potm"
-              matches={disciplineMatches}
-              scopedDiscipline={selectedDiscipline}
+              matches={sortedAllMatches}
+              disciplineFilter={potmDisciplineFilter}
+              onDisciplineChange={(val) => {
+                setPotmDisciplineFilter(val);
+                setPotmGroupFilter('ALL');
+                if (val !== 'ALL') {
+                  onSelectDiscipline(val);
+                }
+              }}
               groupFilter={potmGroupFilter}
               onGroupChange={setPotmGroupFilter}
               stageFilter={potmStageFilter}
               onStageChange={setPotmStageFilter}
+              filteredCount={filteredPotmMatches.length}
+              totalCount={sortedAllMatches.length}
+              onReset={() => {
+                setPotmDisciplineFilter(selectedDiscipline);
+                setPotmGroupFilter('ALL');
+                setPotmStageFilter('ALL');
+              }}
               compact
             />
 
@@ -455,7 +474,8 @@ export function VotationsView({
                     Votación POTM Abierta Ahora
                   </h2>
                   <p className="text-xs text-neutral-600">
-                    Disponible durante la hora programada de cada encuentro en {discMeta.nombre}.
+                    Disponible durante la hora programada de cada encuentro en{' '}
+                    {potmDisciplineFilter === 'ALL' ? 'todas las disciplinas' : discMeta.nombre}.
                   </p>
                 </div>
                 <span className="text-xs font-mono text-[#707ef9] font-semibold">
@@ -468,8 +488,10 @@ export function VotationsView({
                   <Clock className="w-5 h-5 text-neutral-400 shrink-0" />
                   <span>
                     No hay encuentros en horario de votación POTM activa en este momento para{' '}
-                    <strong>{discMeta.nombre}</strong>. Revisa los partidos finalizados o próximos a
-                    disputarse abajo.
+                    <strong>
+                      {potmDisciplineFilter === 'ALL' ? 'todas las disciplinas' : discMeta.nombre}
+                    </strong>
+                    . Revisa los partidos finalizados o próximos a disputarse abajo.
                   </span>
                 </div>
               ) : (

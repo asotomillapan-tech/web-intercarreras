@@ -12,11 +12,8 @@ import {
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
-  extractMatchGroups,
-  extractMatchStages,
   filterMatchesByOrg,
   groupMatchesByOrg,
-  MATCH_STAGE_ORDER,
   type MatchGroupByMode,
 } from '../domain/matchFilterEngine';
 import type {
@@ -28,6 +25,7 @@ import type {
   PeriodScore,
   TournamentState,
 } from '../types/tournament';
+import { MatchFilterBar } from './MatchFilterBar';
 
 interface AdminMatchEditorProps {
   state: TournamentState;
@@ -86,23 +84,6 @@ export function AdminMatchEditor({
       setErrorMsg(null);
     }
   }, [initialEditMatchId, state.matches]);
-
-  const availableGroups = useMemo(
-    () =>
-      extractMatchGroups(state.matches, {
-        disciplineId: disciplineFilter,
-        fase: stageFilter,
-      }),
-    [state.matches, disciplineFilter, stageFilter]
-  );
-
-  const availableStages = useMemo(() => {
-    const present = extractMatchStages(state.matches, {
-      disciplineId: disciplineFilter,
-      groupName: groupFilter,
-    });
-    return present.length > 0 ? present : MATCH_STAGE_ORDER;
-  }, [state.matches, disciplineFilter, groupFilter]);
 
   const filteredMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -849,92 +830,68 @@ export function AdminMatchEditor({
         </form>
       )}
 
-      {/* Filters Toolbar */}
-      <div className="space-y-3 bg-[#f5f6f8] border border-neutral-200 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por equipo, cancha, grupo o fecha..."
-              aria-label="Buscar partidos"
-              className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-            />
-          </div>
-
-          <select
-            value={disciplineFilter}
-            onChange={(e) => {
-              setDisciplineFilter(e.target.value as 'ALL' | DisciplineId);
-              setGroupFilter('ALL');
-            }}
-            aria-label="Filtrar partidos por disciplina"
-            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-          >
-            <option value="ALL">Todas las disciplinas ({state.matches.length})</option>
-            {DISCIPLINES.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nombre}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | MatchStatus)}
-            aria-label="Filtrar partidos por estado"
-            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-          >
-            <option value="ALL">Todos los estados</option>
-            <option value="FINALIZADO">Finalizados — Partidos Pasados ({pastCount})</option>
-            <option value="EN_VIVO">En Vivo ({liveCount})</option>
-            <option value="PROGRAMADO">Programados ({scheduledCount})</option>
-          </select>
+      {/* Unified Advanced Match Filter Bar */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por equipo, cancha, grupo, fase o fecha..."
+            aria-label="Buscar partidos"
+            className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+          />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-neutral-200">
-          <select
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
-            aria-label="Filtrar partidos por grupo"
-            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-          >
-            <option value="ALL">Todos los grupos / llaves</option>
-            {availableGroups.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value as 'ALL' | MatchPhase)}
-            aria-label="Filtrar partidos por fase"
-            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-          >
-            <option value="ALL">Todas las fases</option>
-            {availableStages.map((stage) => (
-              <option key={stage} value={stage}>
-                {stage}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as MatchGroupByMode)}
-            aria-label="Organizar partidos por"
-            className="bg-white border border-neutral-300 px-3 py-2 text-sm"
-          >
-            <option value="none">Organizar: Sin agrupar</option>
-            <option value="disciplina">Organizar por: Disciplina</option>
-            <option value="grupo">Organizar por: Grupo</option>
-            <option value="fase">Organizar por: Fase</option>
-          </select>
-        </div>
+        <MatchFilterBar
+          idPrefix="admin-matches"
+          matches={state.matches}
+          disciplineFilter={disciplineFilter}
+          onDisciplineChange={(val) => {
+            setDisciplineFilter(val);
+            setGroupFilter('ALL');
+          }}
+          groupFilter={groupFilter}
+          onGroupChange={setGroupFilter}
+          stageFilter={stageFilter}
+          onStageChange={setStageFilter}
+          groupBy={groupBy}
+          onGroupByChange={setGroupBy}
+          filteredCount={filteredMatches.length}
+          totalCount={state.matches.length}
+          hasExtraActiveFilters={statusFilter !== 'ALL' || query.trim().length > 0}
+          onReset={() => {
+            setDisciplineFilter('ALL');
+            setGroupFilter('ALL');
+            setStageFilter('ALL');
+            setGroupBy('none');
+            setStatusFilter('ALL');
+            setQuery('');
+          }}
+          extraControls={
+            <div className="min-w-[175px] flex-1">
+              <label
+                htmlFor="admin-matches-status"
+                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+              >
+                <span>Estado</span>
+              </label>
+              <select
+                id="admin-matches-status"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'ALL' | MatchStatus)}
+                aria-label="Filtrar partidos por estado"
+                className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+              >
+                <option value="ALL">Todos los estados</option>
+                <option value="FINALIZADO">Finalizados — Partidos Pasados ({pastCount})</option>
+                <option value="EN_VIVO">En Vivo ({liveCount})</option>
+                <option value="PROGRAMADO">Programados ({scheduledCount})</option>
+              </select>
+            </div>
+          }
+        />
       </div>
 
       {/* Matches List */}
