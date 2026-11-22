@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Award, Lock, Medal, Star, Trophy } from 'lucide-react';
+import { ArrowLeftRight, Award, Lock, Medal, Star, Trophy } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import { canVoteMatchMvp, shouldRevealPublicMatchData } from '../domain/rbacEngine';
 import { buildFullPlayoffTree, computeStandings } from '../domain/tournamentEngine';
@@ -21,6 +21,19 @@ interface StandingsViewProps {
   onOpenMatchModal: (match: Match) => void;
   onToggleFavoriteTeam: (teamId: string) => void;
   onOpenAuth: () => void;
+}
+
+function formatShortMatchDate(fecha: string): string {
+  const trimmed = (fecha || '').trim();
+  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}`;
+  }
+  const dmy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    return `${dmy[1].padStart(2, '0')}/${dmy[2].padStart(2, '0')}`;
+  }
+  return trimmed || 'Fecha por confirmar';
 }
 
 export function StandingsView({
@@ -72,6 +85,7 @@ export function StandingsView({
         clasificadosPorGrupo: config.clasificadosPorGrupo,
         formatoPlayoff: config.formatoPlayoff,
         incluyeTercerLugar: config.incluyeTercerLugar !== false,
+        playoffsIdaYVuelta: Boolean(config.playoffsIdaYVuelta),
         disciplineMatches,
         teamMap,
       }),
@@ -80,6 +94,7 @@ export function StandingsView({
       config.clasificadosPorGrupo,
       config.formatoPlayoff,
       config.incluyeTercerLugar,
+      config.playoffsIdaYVuelta,
       disciplineMatches,
       teamMap,
     ]
@@ -108,6 +123,7 @@ export function StandingsView({
                 {disciplineTeams.length} equipos distribuidos equitativamente en {groups.length}{' '}
                 grupos · Clasifican {config.clasificadosPorGrupo} por grupo a llave de{' '}
                 {config.formatoPlayoff}
+                {config.playoffsIdaYVuelta ? ' (Ida y Vuelta)' : ''}
                 {config.incluyeTercerLugar !== false ? ' + 3° Lugar' : ''} · Sede:{' '}
                 {meta.sedePrincipal}
               </p>
@@ -424,12 +440,12 @@ export function StandingsView({
                   Cuadro Completo de Eliminación Directa · Top {config.formatoPlayoff}
                 </h2>
                 <p className="text-sm text-neutral-600 mt-1">
-                  Visualización completa de todas las fases eliminatorias desde{' '}
-                  {fullBracket.rounds[0]?.title ?? 'Playoffs'} hasta la Gran Final
-                  {fullBracket.thirdPlace ? ' y el Partido por el Tercer Lugar' : ''}.
+                  {fullBracket.isTwoLegged
+                    ? `Series a doble partido (Ida y Vuelta) con definición por marcador global desde ${fullBracket.rounds[0]?.title ?? 'Playoffs'} hasta la Gran Final${fullBracket.thirdPlace ? ' y el Partido por el Tercer Lugar' : ''}.`
+                    : `Visualización completa de todas las fases eliminatorias desde ${fullBracket.rounds[0]?.title ?? 'Playoffs'} hasta la Gran Final${fullBracket.thirdPlace ? ' y el Partido por el Tercer Lugar' : ''}.`}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
+              <div className="flex flex-wrap items-center sm:justify-end gap-2.5 text-xs text-neutral-600 shrink-0">
                 <span className="inline-flex items-center gap-1.5">
                   <Trophy className="w-4 h-4 text-[#707ef9]" />
                   <span>
@@ -437,6 +453,12 @@ export function StandingsView({
                     {config.formatoPlayoff}
                   </span>
                 </span>
+                {fullBracket.isTwoLegged && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#707ef9]/10 border border-[#707ef9]/35 text-[#4250d6] font-bold uppercase tracking-wider text-[11px]">
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    <span>Ida y Vuelta · Global</span>
+                  </span>
+                )}
                 {fullBracket.thirdPlace && (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#f5f6f8] border border-neutral-200 text-[#0d0d0d] font-medium">
                     <Medal className="w-3.5 h-3.5 text-[#707ef9]" />
@@ -493,20 +515,269 @@ export function StandingsView({
                 <div
                   className={`grid gap-6 ${
                     fullBracket.rounds.length === 4
-                      ? 'grid-cols-4 min-w-[1040px]'
+                      ? fullBracket.isTwoLegged
+                        ? 'grid-cols-4 min-w-[1160px]'
+                        : 'grid-cols-4 min-w-[1040px]'
                       : fullBracket.rounds.length === 3
-                      ? 'grid-cols-3 min-w-[780px]'
+                      ? fullBracket.isTwoLegged
+                        ? 'grid-cols-3 min-w-[900px]'
+                        : 'grid-cols-3 min-w-[780px]'
+                      : fullBracket.isTwoLegged
+                      ? 'grid-cols-2 min-w-[620px]'
                       : 'grid-cols-2 min-w-[540px]'
                   }`}
                 >
                   {fullBracket.rounds.map((col, colIdx) => {
                     const isFinalColumn = col.round === 'Final';
                     const renderSlotCard = (slot: PlayoffBracketSlot, accentThirdPlace = false) => {
+                      const isHomeWinner = slot.winnerSide === 'home';
+                      const isAwayWinner = slot.winnerSide === 'away';
+
+                      if (slot.isTwoLegged) {
+                        const firstLeg = slot.firstLegMatch;
+                        const secondLeg = slot.secondLegMatch;
+                        const revealFirst = firstLeg ? shouldRevealPublicMatchData(firstLeg) : false;
+                        const revealSecond = secondLeg ? shouldRevealPublicMatchData(secondLeg) : false;
+                        const votingFirst = firstLeg ? canVoteMatchMvp(firstLeg) : false;
+                        const votingSecond = secondLeg ? canVoteMatchMvp(secondLeg) : false;
+                        const anyVotingOpen = votingFirst || votingSecond;
+                        const hasRevealedFirst =
+                          revealFirst && slot.homeFirstLegScore !== undefined && slot.awayFirstLegScore !== undefined;
+                        const hasRevealedSecond =
+                          revealSecond && slot.homeSecondLegScore !== undefined && slot.awaySecondLegScore !== undefined;
+                        const hasAnyRevealedLeg = hasRevealedFirst || hasRevealedSecond;
+                        const visibleHomeGlobal =
+                          (hasRevealedFirst ? slot.homeFirstLegScore ?? 0 : 0) +
+                          (hasRevealedSecond ? slot.homeSecondLegScore ?? 0 : 0);
+                        const visibleAwayGlobal =
+                          (hasRevealedFirst ? slot.awayFirstLegScore ?? 0 : 0) +
+                          (hasRevealedSecond ? slot.awaySecondLegScore ?? 0 : 0);
+
+                        const headerStatus = slot.isAggregateDraw
+                          ? 'EMPATE GLOBAL'
+                          : hasRevealedFirst && hasRevealedSecond
+                          ? 'GLOBAL FINAL'
+                          : anyVotingOpen
+                          ? 'EN HORARIO'
+                          : hasRevealedFirst
+                          ? 'IDA JUGADA'
+                          : 'IDA Y VUELTA';
+
+                        return (
+                          <div
+                            key={slot.id}
+                            className={`border bg-white transition-colors ${
+                              accentThirdPlace
+                                ? 'border-[#0d0d0d]'
+                                : isFinalColumn
+                                ? 'border-[#707ef9] shadow-sm'
+                                : 'border-neutral-300'
+                            }`}
+                          >
+                            <div
+                              className={`px-3.5 py-2 border-b flex items-center justify-between gap-2 text-[11px] ${
+                                accentThirdPlace
+                                  ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
+                                  : isFinalColumn
+                                  ? 'bg-[#707ef9] text-white border-[#707ef9]'
+                                  : 'bg-[#f5f6f8] text-neutral-600 border-neutral-200'
+                              }`}
+                            >
+                              <span className="font-display font-bold uppercase tracking-wider truncate">
+                                {accentThirdPlace
+                                  ? '3° Lugar · Ida y Vuelta'
+                                  : isFinalColumn
+                                  ? 'Gran Final · Ida y Vuelta'
+                                  : `${slot.round} · Llave ${slot.slot}`}
+                              </span>
+                              <span className="tabular-nums shrink-0 opacity-90 font-semibold">
+                                {headerStatus}
+                              </span>
+                            </div>
+
+                            {/* Column header for IDA / VTA / GLB */}
+                            <div className="grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-1 bg-[#f9fafb] border-b border-neutral-200 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                              <span>Equipo</span>
+                              <span className="text-center">Ida</span>
+                              <span className="text-center">Vta</span>
+                              <span className="text-center font-bold text-[#0d0d0d]">Glb</span>
+                            </div>
+
+                            <div className="divide-y divide-neutral-200">
+                              {/* Home / Seed A Row */}
+                              <div
+                                className={`grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-2.5 ${
+                                  isHomeWinner ? 'bg-[#707ef9]/10' : ''
+                                }`}
+                              >
+                                <div className="min-w-0 pr-1">
+                                  <p
+                                    className={`text-sm truncate ${
+                                      isHomeWinner
+                                        ? 'font-bold text-[#0d0d0d]'
+                                        : slot.homeTeamId
+                                        ? 'font-medium text-[#0d0d0d]'
+                                        : 'text-neutral-500 italic'
+                                    }`}
+                                  >
+                                    {slot.homeTeamName}
+                                  </p>
+                                  <p className="text-[10px] font-mono text-neutral-400 truncate">
+                                    {slot.homeSeed}
+                                  </p>
+                                </div>
+
+                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
+                                  {hasRevealedFirst ? (
+                                    slot.homeFirstLegScore
+                                  ) : votingFirst ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+
+                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
+                                  {hasRevealedSecond ? (
+                                    slot.homeSecondLegScore
+                                  ) : votingSecond ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+
+                                <span
+                                  className={`text-center font-display text-xl tabular-nums flex justify-center ${
+                                    isHomeWinner
+                                      ? 'text-[#707ef9] font-bold'
+                                      : 'text-[#0d0d0d] font-bold'
+                                  }`}
+                                >
+                                  {hasAnyRevealedLeg ? (
+                                    visibleHomeGlobal
+                                  ) : anyVotingOpen ? (
+                                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+                              </div>
+
+                              {/* Away / Seed B Row */}
+                              <div
+                                className={`grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-2.5 ${
+                                  isAwayWinner ? 'bg-[#707ef9]/10' : ''
+                                }`}
+                              >
+                                <div className="min-w-0 pr-1">
+                                  <p
+                                    className={`text-sm truncate ${
+                                      isAwayWinner
+                                        ? 'font-bold text-[#0d0d0d]'
+                                        : slot.awayTeamId
+                                        ? 'font-medium text-[#0d0d0d]'
+                                        : 'text-neutral-500 italic'
+                                    }`}
+                                  >
+                                    {slot.awayTeamName}
+                                  </p>
+                                  <p className="text-[10px] font-mono text-neutral-400 truncate">
+                                    {slot.awaySeed}
+                                  </p>
+                                </div>
+
+                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
+                                  {hasRevealedFirst ? (
+                                    slot.awayFirstLegScore
+                                  ) : votingFirst ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+
+                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
+                                  {hasRevealedSecond ? (
+                                    slot.awaySecondLegScore
+                                  ) : votingSecond ? (
+                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+
+                                <span
+                                  className={`text-center font-display text-xl tabular-nums flex justify-center ${
+                                    isAwayWinner
+                                      ? 'text-[#707ef9] font-bold'
+                                      : 'text-[#0d0d0d] font-bold'
+                                  }`}
+                                >
+                                  {hasAnyRevealedLeg ? (
+                                    visibleAwayGlobal
+                                  ) : anyVotingOpen ? (
+                                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            {slot.isAggregateDraw && (
+                              <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-200 text-[10px] font-medium text-amber-900">
+                                Empate en marcador global — definición por penales / criterio oficial
+                              </div>
+                            )}
+
+                            {/* Interactive Ida & Vuelta Footer Buttons */}
+                            <div className="grid grid-cols-2 divide-x divide-neutral-200 border-t border-neutral-200 bg-[#f9fafb] text-[11px]">
+                              {firstLeg ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenMatchModal(firstLeg)}
+                                  className="px-2.5 py-2 text-left hover:bg-[#707ef9]/10 transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
+                                >
+                                  <span className="truncate text-neutral-700 font-medium">
+                                    Ida · {formatShortMatchDate(firstLeg.fecha)}
+                                  </span>
+                                  <span className="text-[#707ef9] font-bold shrink-0">
+                                    {votingFirst ? 'MVP →' : '→'}
+                                  </span>
+                                </button>
+                              ) : (
+                                <div className="px-2.5 py-2 text-neutral-400 truncate">
+                                  Ida · Por programar
+                                </div>
+                              )}
+
+                              {secondLeg ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenMatchModal(secondLeg)}
+                                  className="px-2.5 py-2 text-left hover:bg-[#707ef9]/10 transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
+                                >
+                                  <span className="truncate text-neutral-700 font-medium">
+                                    Vta · {formatShortMatchDate(secondLeg.fecha)}
+                                  </span>
+                                  <span className="text-[#707ef9] font-bold shrink-0">
+                                    {votingSecond ? 'MVP →' : '→'}
+                                  </span>
+                                </button>
+                              ) : (
+                                <div className="px-2.5 py-2 text-neutral-400 truncate">
+                                  Vta · Por programar
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       const linkedMatch = slot.match;
                       const revealScore = linkedMatch ? shouldRevealPublicMatchData(linkedMatch) : false;
                       const votingOpen = linkedMatch ? canVoteMatchMvp(linkedMatch) : false;
-                      const isHomeWinner = slot.winnerSide === 'home';
-                      const isAwayWinner = slot.winnerSide === 'away';
                       const isClickable = Boolean(linkedMatch);
 
                       const cardInner = (
@@ -541,7 +812,7 @@ export function StandingsView({
                                   ? 'EN HORARIO'
                                   : revealScore
                                   ? 'FINAL'
-                                  : `${linkedMatch.fecha.slice(5)} ${linkedMatch.hora}`
+                                  : `${formatShortMatchDate(linkedMatch.fecha)} ${linkedMatch.hora}`
                                 : 'Proyectado'}
                             </span>
                           </div>
@@ -658,7 +929,12 @@ export function StandingsView({
                             {col.title}
                           </span>
                           <span className="text-[11px] text-neutral-400 tabular-nums">
-                            {col.slots.length} {col.slots.length === 1 ? 'partido' : 'llaves'}
+                            {col.slots.length}{' '}
+                            {col.slots.length === 1
+                              ? fullBracket.isTwoLegged
+                                ? 'llave'
+                                : 'partido'
+                              : 'llaves'}
                           </span>
                         </div>
 

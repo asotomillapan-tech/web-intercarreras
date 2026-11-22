@@ -170,6 +170,8 @@ export const INITIAL_CONFIGS: Record<DisciplineId, DisciplineFormatConfig> = {
     numGrupos: 4,
     clasificadosPorGrupo: 2,
     formatoPlayoff: 8,
+    incluyeTercerLugar: true,
+    playoffsIdaYVuelta: true,
     inscripcionesAbiertas: true,
     transferenciasAbiertas: false,
     maxTransferenciasPorEquipo: 2,

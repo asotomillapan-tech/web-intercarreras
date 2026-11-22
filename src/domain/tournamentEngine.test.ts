@@ -546,4 +546,137 @@ test('buildFullPlayoffTree generates all elimination rounds, propagates winners 
   assert.equal(prog[0].label, '3° Lugar');
 });
 
+test('buildFullPlayoffTree supports Ida y Vuelta (two-legged) ties with swapped home/away legs and global aggregate', () => {
+  const standingsByGroup = {
+    'Grupo A': [
+      { teamId: 'a1', teamName: 'Alpha', sigla: 'ALP', carrera: 'Med', groupName: 'Grupo A', pj: 3, pg: 3, pe: 0, pp: 0, favor: 9, contra: 1, diferencia: 8, puntos: 9, racha: [] },
+      { teamId: 'a2', teamName: 'Beta', sigla: 'BET', carrera: 'Der', groupName: 'Grupo A', pj: 3, pg: 2, pe: 0, pp: 1, favor: 6, contra: 3, diferencia: 3, puntos: 6, racha: [] },
+    ],
+    'Grupo B': [
+      { teamId: 'b1', teamName: 'Gamma', sigla: 'GAM', carrera: 'Ing', groupName: 'Grupo B', pj: 3, pg: 3, pe: 0, pp: 0, favor: 7, contra: 2, diferencia: 5, puntos: 9, racha: [] },
+      { teamId: 'b2', teamName: 'Delta', sigla: 'DEL', carrera: 'Kin', groupName: 'Grupo B', pj: 3, pg: 1, pe: 1, pp: 1, favor: 4, contra: 4, diferencia: 0, puntos: 4, racha: [] },
+    ],
+  };
+
+  const teamMap = new Map<string, Pick<Team, 'nombre'>>([
+    ['a1', { nombre: 'Alpha' }],
+    ['a2', { nombre: 'Beta' }],
+    ['b1', { nombre: 'Gamma' }],
+    ['b2', { nombre: 'Delta' }],
+  ]);
+
+  const makeLeg = (overrides: Partial<Match>): Match => ({
+    id: 'leg',
+    disciplineId: 'f7-h-1',
+    groupName: 'Playoffs',
+    fase: 'Semifinal',
+    playoffLeg: 'IDA',
+    jornada: 1,
+    fecha: '2026-11-20',
+    hora: '19:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a1',
+    awayTeamId: 'b2',
+    homeScore: 0,
+    awayScore: 0,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 0, away: 0 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+    ...overrides,
+  });
+
+  // 1) Only Ida finalized -> must NOT advance a winner yet
+  const treeOnlyIda = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 4,
+    incluyeTercerLugar: true,
+    playoffsIdaYVuelta: true,
+    disciplineMatches: [
+      makeLeg({ id: 'sf1-ida', fase: 'Semifinal', playoffLeg: 'IDA', homeTeamId: 'a1', awayTeamId: 'b2', homeScore: 2, awayScore: 1, status: 'FINALIZADO' }),
+      makeLeg({ id: 'sf1-vta', fase: 'Semifinal', playoffLeg: 'VUELTA', fecha: '2026-11-27', homeTeamId: 'b2', awayTeamId: 'a1', homeScore: 0, awayScore: 0, status: 'PROGRAMADO' }),
+    ],
+    teamMap,
+  });
+
+  assert.equal(treeOnlyIda.isTwoLegged, true);
+  const sf1Pending = treeOnlyIda.rounds[0].slots[0];
+  assert.equal(sf1Pending.isTwoLegged, true);
+  assert.equal(sf1Pending.homeFirstLegScore, 2);
+  assert.equal(sf1Pending.awayFirstLegScore, 1);
+  assert.equal(sf1Pending.homeSecondLegScore, undefined);
+  assert.equal(sf1Pending.winnerSide, null);
+  assert.equal(treeOnlyIda.rounds[1].slots[0].homeTeamId, undefined);
+
+  // 2) Both legs finalized with swapped localía:
+  // SF1: Ida Alpha 2-1 Delta, Vuelta Delta 3-0 Alpha => Global Alpha 2 - 4 Delta (Delta advances!)
+  // SF2: Ida Gamma 1-1 Beta, Vuelta Beta 1-1 Gamma => Global Gamma 2 - 2 Beta (Aggregate draw, no auto-winner)
+  const treeBothLegs = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 4,
+    incluyeTercerLugar: true,
+    playoffsIdaYVuelta: true,
+    disciplineMatches: [
+      makeLeg({ id: 'sf1-ida', fase: 'Semifinal', playoffLeg: 'IDA', fecha: '2026-11-20', homeTeamId: 'a1', awayTeamId: 'b2', homeScore: 2, awayScore: 1 }),
+      makeLeg({ id: 'sf1-vta', fase: 'Semifinal', playoffLeg: 'VUELTA', fecha: '2026-11-27', homeTeamId: 'b2', awayTeamId: 'a1', homeScore: 3, awayScore: 0 }),
+      makeLeg({ id: 'sf2-ida', fase: 'Semifinal', playoffLeg: 'IDA', fecha: '2026-11-20', homeTeamId: 'b1', awayTeamId: 'a2', homeScore: 1, awayScore: 1 }),
+      makeLeg({ id: 'sf2-vta', fase: 'Semifinal', playoffLeg: 'VUELTA', fecha: '2026-11-27', homeTeamId: 'a2', awayTeamId: 'b1', homeScore: 1, awayScore: 1 }),
+    ],
+    teamMap,
+  });
+
+  const sf1Done = treeBothLegs.rounds[0].slots[0];
+  assert.equal(sf1Done.homeTeamId, 'a1');
+  assert.equal(sf1Done.awayTeamId, 'b2');
+  assert.equal(sf1Done.homeFirstLegScore, 2);
+  assert.equal(sf1Done.awayFirstLegScore, 1);
+  assert.equal(sf1Done.homeSecondLegScore, 0);
+  assert.equal(sf1Done.awaySecondLegScore, 3);
+  assert.equal(sf1Done.homeScore, 2);
+  assert.equal(sf1Done.awayScore, 4);
+  assert.equal(sf1Done.winnerSide, 'away');
+  assert.equal(sf1Done.isAggregateDraw, false);
+  // Delta advanced to Final, Alpha dropped to Tercer Lugar
+  assert.equal(treeBothLegs.rounds[1].slots[0].homeTeamId, 'b2');
+  assert.equal(treeBothLegs.thirdPlace?.homeTeamId, 'a1');
+
+  const sf2Draw = treeBothLegs.rounds[0].slots[1];
+  assert.equal(sf2Draw.homeScore, 2);
+  assert.equal(sf2Draw.awayScore, 2);
+  assert.equal(sf2Draw.winnerSide, null);
+  assert.equal(sf2Draw.isAggregateDraw, true);
+  assert.equal(treeBothLegs.rounds[1].slots[0].awayTeamId, undefined);
+
+  // 3) DD/MM/YYYY dates from Google Sheets without explicit playoffLeg sort chronologically
+  const treeDmy = buildFullPlayoffTree({
+    standingsByGroup,
+    clasificadosPorGrupo: 2,
+    formatoPlayoff: 4,
+    incluyeTercerLugar: false,
+    playoffsIdaYVuelta: true,
+    disciplineMatches: [
+      makeLeg({ id: 'dmy-vta', fase: 'Semifinal', playoffLeg: undefined, fecha: '02/11/2026', homeTeamId: 'b2', awayTeamId: 'a1', homeScore: 1, awayScore: 4 }),
+      makeLeg({ id: 'dmy-ida', fase: 'Semifinal', playoffLeg: undefined, fecha: '29/10/2026', homeTeamId: 'a1', awayTeamId: 'b2', homeScore: 3, awayScore: 2 }),
+    ],
+    teamMap,
+  });
+  const dmySlot = treeDmy.rounds[0].slots[0];
+  assert.equal(dmySlot.firstLegMatch?.id, 'dmy-ida');
+  assert.equal(dmySlot.secondLegMatch?.id, 'dmy-vta');
+  assert.equal(dmySlot.homeFirstLegScore, 3);
+  assert.equal(dmySlot.awayFirstLegScore, 2);
+  assert.equal(dmySlot.homeSecondLegScore, 4);
+  assert.equal(dmySlot.awaySecondLegScore, 1);
+  assert.equal(dmySlot.homeScore, 7);
+  assert.equal(dmySlot.awayScore, 3);
+  assert.equal(dmySlot.winnerSide, 'home');
+});
+
+
 

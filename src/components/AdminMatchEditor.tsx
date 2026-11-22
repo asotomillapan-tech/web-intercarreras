@@ -14,6 +14,7 @@ import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import type {
   DisciplineId,
   Match,
+  MatchPlayoffLeg,
   MatchStatus,
   PeriodScore,
   TournamentState,
@@ -35,6 +36,13 @@ const MATCH_PHASES: Match['fase'][] = [
   'Final',
 ];
 
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const parts = isoDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return isoDate;
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days));
+  return d.toISOString().slice(0, 10);
+}
+
 export function AdminMatchEditor({
   state,
   initialEditMatchId,
@@ -47,6 +55,7 @@ export function AdminMatchEditor({
 
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [isCreatingMatch, setIsCreatingMatch] = useState(false);
+  const [createReturnLeg, setCreateReturnLeg] = useState(true);
   const [correctionNote, setCorrectionNote] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -116,6 +125,7 @@ export function AdminMatchEditor({
       .filter((t) => t.disciplineId === defaultDisc)
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     const discMeta = DISCIPLINE_MAP[defaultDisc];
+    const isTwoLegged = Boolean(state.configs[defaultDisc]?.playoffsIdaYVuelta);
     const defaultRef =
       discMeta.sportType === 'futbol7'
         ? 'ref-f7-1'
@@ -124,11 +134,13 @@ export function AdminMatchEditor({
         : 'ref-bk-1';
 
     setIsCreatingMatch(true);
+    setCreateReturnLeg(isTwoLegged);
     setEditingMatch({
       id: `m-${defaultDisc}-${Date.now()}`,
       disciplineId: defaultDisc,
       groupName: 'Playoffs',
-      fase: 'Tercer Lugar',
+      fase: isTwoLegged ? 'Cuartos' : 'Tercer Lugar',
+      playoffLeg: isTwoLegged ? 'IDA' : 'UNICO',
       jornada: 1,
       fecha: new Date().toISOString().slice(0, 10),
       hora: '19:00',
@@ -152,6 +164,8 @@ export function AdminMatchEditor({
   };
 
   const handleCreateDisciplineChange = (nextDiscId: DisciplineId) => {
+    const isTwoLegged = Boolean(state.configs[nextDiscId]?.playoffsIdaYVuelta);
+    setCreateReturnLeg(isTwoLegged);
     setEditingMatch((prev) => {
       if (!prev) return prev;
       const discTeams = state.teams
@@ -167,6 +181,7 @@ export function AdminMatchEditor({
       return {
         ...prev,
         disciplineId: nextDiscId,
+        playoffLeg: prev.fase === 'Grupos' ? undefined : isTwoLegged ? 'IDA' : 'UNICO',
         cancha: discMeta.sedePrincipal,
         homeTeamId: discTeams[0]?.id ?? '',
         awayTeamId: discTeams[1]?.id ?? '',
@@ -228,8 +243,15 @@ export function AdminMatchEditor({
     const finalHomeScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.homeScore) || 0)));
     const finalAwayScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.awayScore) || 0)));
 
+    const normalizedLeg: MatchPlayoffLeg | undefined =
+      editingMatch.fase === 'Grupos'
+        ? undefined
+        : editingMatch.playoffLeg ??
+          (state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta ? 'IDA' : 'UNICO');
+
     const savedMatch: Match = {
       ...editingMatch,
+      playoffLeg: normalizedLeg,
       groupName: editingMatch.groupName.trim() || (editingMatch.fase === 'Grupos' ? 'Grupo A' : 'Playoffs'),
       homeScore: finalHomeScore,
       awayScore: finalAwayScore,
@@ -253,11 +275,51 @@ export function AdminMatchEditor({
           }),
     };
 
+    const shouldCreateReturnLeg =
+      isCreatingMatch &&
+      Boolean(onAddMatch) &&
+      createReturnLeg &&
+      savedMatch.fase !== 'Grupos' &&
+      savedMatch.playoffLeg === 'IDA' &&
+      Boolean(state.configs[savedMatch.disciplineId]?.playoffsIdaYVuelta);
+
     if (isCreatingMatch && onAddMatch) {
       onAddMatch(savedMatch);
-      setSavedMsg(
-        `Encuentro programado en Firestore (${savedMatch.fase}): ${homeName} vs ${awayName} · ${savedMatch.fecha} ${savedMatch.hora}.`
-      );
+      if (shouldCreateReturnLeg) {
+        const returnDate = addDaysToIsoDate(savedMatch.fecha, 7);
+        const returnMatch: Match = {
+          ...savedMatch,
+          id: `${savedMatch.id}-vta`,
+          playoffLeg: 'VUELTA',
+          homeTeamId: savedMatch.awayTeamId,
+          awayTeamId: savedMatch.homeTeamId,
+          fecha: returnDate,
+          homeScore: 0,
+          awayScore: 0,
+          status: 'PROGRAMADO',
+          periodLabel: 'Por iniciar',
+          clock: '00:00',
+          periods: [],
+          fouls: { home: 0, away: 0 },
+          timeouts: { home: 0, away: 0 },
+          events: [],
+          scoresheetValidation: undefined,
+        };
+        onAddMatch(returnMatch);
+        setSavedMsg(
+          `Llave Ida y Vuelta programada en Firestore (${savedMatch.fase}): Ida ${savedMatch.fecha} (${homeName} vs ${awayName}) y Vuelta ${returnDate} (${awayName} vs ${homeName}).`
+        );
+      } else {
+        const legSuffix =
+          savedMatch.playoffLeg === 'IDA'
+            ? ' · Ida'
+            : savedMatch.playoffLeg === 'VUELTA'
+            ? ' · Vuelta'
+            : '';
+        setSavedMsg(
+          `Encuentro programado en Firestore (${savedMatch.fase}${legSuffix}): ${homeName} vs ${awayName} · ${savedMatch.fecha} ${savedMatch.hora}.`
+        );
+      }
     } else {
       onUpdateMatch(savedMatch);
       setSavedMsg(
@@ -511,9 +573,18 @@ export function AdminMatchEditor({
               <select
                 id="edit-m-fase"
                 value={editingMatch.fase}
-                onChange={(e) =>
-                  setEditingMatch({ ...editingMatch, fase: e.target.value as Match['fase'] })
-                }
+                onChange={(e) => {
+                  const nextFase = e.target.value as Match['fase'];
+                  const isTwoLegged = Boolean(state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta);
+                  setEditingMatch({
+                    ...editingMatch,
+                    fase: nextFase,
+                    playoffLeg:
+                      nextFase === 'Grupos'
+                        ? undefined
+                        : editingMatch.playoffLeg ?? (isTwoLegged ? 'IDA' : 'UNICO'),
+                  });
+                }}
                 className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
               >
                 {MATCH_PHASES.map((f) => (
@@ -523,6 +594,51 @@ export function AdminMatchEditor({
                 ))}
               </select>
             </div>
+
+            {editingMatch.fase !== 'Grupos' && (
+              <div>
+                <label htmlFor="edit-m-leg" className="block text-xs font-medium text-neutral-700 mb-1">
+                  Instancia de Llave (Ida / Vuelta)
+                </label>
+                <select
+                  id="edit-m-leg"
+                  value={
+                    editingMatch.playoffLeg ??
+                    (state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta ? 'IDA' : 'UNICO')
+                  }
+                  onChange={(e) =>
+                    setEditingMatch({
+                      ...editingMatch,
+                      playoffLeg: e.target.value as MatchPlayoffLeg,
+                    })
+                  }
+                  className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                >
+                  <option value="IDA">Partido de Ida</option>
+                  <option value="VUELTA">Partido de Vuelta</option>
+                  <option value="UNICO">Partido Único</option>
+                </select>
+              </div>
+            )}
+
+            {isCreatingMatch &&
+              editingMatch.fase !== 'Grupos' &&
+              (editingMatch.playoffLeg ?? 'IDA') === 'IDA' &&
+              Boolean(state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta) && (
+                <div className="sm:col-span-2 lg:col-span-3 bg-[#707ef9]/5 border border-[#707ef9]/30 px-3.5 py-2.5">
+                  <label className="inline-flex items-center gap-2.5 text-xs font-medium text-[#0d0d0d] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createReturnLeg}
+                      onChange={(e) => setCreateReturnLeg(e.target.checked)}
+                      className="accent-[#707ef9] w-4 h-4"
+                    />
+                    <span>
+                      Crear automáticamente también el partido de Vuelta con localía invertida (+7 días)
+                    </span>
+                  </label>
+                </div>
+              )}
 
             <div>
               <label htmlFor="edit-m-group" className="block text-xs font-medium text-neutral-700 mb-1">
@@ -772,6 +888,11 @@ export function AdminMatchEditor({
                     <span className="text-neutral-500">
                       {m.fase} · J{m.jornada} · {m.groupName}
                     </span>
+                    {m.fase !== 'Grupos' && (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA') && (
+                      <span className="px-1.5 py-0.5 bg-[#707ef9]/15 text-[#4250d6] font-display font-bold uppercase tracking-wider text-[10px]">
+                        {m.playoffLeg === 'IDA' ? 'IDA' : 'VUELTA'}
+                      </span>
+                    )}
                     <span className="text-neutral-400 inline-flex items-center gap-1 tabular-nums">
                       <Calendar className="w-3 h-3" />
                       {m.fecha} {m.hora}

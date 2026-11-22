@@ -2104,6 +2104,7 @@ export function AdminRefereeView({
                       </p>
                       <p className={`text-xs mt-0.5 ${active ? 'text-neutral-300' : 'text-neutral-500'}`}>
                         {cfg.numGrupos} grupos · Playoff Top {cfg.formatoPlayoff}
+                        {cfg.playoffsIdaYVuelta ? ' · Ida y Vuelta' : ''}
                       </p>
                     </div>
                     <span className="font-display text-base font-bold tabular-nums shrink-0">
@@ -2289,6 +2290,18 @@ export function AdminRefereeView({
                     className="accent-[#707ef9] w-4 h-4"
                   />
                   <span>Incluir partido por el Tercer Lugar en Playoffs</span>
+                </label>
+
+                <label className="inline-flex items-center gap-2.5 text-sm font-medium text-[#0d0d0d] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(draftConfig.playoffsIdaYVuelta)}
+                    onChange={(e) =>
+                      setDraftConfig((c) => ({ ...c, playoffsIdaYVuelta: e.target.checked }))
+                    }
+                    className="accent-[#707ef9] w-4 h-4"
+                  />
+                  <span>Playoffs con partidos de Ida y Vuelta (marcador global)</span>
                 </label>
               </div>
 

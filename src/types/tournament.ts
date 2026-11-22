@@ -22,6 +22,8 @@ export type MatchPhase =
   | 'Tercer Lugar'
   | 'Final';
 
+export type MatchPlayoffLeg = 'IDA' | 'VUELTA' | 'UNICO';
+
 export type TournamentStage = 'INSCRIPCIONES' | 'FASE_GRUPOS' | 'TRANSFERENCIAS' | 'PLAYOFFS';
 
 export interface DisciplineMeta {
@@ -45,6 +47,7 @@ export interface DisciplineFormatConfig {
   clasificadosPorGrupo: number;
   formatoPlayoff: 4 | 8 | 16;
   incluyeTercerLugar?: boolean;
+  playoffsIdaYVuelta?: boolean;
   inscripcionesAbiertas: boolean;
   transferenciasAbiertas: boolean;
   maxTransferenciasPorEquipo: number;
@@ -162,6 +165,7 @@ export interface Match {
   disciplineId: DisciplineId;
   groupName: string;
   fase: MatchPhase;
+  playoffLeg?: MatchPlayoffLeg;
   jornada: number;
   fecha: string;
   hora: string;
@@ -250,8 +254,16 @@ export interface PlayoffMatchup {
 
 export interface PlayoffBracketSlot extends PlayoffMatchup {
   match?: Match;
+  isTwoLegged?: boolean;
+  firstLegMatch?: Match;
+  secondLegMatch?: Match;
+  homeFirstLegScore?: number;
+  awayFirstLegScore?: number;
+  homeSecondLegScore?: number;
+  awaySecondLegScore?: number;
   homeScore?: number;
   awayScore?: number;
+  isAggregateDraw?: boolean;
   winnerSide?: 'home' | 'away' | null;
   status: 'PROYECTADO' | MatchStatus;
 }
@@ -265,6 +277,7 @@ export interface PlayoffRoundColumn {
 export interface FullPlayoffBracket {
   rounds: PlayoffRoundColumn[];
   thirdPlace: PlayoffBracketSlot | null;
+  isTwoLegged?: boolean;
   championName?: string;
   thirdPlaceWinnerName?: string;
 }

@@ -74,7 +74,13 @@ export function MatchMvpModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                {disc.nombre} · {match.groupName} · Jornada {match.jornada}
+                {disc.nombre} · {match.fase !== 'Grupos' ? match.fase : match.groupName}
+                {match.fase !== 'Grupos' && match.playoffLeg === 'IDA'
+                  ? ' · Partido de Ida'
+                  : match.fase !== 'Grupos' && match.playoffLeg === 'VUELTA'
+                  ? ' · Partido de Vuelta'
+                  : ''}{' '}
+                · Jornada {match.jornada}
               </p>
               <h2
                 id="match-mvp-modal-title"

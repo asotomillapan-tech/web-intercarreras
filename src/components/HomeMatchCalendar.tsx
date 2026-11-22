@@ -543,6 +543,12 @@ export function HomeMatchCalendar({
                                   {phaseBadge}
                                 </span>
                               )}
+                              {isKnockout &&
+                                (match.playoffLeg === 'IDA' || match.playoffLeg === 'VUELTA') && (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-display font-bold uppercase tracking-wider bg-[#0d0d0d] text-white">
+                                    {match.playoffLeg === 'IDA' ? 'Ida' : 'Vuelta'}
+                                  </span>
+                                )}
                             </div>
 
                             <p className="font-display text-lg font-bold uppercase tracking-wide text-[#0d0d0d] leading-snug">

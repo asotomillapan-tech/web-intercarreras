@@ -171,6 +171,9 @@
         "incluyeTercerLugar": {
           "type": "boolean"
         },
+        "playoffsIdaYVuelta": {
+          "type": "boolean"
+        },
         "inscripcionesAbiertas": {
           "type": "boolean"
         },
@@ -420,6 +423,10 @@
         "fase": {
           "type": "string",
           "enum": ["Grupos", "Octavos", "Cuartos", "Semifinal", "Tercer Lugar", "Final"]
+        },
+        "playoffLeg": {
+          "type": "string",
+          "enum": ["IDA", "VUELTA", "UNICO"]
         },
         "jornada": {
           "type": "integer"

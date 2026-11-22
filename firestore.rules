@@ -232,6 +232,7 @@ service cloud.firestore {
           'clasificadosPorGrupo',
           'formatoPlayoff',
           'incluyeTercerLugar',
+          'playoffsIdaYVuelta',
           'inscripcionesAbiertas',
           'transferenciasAbiertas',
           'maxTransferenciasPorEquipo',
@@ -245,6 +246,7 @@ service cloud.firestore {
         && data.clasificadosPorGrupo is int && data.clasificadosPorGrupo >= 1 && data.clasificadosPorGrupo <= 8
         && data.formatoPlayoff in [4, 8, 16]
         && (!('incluyeTercerLugar' in data) || data.incluyeTercerLugar is bool)
+        && (!('playoffsIdaYVuelta' in data) || data.playoffsIdaYVuelta is bool)
         && data.inscripcionesAbiertas is bool
         && data.transferenciasAbiertas is bool
         && data.maxTransferenciasPorEquipo is int && data.maxTransferenciasPorEquipo >= 0 && data.maxTransferenciasPorEquipo <= 10
@@ -431,6 +433,7 @@ service cloud.firestore {
           'disciplineId',
           'groupName',
           'fase',
+          'playoffLeg',
           'jornada',
           'fecha',
           'hora',
@@ -455,6 +458,7 @@ service cloud.firestore {
         && isValidDiscipline(data.disciplineId)
         && data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 40
         && data.fase in ['Grupos', 'Octavos', 'Cuartos', 'Semifinal', 'Tercer Lugar', 'Final']
+        && (!('playoffLeg' in data) || data.playoffLeg in ['IDA', 'VUELTA', 'UNICO'])
         && data.jornada is int && data.jornada >= 1 && data.jornada <= 50
         && data.fecha is string && data.fecha.size() >= 8 && data.fecha.size() <= 20
         && data.hora is string && data.hora.size() >= 4 && data.hora.size() <= 12
@@ -811,6 +815,7 @@ service cloud.firestore {
           'clasificadosPorGrupo',
           'formatoPlayoff',
           'incluyeTercerLugar',
+          'playoffsIdaYVuelta',
           'inscripcionesAbiertas',
           'transferenciasAbiertas',
           'maxTransferenciasPorEquipo',
@@ -1089,6 +1094,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'groupName',
               'fase',
+              'playoffLeg',
               'jornada',
               'fecha',
               'hora',

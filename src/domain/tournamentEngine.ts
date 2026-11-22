@@ -377,6 +377,13 @@ function getRoundSequence(formatoPlayoff: 4 | 8 | 16): Array<'Octavos' | 'Cuarto
   return ['Semifinal', 'Final'];
 }
 
+function getScoreForTeamInMatch(match: Match, teamId?: string): number | undefined {
+  if (!teamId) return undefined;
+  if (match.homeTeamId === teamId) return match.homeScore;
+  if (match.awayTeamId === teamId) return match.awayScore;
+  return undefined;
+}
+
 function resolveSlotOutcome(
   slot: PlayoffBracketSlot,
   teamMap: Map<string, Pick<Team, 'nombre'>>
@@ -403,6 +410,7 @@ function resolveSlotOutcome(
 
   return {
     ...slot,
+    isTwoLegged: false,
     homeSeed,
     awaySeed,
     homeTeamId,
@@ -413,6 +421,119 @@ function resolveSlotOutcome(
     awayScore: m.status === 'PROGRAMADO' ? undefined : m.awayScore,
     winnerSide,
     status: m.status,
+  };
+}
+
+function resolveTwoLeggedSlotOutcome(
+  slot: PlayoffBracketSlot,
+  legMatches: Match[],
+  teamMap: Map<string, Pick<Team, 'nombre'>>
+): PlayoffBracketSlot {
+  if (legMatches.length === 0) {
+    return { ...slot, isTwoLegged: true };
+  }
+
+  let firstLegMatch: Match | undefined;
+  let secondLegMatch: Match | undefined;
+
+  if (legMatches.length === 1) {
+    const only = legMatches[0];
+    if (only.playoffLeg === 'VUELTA') {
+      secondLegMatch = only;
+    } else {
+      firstLegMatch = only;
+    }
+  } else {
+    const explicitIda = legMatches.find((m) => m.playoffLeg === 'IDA');
+    const explicitVuelta = legMatches.find((m) => m.playoffLeg === 'VUELTA' && m.id !== explicitIda?.id);
+    if (explicitIda || explicitVuelta) {
+      firstLegMatch = explicitIda ?? legMatches.find((m) => m.id !== explicitVuelta?.id);
+      secondLegMatch = explicitVuelta ?? legMatches.find((m) => m.id !== firstLegMatch?.id);
+    } else {
+      firstLegMatch = legMatches[0];
+      secondLegMatch = legMatches[1];
+    }
+  }
+
+  const refMatch = firstLegMatch ?? secondLegMatch!;
+  // Preserve seeded slot orientation if known; otherwise inherit from Ida (or available leg)
+  const homeTeamId = slot.homeTeamId ?? refMatch.homeTeamId;
+  const awayTeamId =
+    slot.awayTeamId ??
+    (refMatch.homeTeamId === homeTeamId ? refMatch.awayTeamId : refMatch.homeTeamId);
+
+  const homeTeamName =
+    (homeTeamId ? teamMap.get(homeTeamId)?.nombre : undefined) ?? slot.homeTeamName;
+  const awayTeamName =
+    (awayTeamId ? teamMap.get(awayTeamId)?.nombre : undefined) ?? slot.awayTeamName;
+
+  const leg1Played = Boolean(firstLegMatch && firstLegMatch.status !== 'PROGRAMADO');
+  const leg2Played = Boolean(secondLegMatch && secondLegMatch.status !== 'PROGRAMADO');
+
+  const homeFirstLegScore =
+    leg1Played && firstLegMatch ? getScoreForTeamInMatch(firstLegMatch, homeTeamId) : undefined;
+  const awayFirstLegScore =
+    leg1Played && firstLegMatch ? getScoreForTeamInMatch(firstLegMatch, awayTeamId) : undefined;
+
+  const homeSecondLegScore =
+    leg2Played && secondLegMatch ? getScoreForTeamInMatch(secondLegMatch, homeTeamId) : undefined;
+  const awaySecondLegScore =
+    leg2Played && secondLegMatch ? getScoreForTeamInMatch(secondLegMatch, awayTeamId) : undefined;
+
+  const hasAnyScore = homeFirstLegScore !== undefined || homeSecondLegScore !== undefined;
+  const aggHome = hasAnyScore
+    ? (homeFirstLegScore ?? 0) + (homeSecondLegScore ?? 0)
+    : undefined;
+  const aggAway = hasAnyScore
+    ? (awayFirstLegScore ?? 0) + (awaySecondLegScore ?? 0)
+    : undefined;
+
+  const isSingleUnicoMatch =
+    legMatches.length === 1 && legMatches[0].playoffLeg === 'UNICO';
+  const bothLegsFinalized =
+    Boolean(firstLegMatch && secondLegMatch) &&
+    firstLegMatch!.status === 'FINALIZADO' &&
+    secondLegMatch!.status === 'FINALIZADO';
+
+  let status: PlayoffBracketSlot['status'] = 'PROGRAMADO';
+  if (firstLegMatch?.status === 'EN_VIVO' || secondLegMatch?.status === 'EN_VIVO') {
+    status = 'EN_VIVO';
+  } else if (bothLegsFinalized || (isSingleUnicoMatch && refMatch.status === 'FINALIZADO')) {
+    status = 'FINALIZADO';
+  }
+
+  let winnerSide: 'home' | 'away' | null = null;
+  let isAggregateDraw = false;
+
+  if (status === 'FINALIZADO' && aggHome !== undefined && aggAway !== undefined) {
+    if (aggHome > aggAway) {
+      winnerSide = 'home';
+    } else if (aggAway > aggHome) {
+      winnerSide = 'away';
+    } else {
+      isAggregateDraw = true;
+    }
+  }
+
+  return {
+    ...slot,
+    isTwoLegged: true,
+    match: secondLegMatch ?? firstLegMatch,
+    firstLegMatch,
+    secondLegMatch,
+    homeTeamId,
+    awayTeamId,
+    homeTeamName,
+    awayTeamName,
+    homeFirstLegScore,
+    awayFirstLegScore,
+    homeSecondLegScore,
+    awaySecondLegScore,
+    homeScore: aggHome,
+    awayScore: aggAway,
+    isAggregateDraw,
+    winnerSide,
+    status,
   };
 }
 
@@ -436,69 +557,148 @@ function getSlotLoser(slot: PlayoffBracketSlot): { teamId?: string; teamName: st
   return null;
 }
 
+function getUnorderedPairKey(homeTeamId: string, awayTeamId: string): string {
+  return homeTeamId < awayTeamId ? `${homeTeamId}|${awayTeamId}` : `${awayTeamId}|${homeTeamId}`;
+}
+
+function normalizeSortableDate(fecha: string): string {
+  const trimmed = fecha.trim();
+  const dmy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  }
+  return trimmed;
+}
+
 function attachMatchesToSlots(
   slots: PlayoffBracketSlot[],
   phaseMatches: Match[],
-  teamMap: Map<string, Pick<Team, 'nombre'>>
+  teamMap: Map<string, Pick<Team, 'nombre'>>,
+  isTwoLegged = false
 ): PlayoffBracketSlot[] {
   const usedMatchIds = new Set<string>();
   const sortedPhaseMatches = [...phaseMatches].sort((a, b) => {
-    const keyA = `${a.jornada}-${a.fecha}-${a.hora}-${a.id}`;
-    const keyB = `${b.jornada}-${b.fecha}-${b.hora}-${b.id}`;
+    const keyA = `${normalizeSortableDate(a.fecha)}-${a.hora}-${String(a.jornada).padStart(2, '0')}-${a.id}`;
+    const keyB = `${normalizeSortableDate(b.fecha)}-${b.hora}-${String(b.jornada).padStart(2, '0')}-${b.id}`;
     return keyA.localeCompare(keyB);
   });
 
-  // Pass 1: exact team-pair matches
+  if (!isTwoLegged) {
+    // Single-leg attachment (existing behavior)
+    const matchedFirstPass = slots.map((slot) => {
+      if (!slot.homeTeamId || !slot.awayTeamId) return slot;
+      const found = sortedPhaseMatches.find(
+        (m) =>
+          !usedMatchIds.has(m.id) &&
+          ((m.homeTeamId === slot.homeTeamId && m.awayTeamId === slot.awayTeamId) ||
+            (m.homeTeamId === slot.awayTeamId && m.awayTeamId === slot.homeTeamId))
+      );
+      if (!found) return slot;
+      usedMatchIds.add(found.id);
+      return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+    });
+
+    const matchedSecondPass = matchedFirstPass.map((slot) => {
+      if (slot.match) return slot;
+      if (!slot.homeTeamId && !slot.awayTeamId) return slot;
+      const found = sortedPhaseMatches.find(
+        (m) =>
+          !usedMatchIds.has(m.id) &&
+          ((slot.homeTeamId && (m.homeTeamId === slot.homeTeamId || m.awayTeamId === slot.homeTeamId)) ||
+            (slot.awayTeamId && (m.homeTeamId === slot.awayTeamId || m.awayTeamId === slot.awayTeamId)))
+      );
+      if (!found) return slot;
+      usedMatchIds.add(found.id);
+      return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+    });
+
+    const remainingMatches = sortedPhaseMatches.filter((m) => !usedMatchIds.has(m.id));
+    let remIdx = 0;
+    return matchedSecondPass.map((slot) => {
+      if (slot.match) return slot;
+      const fallback = remainingMatches[remIdx];
+      if (!fallback) return slot;
+      remIdx += 1;
+      usedMatchIds.add(fallback.id);
+      return resolveSlotOutcome({ ...slot, match: fallback }, teamMap);
+    });
+  }
+
+  // Two-legged (Ida y Vuelta) attachment: group up to 2 legs per team pair per slot
   const matchedFirstPass = slots.map((slot) => {
-    if (!slot.homeTeamId || !slot.awayTeamId) return slot;
-    const found = sortedPhaseMatches.find(
-      (m) =>
-        !usedMatchIds.has(m.id) &&
-        ((m.homeTeamId === slot.homeTeamId && m.awayTeamId === slot.awayTeamId) ||
-          (m.homeTeamId === slot.awayTeamId && m.awayTeamId === slot.homeTeamId))
-    );
-    if (!found) return slot;
-    usedMatchIds.add(found.id);
-    return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+    if (!slot.homeTeamId || !slot.awayTeamId) return { ...slot, isTwoLegged: true };
+    const foundLegs = sortedPhaseMatches
+      .filter(
+        (m) =>
+          !usedMatchIds.has(m.id) &&
+          ((m.homeTeamId === slot.homeTeamId && m.awayTeamId === slot.awayTeamId) ||
+            (m.homeTeamId === slot.awayTeamId && m.awayTeamId === slot.homeTeamId))
+      )
+      .slice(0, 2);
+    if (foundLegs.length === 0) return { ...slot, isTwoLegged: true };
+    foundLegs.forEach((m) => usedMatchIds.add(m.id));
+    return resolveTwoLeggedSlotOutcome(slot, foundLegs, teamMap);
   });
 
-  // Pass 2: single-team overlap
   const matchedSecondPass = matchedFirstPass.map((slot) => {
-    if (slot.match) return slot;
+    if (slot.firstLegMatch || slot.secondLegMatch) return slot;
     if (!slot.homeTeamId && !slot.awayTeamId) return slot;
-    const found = sortedPhaseMatches.find(
+    const anchor = sortedPhaseMatches.find(
       (m) =>
         !usedMatchIds.has(m.id) &&
         ((slot.homeTeamId && (m.homeTeamId === slot.homeTeamId || m.awayTeamId === slot.homeTeamId)) ||
           (slot.awayTeamId && (m.homeTeamId === slot.awayTeamId || m.awayTeamId === slot.awayTeamId)))
     );
-    if (!found) return slot;
-    usedMatchIds.add(found.id);
-    return resolveSlotOutcome({ ...slot, match: found }, teamMap);
+    if (!anchor) return slot;
+    const key = getUnorderedPairKey(anchor.homeTeamId, anchor.awayTeamId);
+    const pairLegs = sortedPhaseMatches
+      .filter((m) => !usedMatchIds.has(m.id) && getUnorderedPairKey(m.homeTeamId, m.awayTeamId) === key)
+      .slice(0, 2);
+    pairLegs.forEach((m) => usedMatchIds.add(m.id));
+    return resolveTwoLeggedSlotOutcome(slot, pairLegs, teamMap);
   });
 
-  // Pass 3: remaining unmatched matches of this phase sequentially
-  const remainingMatches = sortedPhaseMatches.filter((m) => !usedMatchIds.has(m.id));
-  let remIdx = 0;
+  // Pass 3: remaining unmatched matches grouped by unordered team pair
+  const remainingPairGroups: Match[][] = [];
+  const pairIndexMap = new Map<string, number>();
+  for (const m of sortedPhaseMatches) {
+    if (usedMatchIds.has(m.id)) continue;
+    const key = getUnorderedPairKey(m.homeTeamId, m.awayTeamId);
+    const existingIdx = pairIndexMap.get(key);
+    if (existingIdx !== undefined && remainingPairGroups[existingIdx].length < 2) {
+      remainingPairGroups[existingIdx].push(m);
+    } else {
+      pairIndexMap.set(key, remainingPairGroups.length);
+      remainingPairGroups.push([m]);
+    }
+  }
+
+  let remGroupIdx = 0;
   return matchedSecondPass.map((slot) => {
-    if (slot.match) return slot;
-    const fallback = remainingMatches[remIdx];
-    if (!fallback) return slot;
-    remIdx += 1;
-    usedMatchIds.add(fallback.id);
-    return resolveSlotOutcome({ ...slot, match: fallback }, teamMap);
+    if (slot.firstLegMatch || slot.secondLegMatch) return slot;
+    const fallbackGroup = remainingPairGroups[remGroupIdx];
+    if (!fallbackGroup) return slot;
+    remGroupIdx += 1;
+    fallbackGroup.forEach((m) => usedMatchIds.add(m.id));
+    return resolveTwoLeggedSlotOutcome(slot, fallbackGroup, teamMap);
   });
 }
 
 /**
- * Builds the complete multi-round single-elimination playoff bracket from opening round
- * all the way to the Grand Final, plus the optional Third Place match ("Tercer Lugar").
+ * Builds the complete multi-round playoff bracket from opening round all the way
+ * to the Grand Final, plus the optional Third Place match ("Tercer Lugar").
+ * Supports both single-leg elimination and two-legged (Ida y Vuelta) aggregate ties.
  */
 export function buildFullPlayoffTree(params: {
   standingsByGroup: Record<string, StandingsRow[]>;
   clasificadosPorGrupo: number;
   formatoPlayoff: 4 | 8 | 16;
   incluyeTercerLugar?: boolean;
+  playoffsIdaYVuelta?: boolean;
   disciplineMatches: Match[];
   teamMap: Map<string, Pick<Team, 'nombre'>>;
 }): FullPlayoffBracket {
@@ -507,6 +707,7 @@ export function buildFullPlayoffTree(params: {
     clasificadosPorGrupo,
     formatoPlayoff,
     incluyeTercerLugar = true,
+    playoffsIdaYVuelta = false,
     disciplineMatches,
     teamMap,
   } = params;
@@ -534,6 +735,7 @@ export function buildFullPlayoffTree(params: {
     if (rIdx === 0) {
       baseSlots = openingMatchups.map((m) => ({
         ...m,
+        isTwoLegged: playoffsIdaYVuelta,
         winnerSide: null,
         status: 'PROYECTADO',
       }));
@@ -556,6 +758,7 @@ export function buildFullPlayoffTree(params: {
           id: `po-${round.toLowerCase()}-${i + 1}`,
           round,
           slot: i + 1,
+          isTwoLegged: playoffsIdaYVuelta,
           homeSeed: leftLabel,
           awaySeed: rightLabel,
           homeTeamName: leftWinner ? leftWinner.teamName : leftLabel,
@@ -571,7 +774,8 @@ export function buildFullPlayoffTree(params: {
     const resolvedSlots = attachMatchesToSlots(
       baseSlots,
       matchesByPhase.get(round) ?? [],
-      teamMap
+      teamMap,
+      playoffsIdaYVuelta
     );
 
     rounds.push({
@@ -581,7 +785,7 @@ export function buildFullPlayoffTree(params: {
     });
   }
 
-  // Third place match (losers of Semifinals)
+  // Third place match (losers of Semifinals — single match unless 2 legs are explicitly scheduled)
   let thirdPlace: PlayoffBracketSlot | null = null;
   if (incluyeTercerLugar) {
     const semiColumn = rounds.find((r) => r.round === 'Semifinal');
@@ -589,11 +793,16 @@ export function buildFullPlayoffTree(params: {
     const semi2 = semiColumn?.slots[1];
     const semi1Loser = semi1 ? getSlotLoser(semi1) : null;
     const semi2Loser = semi2 ? getSlotLoser(semi2) : null;
+    const thirdMatches = matchesByPhase.get('Tercer Lugar') ?? [];
+    const thirdIsTwoLegged =
+      thirdMatches.length >= 2 ||
+      thirdMatches.some((m) => m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA');
 
     const baseThird: PlayoffBracketSlot = {
       id: 'po-tercer-lugar-1',
       round: 'Tercer Lugar',
       slot: 1,
+      isTwoLegged: thirdIsTwoLegged,
       homeSeed: 'Perdedor Semifinal 1',
       awaySeed: 'Perdedor Semifinal 2',
       homeTeamName: semi1Loser ? semi1Loser.teamName : 'Perdedor Semifinal 1',
@@ -606,8 +815,9 @@ export function buildFullPlayoffTree(params: {
 
     const [resolvedThird] = attachMatchesToSlots(
       [baseThird],
-      matchesByPhase.get('Tercer Lugar') ?? [],
-      teamMap
+      thirdMatches,
+      teamMap,
+      thirdIsTwoLegged
     );
     thirdPlace = resolvedThird;
   }
@@ -619,6 +829,7 @@ export function buildFullPlayoffTree(params: {
   return {
     rounds,
     thirdPlace,
+    isTwoLegged: playoffsIdaYVuelta,
     championName: champion?.teamName,
     thirdPlaceWinnerName: thirdWinner?.teamName,
   };

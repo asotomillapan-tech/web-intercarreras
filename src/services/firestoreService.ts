@@ -179,6 +179,10 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
             : mergedConfigs[id].formatoPlayoff) as 4 | 8 | 16,
           incluyeTercerLugar:
             typeof data.incluyeTercerLugar === 'boolean' ? data.incluyeTercerLugar : true,
+          playoffsIdaYVuelta:
+            typeof data.playoffsIdaYVuelta === 'boolean'
+              ? data.playoffsIdaYVuelta
+              : id === 'f7-h-1',
           inscripcionesAbiertas: Boolean(data.inscripcionesAbiertas),
           transferenciasAbiertas: Boolean(data.transferenciasAbiertas),
           maxTransferenciasPorEquipo: Number(data.maxTransferenciasPorEquipo) ?? 2,
@@ -241,6 +245,10 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
         disciplineId: data.disciplineId as DisciplineId,
         groupName: String(data.groupName || 'Grupo A'),
         fase: (data.fase as Match['fase']) || 'Grupos',
+        playoffLeg:
+          data.playoffLeg === 'IDA' || data.playoffLeg === 'VUELTA' || data.playoffLeg === 'UNICO'
+            ? (data.playoffLeg as Match['playoffLeg'])
+            : undefined,
         jornada: Number(data.jornada) || 1,
         fecha: String(data.fecha || ''),
         hora: String(data.hora || ''),
@@ -757,6 +765,7 @@ export async function saveFirestoreDisciplineConfig(config: DisciplineFormatConf
       clasificadosPorGrupo: Math.max(1, Math.min(8, Math.trunc(config.clasificadosPorGrupo))),
       formatoPlayoff: config.formatoPlayoff,
       incluyeTercerLugar: config.incluyeTercerLugar !== false,
+      playoffsIdaYVuelta: Boolean(config.playoffsIdaYVuelta),
       inscripcionesAbiertas: Boolean(config.inscripcionesAbiertas),
       transferenciasAbiertas: Boolean(config.transferenciasAbiertas),
       maxTransferenciasPorEquipo: Math.max(0, Math.min(10, Math.trunc(config.maxTransferenciasPorEquipo))),
@@ -1003,6 +1012,13 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
+      if (
+        match.playoffLeg === 'IDA' ||
+        match.playoffLeg === 'VUELTA' ||
+        match.playoffLeg === 'UNICO'
+      ) {
+        payload.playoffLeg = match.playoffLeg;
+      }
       if (match.scoresheetValidation) {
         payload.scoresheetValidation = match.scoresheetValidation;
       }
@@ -1026,6 +1042,13 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
       if (actorRole === 'admin') {
         updatePayload.groupName = match.groupName.slice(0, 40);
         updatePayload.fase = match.fase;
+        if (
+          match.playoffLeg === 'IDA' ||
+          match.playoffLeg === 'VUELTA' ||
+          match.playoffLeg === 'UNICO'
+        ) {
+          updatePayload.playoffLeg = match.playoffLeg;
+        }
         updatePayload.jornada = Math.max(1, Math.min(50, Math.trunc(match.jornada)));
         updatePayload.fecha = match.fecha.slice(0, 20);
         updatePayload.hora = match.hora.slice(0, 12);
