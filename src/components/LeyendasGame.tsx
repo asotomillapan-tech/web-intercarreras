@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -51,6 +51,7 @@ import {
   type LeyendasEventOption,
   type LeyendasFocusCard,
   type LeyendasGameEvent,
+  type LeyendasMiniGameKind,
   type LeyendasMiniGameOutcome,
   type LeyendasMiniGameScenario,
   type LeyendasRankingCategory,
@@ -181,6 +182,7 @@ export function LeyendasGame({
     narrative: string;
   } | null>(null);
   const [activeMiniGame, setActiveMiniGame] = useState<LeyendasMiniGameScenario | null>(null);
+  const [lastMiniGameKind, setLastMiniGameKind] = useState<LeyendasMiniGameKind | null>(null);
   const [momentNarrative, setMomentNarrative] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
 
@@ -189,6 +191,7 @@ export function LeyendasGame({
   const [submittingGlobal, setSubmittingGlobal] = useState(false);
   const [submittedGlobal, setSubmittedGlobal] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const autoPublishAttemptedKeyRef = useRef<string | null>(null);
   const [rankingTab, setRankingTab] = useState<LeyendasRankingCategory>('general');
   const [inspectedEntry, setInspectedEntry] = useState<LeyendasLeaderboardEntry | null>(null);
   const [localHof, setLocalHof] = useState<LocalHofEntry[]>(() => loadLocalHof());
@@ -297,10 +300,12 @@ export function LeyendasGame({
     setActiveEvent(null);
     setEventResult(null);
     setActiveMiniGame(null);
+    setLastMiniGameKind(null);
     setMomentNarrative(null);
     setSemPhase('FOCUS');
     setSubmittedGlobal(false);
     setSubmitError(null);
+    autoPublishAttemptedKeyRef.current = null;
     setConfirmRestart(false);
     setScreen('career');
   };
@@ -401,7 +406,9 @@ export function LeyendasGame({
       rehabCompleted,
       narrative,
     });
-    setActiveMiniGame(getVisualMiniGameScenario(updated));
+    const nextMiniGame = getVisualMiniGameScenario(updated, Math.random, lastMiniGameKind);
+    setLastMiniGameKind(nextMiniGame.kind);
+    setActiveMiniGame(nextMiniGame);
     setMomentNarrative(null);
     setSemPhase('MOMENT');
   };
@@ -570,7 +577,7 @@ export function LeyendasGame({
     startNextSemesterCycle();
   };
 
-  const handleSubmitToGlobalRanking = async () => {
+  const handleSubmitToGlobalRanking = useCallback(async () => {
     if (!career || !currentUser || submittingGlobal || submittedGlobal) return;
     setSubmittingGlobal(true);
     setSubmitError(null);
@@ -585,7 +592,16 @@ export function LeyendasGame({
     } finally {
       setSubmittingGlobal(false);
     }
-  };
+  }, [career, currentUser, submittingGlobal, submittedGlobal, onSaveLeyendasEntry]);
+
+  // Auto-publish completed career to Firestore Weekly Global Ranking when signed in
+  useEffect(() => {
+    if (!career || !career.finished || !currentUser || submittedGlobal || submittingGlobal) return;
+    const key = `${career.playerName}-${career.startYear}-${career.semestersPlayed}-${career.maxOvr}-${currentUser.uid}`;
+    if (autoPublishAttemptedKeyRef.current === key) return;
+    autoPublishAttemptedKeyRef.current = key;
+    void handleSubmitToGlobalRanking();
+  }, [career, currentUser, submittedGlobal, submittingGlobal, handleSubmitToGlobalRanking]);
 
   const handleResetToCreation = () => {
     setCareer(null);
@@ -593,6 +609,8 @@ export function LeyendasGame({
     setConfirmRestart(false);
     setSubmittedGlobal(false);
     setSubmitError(null);
+    setLastMiniGameKind(null);
+    autoPublishAttemptedKeyRef.current = null;
   };
 
   const academicHint = career ? getAcademicNarrativeHint(career.gpa, career.hasScholarship) : null;
@@ -1342,9 +1360,11 @@ export function LeyendasGame({
                         <CheckCircle2 className="w-4 h-4" />
                         <span>
                           {submittedGlobal
-                            ? 'Publicado en el Top Global Semanal'
+                            ? 'Guardado en el Top Global Semanal'
                             : submittingGlobal
-                            ? 'Publicando...'
+                            ? 'Guardando en Ranking Semanal...'
+                            : submitError
+                            ? 'Reintentar guardado en Top Global'
                             : 'Publicar en Top Global Semanal'}
                         </span>
                       </button>
@@ -1355,7 +1375,7 @@ export function LeyendasGame({
                         className="inline-flex items-center gap-2 px-5 py-3 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
                       >
                         <UserPlus className="w-4 h-4" />
-                        <span>Inicia sesión con Google para publicar en el Top Global</span>
+                        <span>Inicia sesión con Google para guardar en el Top Global</span>
                       </button>
                     )}
 

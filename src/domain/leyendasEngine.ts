@@ -155,9 +155,22 @@ export interface LeyendasTryoutDirectory {
 
 export type LeyendasMiniGameKind =
   | 'penalty_kick'
+  | 'free_kick'
+  | 'one_on_one'
+  | 'goal_line_tackle'
   | 'penalty_save'
+  | 'keeper_reflex'
   | 'buzzer_beater'
-  | 'volleyball_spike';
+  | 'free_throw_clutch'
+  | 'fastbreak_dunk'
+  | 'volleyball_spike'
+  | 'volleyball_block'
+  | 'volleyball_serve';
+
+export interface LeyendasMiniGameChoice {
+  id: 'LEFT' | 'CENTER' | 'RIGHT';
+  label: string;
+}
 
 export interface LeyendasMiniGameScenario {
   id: string;
@@ -169,6 +182,8 @@ export interface LeyendasMiniGameScenario {
   venue: string;
   teamName: string;
   rivalName: string;
+  actionButtonLabel: string;
+  actionChoices?: LeyendasMiniGameChoice[];
   sweetSpotWidth: number; // percentage width of PERFECT zone (higher OVR = slightly wider)
   goodZoneWidth: number; // percentage width of GOOD zone
   speedMultiplier: number;
@@ -1830,11 +1845,13 @@ export function pickSemesterEvent(
 }
 
 /**
- * Generates an interactive visual mini-game scenario tailored to the player's sport & position.
+ * Generates an interactive visual mini-game scenario tailored to the player's sport & position,
+ * rotating across rich distinct mini-games so semesters never feel repetitive.
  */
 export function getVisualMiniGameScenario(
   career: LeyendasCareerState,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  lastKind?: LeyendasMiniGameKind | null
 ): LeyendasMiniGameScenario {
   const rivalName = career.rival?.clubName ?? 'Clásico Rival UFRO';
   const ovrBonusWidth = Math.max(-3, Math.min(8, Math.round((career.ovr - 70) * 0.3)));
@@ -1843,199 +1860,582 @@ export function getVisualMiniGameScenario(
   const goodZoneWidth = Math.max(26, Math.min(44, 34 + ovrBonusWidth + injuredPenalty));
   const speedMultiplier = career.semester === 2 ? 1.12 : 1.0;
 
+  let pool: LeyendasMiniGameKind[];
   if (career.sportKey === 'futbol') {
     if (career.pos === 'ARQ') {
-      return {
-        id: `mg-arq-${career.year}-${career.semester}-${Math.floor(rng() * 999)}`,
-        kind: 'penalty_save',
-        sportKey: 'futbol',
-        title: 'Minuto 50\' · Atajada de Penal Decisivo',
-        subtitle: 'Elige el palo y frena el reflejo en la zona verde para tapar el disparo',
-        context: `${career.team.name} defiende la ventaja ante ${rivalName}. Todo el Complejo UFRO contiene la respiración.`,
-        venue: 'Cancha 1 · Complejo Deportivo UFRO',
-        teamName: career.team.name,
-        rivalName,
-        sweetSpotWidth,
-        goodZoneWidth,
-        speedMultiplier,
-      };
+      pool = ['penalty_save', 'keeper_reflex'];
+    } else if (career.pos === 'DEF') {
+      pool = ['goal_line_tackle', 'free_kick', 'penalty_kick', 'one_on_one'];
+    } else if (career.pos === 'MED') {
+      pool = ['free_kick', 'one_on_one', 'penalty_kick', 'goal_line_tackle'];
+    } else {
+      pool = ['one_on_one', 'free_kick', 'penalty_kick', 'goal_line_tackle'];
     }
-
-    return {
-      id: `mg-pen-${career.year}-${career.semester}-${Math.floor(rng() * 999)}`,
-      kind: 'penalty_kick',
-      sportKey: 'futbol',
-      title: 'Penal al Último Minuto · Cancha 1',
-      subtitle: 'Apunta a un rincón del arco y presiona PATEAR justo en la zona óptima',
-      context: `Empate en el cierre para ${career.team.name} vs ${rivalName}. El balón está en el punto penal.`,
-      venue: 'Cancha 1 · Complejo Deportivo UFRO',
-      teamName: career.team.name,
-      rivalName,
-      sweetSpotWidth,
-      goodZoneWidth,
-      speedMultiplier,
-    };
+  } else if (career.sportKey === 'basquet') {
+    pool = ['buzzer_beater', 'fastbreak_dunk', 'free_throw_clutch'];
+  } else {
+    pool =
+      career.pos === 'LIB'
+        ? ['volleyball_serve', 'volleyball_block', 'volleyball_spike']
+        : ['volleyball_spike', 'volleyball_block', 'volleyball_serve'];
   }
 
-  if (career.sportKey === 'basquet') {
-    return {
-      id: `mg-bk-${career.year}-${career.semester}-${Math.floor(rng() * 999)}`,
-      kind: 'buzzer_beater',
-      sportKey: 'basquet',
-      title: 'Tiro sobre la Chicharra · 00:02',
-      subtitle: 'Suelta el lanzamiento cuando el indicador cruce la zona dorada del aro',
-      context: `${career.team.name} cae por 2 puntos frente a ${rivalName} en el Gimnasio Olímpico.`,
-      venue: 'Gimnasio Olímpico UFRO',
-      teamName: career.team.name,
-      rivalName,
-      sweetSpotWidth,
-      goodZoneWidth,
-      speedMultiplier,
-    };
-  }
+  const filteredPool =
+    lastKind && pool.length > 1 ? pool.filter((k) => k !== lastKind) : pool;
+  const kind = filteredPool[Math.floor(rng() * filteredPool.length)] ?? pool[0];
+  const baseId = `mg-${kind}-${career.year}-${career.semester}-${Math.floor(rng() * 999)}`;
 
-  return {
-    id: `mg-vl-${career.year}-${career.semester}-${Math.floor(rng() * 999)}`,
-    kind: 'volleyball_spike',
-    sportKey: 'voley',
-    title: 'Match Point 14-14 · Remache Decisivo',
-    subtitle: 'Impacta el balón justo cuando entre en el punto máximo sobre la red',
-    context: `Set definitivo para ${career.team.name} frente a ${rivalName}. La armadora te deja la pelota perfecta.`,
-    venue: 'Gimnasio Olímpico UFRO',
+  const baseMeta = {
+    id: baseId,
+    kind,
+    sportKey: career.sportKey,
     teamName: career.team.name,
     rivalName,
     sweetSpotWidth,
     goodZoneWidth,
     speedMultiplier,
   };
+
+  switch (kind) {
+    case 'penalty_save':
+      return {
+        ...baseMeta,
+        title: "Minuto 50' · Atajada de Penal Decisivo",
+        subtitle: 'Elige el palo y frena el reflejo en la zona verde para tapar el disparo',
+        context: `${career.team.name} defiende la ventaja ante ${rivalName}. Todo el Complejo UFRO contiene la respiración.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Lanzarse a Atajar',
+        actionChoices: [
+          { id: 'LEFT', label: 'Volar Izquierda' },
+          { id: 'CENTER', label: 'Aguantar Centro' },
+          { id: 'RIGHT', label: 'Volar Derecha' },
+        ],
+      };
+
+    case 'keeper_reflex':
+      return {
+        ...baseMeta,
+        title: 'Achique Mano a Mano · Reflejo Puro',
+        subtitle: 'Lee el perfil del delantero rival y sal a achicar justo en el instante perfecto',
+        context: `Contragolpe letal de ${rivalName} en el cierre del partido. Solo quedas tú bajo los tres palos de ${career.team.name}.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Salir a Achicar',
+        actionChoices: [
+          { id: 'LEFT', label: 'Cerrar Primer Palo' },
+          { id: 'CENTER', label: 'Achique Frontal' },
+          { id: 'RIGHT', label: 'Cubrir Segundo Palo' },
+        ],
+      };
+
+    case 'free_kick':
+      return {
+        ...baseMeta,
+        title: 'Tiro Libre al Borde del Área · Barrera Armada',
+        subtitle: 'Elige el efecto sobre la barrera y frena el medidor en el punto exacto',
+        context: `Falta peligrosa a 18 metros del arco de ${rivalName}. La barrera de tres jugadores cubre el primer palo.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Ejecutar Tiro Libre',
+        actionChoices: [
+          { id: 'LEFT', label: 'Comba Izquierda' },
+          { id: 'CENTER', label: 'Por Arriba Barrera' },
+          { id: 'RIGHT', label: 'Palo del Arquero' },
+        ],
+      };
+
+    case 'one_on_one':
+      return {
+        ...baseMeta,
+        title: 'Mano a Mano vs el Arquero · Contragolpe',
+        subtitle: 'Escoge tu recurso de definición y presiona justo antes de que el portero te cierre el ángulo',
+        context: `Pase filtrado perfecto al espacio para ${career.team.name}. Quedas cara a cara contra el arquero de ${rivalName}.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Definir Mano a Mano',
+        actionChoices: [
+          { id: 'LEFT', label: 'Remate Cruzado' },
+          { id: 'CENTER', label: 'Vaselina Suave' },
+          { id: 'RIGHT', label: 'Amague y Regate' },
+        ],
+      };
+
+    case 'goal_line_tackle':
+      return {
+        ...baseMeta,
+        title: 'Cruce Defensivo al Límite · Barrida Salvadora',
+        subtitle: 'Anticipa el carril del delantero rival y frena en la zona verde para cortar sin falta',
+        context: `El goleador de ${rivalName} se escapó solo hacia el área de ${career.team.name}. Un cruce limpio salva el resultado.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Ejecutar Cruce Limpio',
+        actionChoices: [
+          { id: 'LEFT', label: 'Cerrar Banda Izq.' },
+          { id: 'CENTER', label: 'Trabar de Frente' },
+          { id: 'RIGHT', label: 'Barrida Derecha' },
+        ],
+      };
+
+    case 'penalty_kick':
+      return {
+        ...baseMeta,
+        title: 'Penal al Último Minuto · Cancha 1',
+        subtitle: 'Apunta a un rincón del arco y presiona PATEAR justo en la zona óptima',
+        context: `Empate en el cierre para ${career.team.name} vs ${rivalName}. El balón está en el punto penal.`,
+        venue: 'Cancha 1 · Complejo Deportivo UFRO',
+        actionButtonLabel: 'Patear Penal',
+        actionChoices: [
+          { id: 'LEFT', label: 'Palo Izquierdo' },
+          { id: 'CENTER', label: 'Al Centro' },
+          { id: 'RIGHT', label: 'Palo Derecho' },
+        ],
+      };
+
+    case 'free_throw_clutch':
+      return {
+        ...baseMeta,
+        title: 'Tiros Libres Decisivos · Reloj en 00:01',
+        subtitle: 'Ajusta el arco del tiro libre y suelta la pelota en la zona verde con temple total',
+        context: `Falta en la última posesión: ${career.team.name} necesita encestar frente a un Gimnasio Olímpico repleto ante ${rivalName}.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Lanzar Tiro Libre',
+        actionChoices: [
+          { id: 'LEFT', label: 'Arco Alto' },
+          { id: 'CENTER', label: 'Lanzamiento Limpio' },
+          { id: 'RIGHT', label: 'Con Tablero' },
+        ],
+      };
+
+    case 'fastbreak_dunk':
+      return {
+        ...baseMeta,
+        title: 'Contragolpe al Aro · Duelo en la Pintura',
+        subtitle: 'Elige tu movimiento para esquivar al defensor de la pintura y define en el momento exacto',
+        context: `Robo de balón y carrera a toda velocidad para ${career.team.name}. El pívot de ${rivalName} espera bajo el aro.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Definir al Aro',
+        actionChoices: [
+          { id: 'LEFT', label: 'Bandeja Izquierda' },
+          { id: 'CENTER', label: 'Flotadora Alta' },
+          { id: 'RIGHT', label: 'Eurostep Derecha' },
+        ],
+      };
+
+    case 'buzzer_beater':
+      return {
+        ...baseMeta,
+        title: 'Tiro sobre la Chicharra · 00:02',
+        subtitle: 'Suelta el lanzamiento cuando el indicador cruce la zona verde del aro',
+        context: `${career.team.name} cae por 2 puntos frente a ${rivalName} en el Gimnasio Olímpico.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Soltar Triple',
+      };
+
+    case 'volleyball_block':
+      return {
+        ...baseMeta,
+        title: 'Bloqueo Doble en la Red · Set Point Rival',
+        subtitle: 'Lee hacia dónde arma el rival y salta en la zona verde para sellar la red',
+        context: `${rivalName} tiene pelota de ataque directo. Tu lectura en la red puede darle vida a ${career.team.name}.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Saltar al Bloqueo',
+        actionChoices: [
+          { id: 'LEFT', label: 'Cerrar Punta Izq.' },
+          { id: 'CENTER', label: 'Bloquear Centro' },
+          { id: 'RIGHT', label: 'Sellar Opuesto' },
+        ],
+      };
+
+    case 'volleyball_serve':
+      return {
+        ...baseMeta,
+        title: 'Saque Ace de Cierre · Presión Máxima',
+        subtitle: 'Apunta a una zona vulnerable de recepción y golpea el saque en el punto dulce',
+        context: `Turno clave al saque para ${career.team.name} frente a ${rivalName} en el cierre del set definitivo.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Ejecutar Saque',
+        actionChoices: [
+          { id: 'LEFT', label: 'Línea Izquierda' },
+          { id: 'CENTER', label: 'Saque Corto Red' },
+          { id: 'RIGHT', label: 'Zona 5 Profunda' },
+        ],
+      };
+
+    case 'volleyball_spike':
+    default:
+      return {
+        ...baseMeta,
+        title: 'Match Point 14-14 · Remache Decisivo',
+        subtitle: 'Impacta el balón justo cuando entre en el punto máximo sobre la red',
+        context: `Set definitivo para ${career.team.name} frente a ${rivalName}. La armadora te deja la pelota perfecta.`,
+        venue: 'Gimnasio Olímpico UFRO',
+        actionButtonLabel: 'Ejecutar Remache',
+      };
+  }
 }
 
 export function evaluateVisualMiniGameOutcome(
   scenario: LeyendasMiniGameScenario,
   tier: 'PERFECT' | 'GOOD' | 'MISS'
 ): LeyendasMiniGameOutcome {
-  if (scenario.kind === 'penalty_kick') {
-    if (tier === 'PERFECT') {
+  switch (scenario.kind) {
+    case 'penalty_kick':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 3,
+          headline: '¡GOLAZO AL ÁNGULO!',
+          narrative: `Ejecución quirúrgica al ángulo superior: el arquero de ${scenario.rivalName} ni la vio pasar. Estalla la reja del Complejo UFRO.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 2,
+          headline: '¡GOL CON TEMPLE!',
+          narrative: `Remate firme y esquinado para darle la victoria a ${scenario.teamName} sobre la hora.`,
+        };
+      }
       return {
         tier,
-        success: true,
-        ovrDelta: 2,
-        statBoost: 3,
-        headline: '¡GOLAZO AL ÁNGULO!',
-        narrative: `Ejecución quirúrgica al ángulo superior: el arquero de ${scenario.rivalName} ni la vio pasar. Estalla la reja del Complejo UFRO.`,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'ATAJADO / AL PALO',
+        narrative: `El arquero de ${scenario.rivalName} adivinó la intención y desvió el penal. Silencio duro en la galería.`,
       };
-    }
-    if (tier === 'GOOD') {
-      return {
-        tier,
-        success: true,
-        ovrDelta: 1,
-        statBoost: 2,
-        headline: '¡GOL CON TEMPLE!',
-        narrative: `Remate firme y esquinado para darle la victoria a ${scenario.teamName} sobre la hora.`,
-      };
-    }
-    return {
-      tier,
-      success: false,
-      ovrDelta: -1,
-      statBoost: 0,
-      headline: 'ATAJADO / AL PALO',
-      narrative: `El arquero de ${scenario.rivalName} adivinó la intención y desvió el penal. Silencio duro en la galería.`,
-    };
-  }
 
-  if (scenario.kind === 'penalty_save') {
-    if (tier === 'PERFECT') {
+    case 'free_kick':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 3,
+          headline: '¡TIRO LIBRE DE ANTOLOGÍA!',
+          narrative: `La pelota pasó por encima de la barrera con rosca perfecta y se clavó en la escuadra de ${scenario.rivalName}. Ovación total en Cancha 1.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 2,
+          headline: '¡GOL DE PELOTA DETENIDA!',
+          narrative: `Disparo seco y bien direccionado que venció la estirada del portero rival para ${scenario.teamName}.`,
+        };
+      }
       return {
         tier,
-        success: true,
-        ovrDelta: 2,
-        statBoost: 3,
-        headline: '¡ATAJADÓN HEROICO!',
-        narrative: `Volaste al rincón exacto y ahogaste el grito de gol de ${scenario.rivalName}. Todo ${scenario.teamName} corre a abrazarte.`,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'REBOTÓ EN LA BARRERA',
+        narrative: `El impacto salió bajo y la barrera de ${scenario.rivalName} bloqueó el tiro libre con solvencia.`,
       };
-    }
-    if (tier === 'GOOD') {
-      return {
-        tier,
-        success: true,
-        ovrDelta: 1,
-        statBoost: 2,
-        headline: '¡MANOTAZO SALVADOR!',
-        narrative: `Alcanzaste a desviar el remate con la punta de los dedos hacia el tiro de esquina.`,
-      };
-    }
-    return {
-      tier,
-      success: false,
-      ovrDelta: -1,
-      statBoost: 0,
-      headline: 'NO ALCANZASTE A LLEGAR',
-      narrative: `El ejecutante de ${scenario.rivalName} te cambió el palo con frialdad en el último instante.`,
-    };
-  }
 
-  if (scenario.kind === 'buzzer_beater') {
-    if (tier === 'PERFECT') {
+    case 'one_on_one':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 3,
+          headline: '¡DEFINICIÓN DE CRACK!',
+          narrative: `Dejaste desparramado al arquero de ${scenario.rivalName} con frialdad absoluta y definiste a placer para ${scenario.teamName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 2,
+          headline: '¡ADENTRO EN EL MANO A MANO!',
+          narrative: `Definiste rápido por abajo antes del achique y desataste el festejo de toda tu carrera.`,
+        };
+      }
       return {
         tier,
-        success: true,
-        ovrDelta: 2,
-        statBoost: 7,
-        headline: '¡TRIPLE LIMPIO SOBRE LA CHICHARRA!',
-        narrative: `Solo red al sonar la bocina del Gimnasio Olímpico. Victoria histórica para ${scenario.teamName}.`,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'ACHIQUE SALVADOR DEL ARQUERO',
+        narrative: `Demoraste una fracción de segundo y el portero de ${scenario.rivalName} cerró el ángulo con el pecho.`,
       };
-    }
-    if (tier === 'GOOD') {
-      return {
-        tier,
-        success: true,
-        ovrDelta: 1,
-        statBoost: 4,
-        headline: '¡TABLERO Y ADENTRO!',
-        narrative: `El balón tocó el tablero y cayó dentro del aro con el reloj en 00:00. Triunfo agónico.`,
-      };
-    }
-    return {
-      tier,
-      success: false,
-      ovrDelta: -1,
-      statBoost: 0,
-      headline: 'BAILÓ EN EL ARO Y SALIÓ',
-      narrative: `El lanzamiento pegó en el hierro delantero y salió hacia afuera justo con la chicharra.`,
-    };
-  }
 
-  // volleyball_spike
-  if (tier === 'PERFECT') {
-    return {
-      tier,
-      success: true,
-      ovrDelta: 2,
-      statBoost: 6,
-      headline: '¡MISIL EN LA DIAGONAL! MATCH POINT',
-      narrative: `Contacto perfecto en el punto más alto: remache imparable por encima del bloqueo doble de ${scenario.rivalName}.`,
-    };
+    case 'goal_line_tackle':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 2,
+          headline: '¡CRUCE HEROICO EN LA LÍNEA!',
+          narrative: `Barrida limpia al balón que levantó aplausos en toda la reja. Le negaste el gol cantado a ${scenario.rivalName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 1,
+          headline: '¡CIERRE TÁCTICO SALVADOR!',
+          narrative: `Lograste incomodar al delantero y mandar la pelota al córner para proteger el arco de ${scenario.teamName}.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'EL DELANTERO TE QUEBRÓ LA CINTURA',
+        narrative: `El enganche rival llegó un instante antes y ${scenario.rivalName} aprovechó el espacio en el área.`,
+      };
+
+    case 'penalty_save':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 3,
+          headline: '¡ATAJADÓN HEROICO!',
+          narrative: `Volaste al rincón exacto y ahogaste el grito de gol de ${scenario.rivalName}. Todo ${scenario.teamName} corre a abrazarte.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 2,
+          headline: '¡MANOTAZO SALVADOR!',
+          narrative: `Alcanzaste a desviar el remate con la punta de los dedos hacia el tiro de esquina.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'NO ALCANZASTE A LLEGAR',
+        narrative: `El ejecutante de ${scenario.rivalName} te cambió el palo con frialdad en el último instante.`,
+      };
+
+    case 'keeper_reflex':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 3,
+          headline: '¡TAPADA A QUEMARROPA!',
+          narrative: `Achicaste con valentía y sacaste una mano milagrosa que dejó sin palabras al banco de ${scenario.rivalName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 2,
+          headline: '¡ACHIQUE PERFECTO!',
+          narrative: `Cerraste el ángulo justo a tiempo y el remate rebotó en tus piernas hacia la banda.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'DEFINICIÓN CRUZADA INATAJABLE',
+        narrative: `El delantero de ${scenario.rivalName} picó el balón justo cuando iniciaste el achique.`,
+      };
+
+    case 'buzzer_beater':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 7,
+          headline: '¡TRIPLE LIMPIO SOBRE LA CHICHARRA!',
+          narrative: `Solo red al sonar la bocina del Gimnasio Olímpico. Victoria histórica para ${scenario.teamName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 4,
+          headline: '¡TABLERO Y ADENTRO!',
+          narrative: `El balón tocó el tablero y cayó dentro del aro con el reloj en 00:00. Triunfo agónico.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'BAILÓ EN EL ARO Y SALIÓ',
+        narrative: `El lanzamiento pegó en el hierro delantero y salió hacia afuera justo con la chicharra.`,
+      };
+
+    case 'free_throw_clutch':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 6,
+          headline: '¡HIELO EN LAS VENAS! 2 DE 2 LIMPIOS',
+          narrative: `Silenciaste el Gimnasio Olímpico con dos tiros libres perfectos solo red para sellar el triunfo de ${scenario.teamName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 4,
+          headline: '¡ADENTRO CON SUSPENSO!',
+          narrative: `El tiro dio un bote en el aro y terminó cayendo dentro para mantener arriba a ${scenario.teamName}.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'CORTO EN EL ARO',
+        narrative: `La presión del reloj se sintió en la muñeca y el balón dio en el borde frontal sin entrar.`,
+      };
+
+    case 'fastbreak_dunk':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 7,
+          headline: '¡DOBLE Y FALTA ESPECTACULAR!',
+          narrative: `Rompiste la defensa de ${scenario.rivalName} en la pintura con un recurso de lujo y levantaste a toda la galería.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 5,
+          headline: '¡BANDEJA DE MANUAL!',
+          narrative: `Usaste bien el cuerpo para proteger el balón y anotar dos puntos clave para ${scenario.teamName}.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'TAPÓN EN LA PINTURA',
+        narrative: `El protector del aro de ${scenario.rivalName} leyó tu paso y bloqueó la bandeja contra el tablero.`,
+      };
+
+    case 'volleyball_block':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 6,
+          headline: '¡MURO IMPENETRABLE! PUNTO DIRECTO',
+          narrative: `Leíste el armado a la perfección y clavaste el balón en los tres metros de ${scenario.rivalName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 4,
+          headline: '¡TOQUE DE BLOQUEO Y CONTRAATAQUE!',
+          narrative: `Amortiguaste el remache en la red permitiendo que ${scenario.teamName} cerrara el punto en la transición.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'BLOQUEO FUERA DE TIEMPO',
+        narrative: `El atacante de ${scenario.rivalName} encontró el hueco entre tus manos y la antena.`,
+      };
+
+    case 'volleyball_serve':
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 6,
+          headline: '¡SAQUE ACE EN LA LÍNEA!',
+          narrative: `Potencia y precisión quirúrgica directo a la esquina: la recepción de ${scenario.rivalName} ni pudo reaccionar.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 4,
+          headline: '¡SAQUE COMPLICADO QUE ROMPE RECEPCIÓN!',
+          narrative: `Tu saque flotante desordenó a ${scenario.rivalName} y le dio pelota regalada a ${scenario.teamName}.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'SAQUE LARGO / A LA RED',
+        narrative: `Excediste la fuerza por centímetros y el balón se escapó por la línea de fondo.`,
+      };
+
+    case 'volleyball_spike':
+    default:
+      if (tier === 'PERFECT') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 2,
+          statBoost: 6,
+          headline: '¡MISIL EN LA DIAGONAL! MATCH POINT',
+          narrative: `Contacto perfecto en el punto más alto: remache imparable por encima del bloqueo doble de ${scenario.rivalName}.`,
+        };
+      }
+      if (tier === 'GOOD') {
+        return {
+          tier,
+          success: true,
+          ovrDelta: 1,
+          statBoost: 4,
+          headline: '¡TOQUE INTELIGENTE Y PUNTO!',
+          narrative: `Aprovechaste las manos del bloqueo rival para mandar la pelota afuera y cerrar el set.`,
+        };
+      }
+      return {
+        tier,
+        success: false,
+        ovrDelta: -1,
+        statBoost: 0,
+        headline: 'BLOQUEO RIVAL EN LA RED',
+        narrative: `El tiempo de salto se adelantó un segundo y el bloqueo de ${scenario.rivalName} cerró la red.`,
+      };
   }
-  if (tier === 'GOOD') {
-    return {
-      tier,
-      success: true,
-      ovrDelta: 1,
-      statBoost: 4,
-      headline: '¡TOQUE INTELIGENTE Y PUNTO!',
-      narrative: `Aprovechaste las manos del bloqueo rival para mandar la pelota afuera y cerrar el set.`,
-    };
-  }
-  return {
-    tier,
-    success: false,
-    ovrDelta: -1,
-    statBoost: 0,
-    headline: 'BLOQUEO RIVAL EN LA RED',
-    narrative: `El tiempo de salto se adelantó un segundo y el bloqueo de ${scenario.rivalName} cerró la red.`,
-  };
 }
 
 export function pickContextualKeyMoment(

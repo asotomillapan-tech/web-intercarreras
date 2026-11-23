@@ -128,7 +128,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'championship_mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'position_award_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
-    getDocs(query(collection(db, 'leyendas_leaderboard'), where('weekKey', '>=', ''))),
+    getDocs(query(collection(db, 'leyendas_leaderboard'), where('sportKey', 'in', ['futbol', 'basquet', 'voley']))),
   ]);
 
   const result: Partial<TournamentState> = {};
@@ -464,6 +464,8 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
         } satisfies LeyendasLeaderboardEntry;
       })
       .sort((a, b) => b.score - a.score);
+  } else {
+    console.error('Error leyendo ranking semanal leyendas_leaderboard:', leyendasRes.reason);
   }
 
   return result;
@@ -1726,19 +1728,24 @@ export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry
     const clampInt = (n: number, min: number, max: number) =>
       Math.max(min, Math.min(max, Math.trunc(Number(n) || 0)));
 
+    const ensureMinStr = (val: string | undefined, fallback: string, minLen: number, maxLen: number) => {
+      const trimmed = (val || '').trim().slice(0, maxLen);
+      return trimmed.length >= minLen ? trimmed : fallback;
+    };
+
     const payload: Record<string, unknown> = {
       id: safeId,
       uid: entry.uid.slice(0, 128),
-      playerName: (entry.playerName || 'Leyenda UFRO').trim().slice(0, 80),
-      career: (entry.career || 'Carrera UFRO').trim().slice(0, 120),
+      playerName: ensureMinStr(entry.playerName, 'Leyenda UFRO', 1, 80),
+      career: ensureMinStr(entry.career, 'Carrera UFRO', 2, 120),
       sportKey: entry.sportKey,
       branch: entry.branch,
-      pos: (entry.pos || 'DEL').trim().slice(0, 12),
+      pos: ensureMinStr(entry.pos, 'DEL', 1, 12),
       ovr: clampInt(entry.ovr, 50, 110),
       maxOvr: clampInt(entry.maxOvr, 50, 110),
       score: clampInt(entry.score, 0, 100000),
-      legacyTitle: (entry.legacyTitle || 'Guerrero Universitario UFRO').trim().slice(0, 100),
-      legacyDesc: (entry.legacyDesc || 'Carrera universitaria UFRO').trim().slice(0, 220),
+      legacyTitle: ensureMinStr(entry.legacyTitle, 'Guerrero Universitario UFRO', 2, 100),
+      legacyDesc: ensureMinStr(entry.legacyDesc, 'Carrera universitaria UFRO', 2, 220),
       titlesCount: clampInt(entry.titlesCount, 0, 60),
       awardsCount: clampInt(entry.awardsCount, 0, 40),
       capsCount: clampInt(entry.capsCount, 0, 200),
@@ -1753,7 +1760,7 @@ export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry
         blk: clampInt(entry.stats.blk, 0, 3000),
         ace: clampInt(entry.stats.ace, 0, 3000),
       },
-      finalTeam: (entry.finalTeam || 'Club UFRO').trim().slice(0, 100),
+      finalTeam: ensureMinStr(entry.finalTeam, 'Club UFRO', 2, 100),
       stints: entry.stints.slice(0, 15).map((s) => ({
         team: s.team.slice(0, 100),
         ...(s.teamId ? { teamId: s.teamId.slice(0, 128) } : {}),
@@ -1772,7 +1779,7 @@ export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry
         title: a.title.slice(0, 100),
         year: clampInt(a.year, 2000, 2100),
       })),
-      weekKey: (entry.weekKey || '2026-W01').slice(0, 16),
+      weekKey: ensureMinStr(entry.weekKey, '2026-W01', 7, 16),
       createdAt: serverTimestamp(),
     };
 

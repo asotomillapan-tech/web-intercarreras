@@ -196,6 +196,7 @@ function AppContent() {
           totyBallots: cloud.totyBallots ?? prev.totyBallots,
           photos: cloud.photos ?? prev.photos,
           news: cloud.news ?? prev.news,
+          leyendasLeaderboard: cloud.leyendasLeaderboard ?? prev.leyendasLeaderboard,
         }));
       })
       .catch((err) => {
@@ -340,6 +341,7 @@ function AppContent() {
               totyBallots: freshPublic.totyBallots ?? prev.totyBallots,
               photos: freshPublic.photos ?? prev.photos,
               news: freshPublic.news ?? prev.news,
+              leyendasLeaderboard: freshPublic.leyendasLeaderboard ?? prev.leyendasLeaderboard,
             }));
           }
 

@@ -264,7 +264,7 @@ describe('leyendasEngine', () => {
     assert.equal(keepRes.renewed, true);
   });
 
-  it('creates and evaluates sport-specific visual mini-games (penalty kick, save, buzzer beater, spike)', () => {
+  it('rotates across diverse visual mini-games across all 3 sports and never repeats back-to-back', () => {
     const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
     const team = clubs.find((c) => c.realTeamId === 'eq-ind-1')!;
     const delCareer = createInitialCareerState({
@@ -278,24 +278,56 @@ describe('leyendasEngine', () => {
       rng: () => 0.5,
     });
 
-    const penKick = getVisualMiniGameScenario(delCareer, () => 0.5);
-    assert.equal(penKick.kind, 'penalty_kick');
-    const penPerfect = evaluateVisualMiniGameOutcome(penKick, 'PERFECT');
-    assert.equal(penPerfect.success, true);
-    assert.equal(penPerfect.ovrDelta, 2);
+    // Football field players get 4 distinct kinds: one_on_one, free_kick, penalty_kick, goal_line_tackle
+    const futbolKinds = new Set<string>();
+    for (const seed of [0.05, 0.3, 0.6, 0.9]) {
+      const sc = getVisualMiniGameScenario(delCareer, () => seed);
+      futbolKinds.add(sc.kind);
+      assert.ok(sc.actionButtonLabel.length > 3);
+      assert.equal(sc.actionChoices?.length, 3);
+      const perfect = evaluateVisualMiniGameOutcome(sc, 'PERFECT');
+      const good = evaluateVisualMiniGameOutcome(sc, 'GOOD');
+      const miss = evaluateVisualMiniGameOutcome(sc, 'MISS');
+      assert.equal(perfect.success, true);
+      assert.equal(perfect.ovrDelta, 2);
+      assert.equal(good.success, true);
+      assert.equal(good.ovrDelta, 1);
+      assert.equal(miss.success, false);
+      assert.equal(miss.ovrDelta, -1);
+    }
+    assert.equal(futbolKinds.size, 4, 'Football field players must have 4 distinct mini-games');
 
-    const penMiss = evaluateVisualMiniGameOutcome(penKick, 'MISS');
-    assert.equal(penMiss.success, false);
-    assert.equal(penMiss.ovrDelta, -1);
+    // Non-repeating rotation check: passing lastKind never returns the same kind
+    const first = getVisualMiniGameScenario(delCareer, () => 0.1);
+    for (const seed of [0.0, 0.25, 0.5, 0.75, 0.99]) {
+      const next = getVisualMiniGameScenario(delCareer, () => seed, first.kind);
+      assert.notEqual(next.kind, first.kind, 'Consecutive semesters must not repeat the same mini-game');
+    }
 
-    const arqScenario = getVisualMiniGameScenario({ ...delCareer, pos: 'ARQ' }, () => 0.5);
-    assert.equal(arqScenario.kind, 'penalty_save');
+    // Football goalkeeper has 2 distinct mini-games (penalty_save & keeper_reflex)
+    const arq1 = getVisualMiniGameScenario({ ...delCareer, pos: 'ARQ' }, () => 0.1);
+    const arq2 = getVisualMiniGameScenario({ ...delCareer, pos: 'ARQ' }, () => 0.1, arq1.kind);
+    assert.notEqual(arq1.kind, arq2.kind);
+    assert.ok(['penalty_save', 'keeper_reflex'].includes(arq1.kind));
+    assert.ok(['penalty_save', 'keeper_reflex'].includes(arq2.kind));
 
-    const bkScenario = getVisualMiniGameScenario({ ...delCareer, sportKey: 'basquet', pos: 'BASE' }, () => 0.5);
-    assert.equal(bkScenario.kind, 'buzzer_beater');
+    // Basketball has 3 distinct mini-games
+    const bkKinds = new Set<string>();
+    for (const seed of [0.05, 0.5, 0.9]) {
+      const sc = getVisualMiniGameScenario({ ...delCareer, sportKey: 'basquet', pos: 'BASE' }, () => seed);
+      bkKinds.add(sc.kind);
+      assert.equal(evaluateVisualMiniGameOutcome(sc, 'PERFECT').success, true);
+    }
+    assert.equal(bkKinds.size, 3, 'Basketball must have 3 distinct mini-games');
 
-    const vlScenario = getVisualMiniGameScenario({ ...delCareer, sportKey: 'voley', pos: 'PUN' }, () => 0.5);
-    assert.equal(vlScenario.kind, 'volleyball_spike');
+    // Volleyball has 3 distinct mini-games
+    const vlKinds = new Set<string>();
+    for (const seed of [0.05, 0.5, 0.9]) {
+      const sc = getVisualMiniGameScenario({ ...delCareer, sportKey: 'voley', pos: 'PUN' }, () => seed);
+      vlKinds.add(sc.kind);
+      assert.equal(evaluateVisualMiniGameOutcome(sc, 'PERFECT').success, true);
+    }
+    assert.equal(vlKinds.size, 3, 'Volleyball must have 3 distinct mini-games');
   });
 
   it('draws 4 tiered focus cards and resolves key moments & full semesters cleanly', () => {

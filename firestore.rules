@@ -1731,7 +1731,7 @@ service cloud.firestore {
     // --- Collection 17: /leyendas_leaderboard/{entryId} (LEYENDAS Weekly Global Ranking) ---
     match /leyendas_leaderboard/{entryId} {
       allow get: if isValidId(entryId);
-      allow list: if resource.data.weekKey is string && resource.data.weekKey.size() <= 16;
+      allow list: if resource.data.sportKey in ['futbol', 'basquet', 'voley'];
 
       allow create: if isVerified()
         && isValidId(entryId)
