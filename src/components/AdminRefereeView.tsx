@@ -18,7 +18,11 @@ import {
   X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
-import { filterMatchesByOrg } from '../domain/matchFilterEngine';
+import {
+  filterMatchesByOrg,
+  sortMatchesChronologically,
+  type MatchSortOrder,
+} from '../domain/matchFilterEngine';
 import {
   applyMatchLiveEvent,
   revertMatchLiveEvent,
@@ -44,6 +48,7 @@ import type {
   DisciplineFormatConfig,
   DisciplineId,
   DisciplineTotyConfig,
+  HomeFeaturedConfig,
   MasterSheetKey,
   MasterSheetsConfig,
   Match,
@@ -57,6 +62,7 @@ import type {
   UserRole,
 } from '../types/tournament';
 import { AdminAwardsManager } from './AdminAwardsManager';
+import { AdminFeaturedManager } from './AdminFeaturedManager';
 import { AdminMatchEditor } from './AdminMatchEditor';
 import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
@@ -67,6 +73,7 @@ import { MatchFilterBar } from './MatchFilterBar';
 
 export type PanelSubTab =
   | 'arbitro'
+  | 'portada'
   | 'noticias'
   | 'partidos'
   | 'equipos'
@@ -119,6 +126,7 @@ interface AdminRefereeViewProps {
   totyRealtimeActive: boolean;
   onSaveTotyConfig: (config: DisciplineTotyConfig) => Promise<void>;
   onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
+  onSaveHomeFeatured: (config: HomeFeaturedConfig) => Promise<void>;
   onRefreshUsers?: () => Promise<void> | void;
   onOpenAuth: () => void;
 }
@@ -241,6 +249,7 @@ export function AdminRefereeView({
   totyRealtimeActive,
   onSaveTotyConfig,
   onResetTotyConfig,
+  onSaveHomeFeatured,
   onRefreshUsers,
   onOpenAuth,
 }: AdminRefereeViewProps) {
@@ -269,6 +278,7 @@ export function AdminRefereeView({
   const [refDisciplineFilter, setRefDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
   const [refGroupFilter, setRefGroupFilter] = useState<'ALL' | string>('ALL');
   const [refStageFilter, setRefStageFilter] = useState<'ALL' | MatchPhase>('ALL');
+  const [refSortOrder, setRefSortOrder] = useState<MatchSortOrder>('newest');
   const [selectedMatchId, setSelectedMatchId] = useState<string>(
     focusedMatchId ?? state.matches.find((m) => m.status === 'EN_VIVO')?.id ?? state.matches[0]?.id ?? ''
   );
@@ -354,16 +364,13 @@ export function AdminRefereeView({
   }, [activeReferee]);
 
   const refereeMatches = useMemo(() => {
-    return filterMatchesByOrg(refereeSportMatches, {
+    const filtered = filterMatchesByOrg(refereeSportMatches, {
       disciplineId: refDisciplineFilter,
       groupName: refGroupFilter,
       fase: refStageFilter,
-    }).sort((a, b) => {
-      const w = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'PROGRAMADO' ? 1 : 2);
-      if (w(a.status) !== w(b.status)) return w(a.status) - w(b.status);
-      return `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`);
     });
-  }, [refereeSportMatches, refDisciplineFilter, refGroupFilter, refStageFilter]);
+    return sortMatchesChronologically(filtered, refSortOrder);
+  }, [refereeSportMatches, refDisciplineFilter, refGroupFilter, refStageFilter, refSortOrder]);
 
   const activeMatch: Match | undefined =
     refereeMatches.find((m) => m.id === selectedMatchId) ??
@@ -844,6 +851,17 @@ export function AdminRefereeView({
                 <>
                   <button
                     type="button"
+                    onClick={() => setSubTab('portada')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'portada'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Portada
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setSubTab('partidos')}
                     className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
                       effectiveSubTab === 'partidos'
@@ -1016,6 +1034,8 @@ export function AdminRefereeView({
                     onGroupChange={setRefGroupFilter}
                     stageFilter={refStageFilter}
                     onStageChange={setRefStageFilter}
+                    sortOrder={refSortOrder}
+                    onSortOrderChange={setRefSortOrder}
                     filteredCount={refereeMatches.length}
                     totalCount={refereeSportMatches.length}
                     compact
@@ -2476,6 +2496,14 @@ export function AdminRefereeView({
             totyRealtimeActive={totyRealtimeActive}
             onSaveTotyConfig={onSaveTotyConfig}
             onResetTotyConfig={onResetTotyConfig}
+          />
+        )}
+
+        {/* TAB 8: PORTADA DESTACADA (SOLO ADMIN) */}
+        {effectiveSubTab === 'portada' && isAdmin && (
+          <AdminFeaturedManager
+            state={state}
+            onSaveHomeFeatured={onSaveHomeFeatured}
           />
         )}
       </div>

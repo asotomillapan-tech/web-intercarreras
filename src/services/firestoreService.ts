@@ -25,6 +25,8 @@ import type {
   DisciplineFormatConfig,
   DisciplineId,
   DisciplineTotyConfig,
+  HomeFeaturedConfig,
+  HomeFeaturedCtaSection,
   LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
@@ -95,6 +97,53 @@ function sanitizeStats(raw: Partial<PlayerStats> | undefined): PlayerStats {
     aces: Math.max(0, Math.min(1000, Math.trunc(Number(raw.aces) || 0))),
     bloqueos: Math.max(0, Math.min(1000, Math.trunc(Number(raw.bloqueos) || 0))),
   };
+}
+
+const ALLOWED_FEATURED_CTA_SECTIONS: HomeFeaturedCtaSection[] = [
+  'posiciones',
+  'equipos',
+  'jugadores',
+  'votaciones',
+  'galeria',
+  'noticias',
+  'inscripciones',
+];
+
+function sanitizeHomeFeatured(raw: unknown): HomeFeaturedConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const mode = obj.mode === 'match' || obj.mode === 'custom' || obj.mode === 'auto' ? obj.mode : 'auto';
+  const result: HomeFeaturedConfig = { mode };
+
+  if (typeof obj.matchId === 'string' && obj.matchId.trim()) {
+    result.matchId = obj.matchId.trim().slice(0, 128);
+  }
+  if (typeof obj.badgeLabel === 'string' && obj.badgeLabel.trim()) {
+    result.badgeLabel = obj.badgeLabel.trim().slice(0, 80);
+  }
+  if (typeof obj.customTitle === 'string' && obj.customTitle.trim()) {
+    result.customTitle = obj.customTitle.trim().slice(0, 140);
+  }
+  if (typeof obj.customSubtitle === 'string' && obj.customSubtitle.trim()) {
+    result.customSubtitle = obj.customSubtitle.trim().slice(0, 160);
+  }
+  if (typeof obj.customDescription === 'string' && obj.customDescription.trim()) {
+    result.customDescription = obj.customDescription.trim().slice(0, 400);
+  }
+  if (typeof obj.ctaLabel === 'string' && obj.ctaLabel.trim()) {
+    result.ctaLabel = obj.ctaLabel.trim().slice(0, 60);
+  }
+  if (
+    typeof obj.ctaSection === 'string' &&
+    ALLOWED_FEATURED_CTA_SECTIONS.includes(obj.ctaSection as HomeFeaturedCtaSection)
+  ) {
+    result.ctaSection = obj.ctaSection as HomeFeaturedCtaSection;
+  }
+  if (typeof obj.updatedAt === 'string' && obj.updatedAt.trim()) {
+    result.updatedAt = obj.updatedAt.trim().slice(0, 64);
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +227,10 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     }
     if (typeof s.lastSyncedAt === 'string') {
       result.lastSyncedAt = s.lastSyncedAt;
+    }
+    const parsedFeatured = sanitizeHomeFeatured(s.homeFeatured);
+    if (parsedFeatured) {
+      result.homeFeatured = parsedFeatured;
     }
   }
 
@@ -842,6 +895,7 @@ export async function saveFirestoreSettings(settings: {
   autoSyncSheetsEnabled?: boolean;
   lastSyncedSpreadsheetId?: string;
   lastSyncedAt?: string;
+  homeFeatured?: HomeFeaturedConfig;
 }): Promise<void> {
   const path = 'settings/tournament';
   try {
@@ -877,6 +931,15 @@ export async function saveFirestoreSettings(settings: {
     }
     if (settings.lastSyncedSpreadsheetId) payload.lastSyncedSpreadsheetId = settings.lastSyncedSpreadsheetId.slice(0, 128);
     if (settings.lastSyncedAt) payload.lastSyncedAt = settings.lastSyncedAt.slice(0, 64);
+    if (settings.homeFeatured) {
+      const sanitizedFeatured = sanitizeHomeFeatured({
+        ...settings.homeFeatured,
+        updatedAt: settings.homeFeatured.updatedAt || new Date().toISOString(),
+      });
+      if (sanitizedFeatured) {
+        payload.homeFeatured = sanitizedFeatured;
+      }
+    }
 
     const existing = await getDoc(ref);
     if (existing.exists()) {

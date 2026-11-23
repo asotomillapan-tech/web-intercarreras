@@ -186,6 +186,31 @@ service cloud.firestore {
         && (!('consolidado' in ms) || (ms.consolidado is string && ms.consolidado.size() <= 128));
     }
 
+    function isValidHomeFeaturedConfig(hf) {
+      return hf is map
+        && hf.keys().hasAll(['mode'])
+        && hf.keys().hasOnly([
+          'mode',
+          'matchId',
+          'badgeLabel',
+          'customTitle',
+          'customSubtitle',
+          'customDescription',
+          'ctaLabel',
+          'ctaSection',
+          'updatedAt'
+        ])
+        && hf.mode in ['auto', 'match', 'custom']
+        && (!('matchId' in hf) || (hf.matchId is string && hf.matchId.size() <= 128))
+        && (!('badgeLabel' in hf) || (hf.badgeLabel is string && hf.badgeLabel.size() <= 80))
+        && (!('customTitle' in hf) || (hf.customTitle is string && hf.customTitle.size() <= 140))
+        && (!('customSubtitle' in hf) || (hf.customSubtitle is string && hf.customSubtitle.size() <= 160))
+        && (!('customDescription' in hf) || (hf.customDescription is string && hf.customDescription.size() <= 400))
+        && (!('ctaLabel' in hf) || (hf.ctaLabel is string && hf.ctaLabel.size() <= 60))
+        && (!('ctaSection' in hf) || (hf.ctaSection in ['posiciones', 'equipos', 'jugadores', 'votaciones', 'galeria', 'noticias', 'inscripciones']))
+        && (!('updatedAt' in hf) || (hf.updatedAt is string && hf.updatedAt.size() <= 64));
+    }
+
     function isValidTournamentSettings(data) {
       return data.keys().hasAll(['temporada', 'updatedAt'])
         && data.keys().hasOnly([
@@ -197,6 +222,7 @@ service cloud.firestore {
           'autoSyncSheetsEnabled',
           'lastSyncedSpreadsheetId',
           'lastSyncedAt',
+          'homeFeatured',
           'updatedAt'
         ])
         && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
@@ -207,6 +233,7 @@ service cloud.firestore {
         && (!('autoSyncSheetsEnabled' in data) || data.autoSyncSheetsEnabled is bool)
         && (!('lastSyncedSpreadsheetId' in data) || (data.lastSyncedSpreadsheetId is string && data.lastSyncedSpreadsheetId.size() <= 128))
         && (!('lastSyncedAt' in data) || (data.lastSyncedAt is string && data.lastSyncedAt.size() <= 64))
+        && (!('homeFeatured' in data) || isValidHomeFeaturedConfig(data.homeFeatured))
         && data.updatedAt is timestamp;
     }
 
@@ -1018,6 +1045,7 @@ service cloud.firestore {
           'autoSyncSheetsEnabled',
           'lastSyncedSpreadsheetId',
           'lastSyncedAt',
+          'homeFeatured',
           'updatedAt'
         ])
         && isAdmin();

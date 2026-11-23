@@ -509,8 +509,32 @@ export interface LeyendasLeaderboardEntry {
   createdAt: string;
 }
 
+export type HomeFeaturedMode = 'auto' | 'match' | 'custom';
+
+export type HomeFeaturedCtaSection =
+  | 'posiciones'
+  | 'equipos'
+  | 'jugadores'
+  | 'votaciones'
+  | 'galeria'
+  | 'noticias'
+  | 'inscripciones';
+
+export interface HomeFeaturedConfig {
+  mode: HomeFeaturedMode;
+  matchId?: string;
+  badgeLabel?: string;
+  customTitle?: string;
+  customSubtitle?: string;
+  customDescription?: string;
+  ctaLabel?: string;
+  ctaSection?: HomeFeaturedCtaSection;
+  updatedAt?: string;
+}
+
 export interface TournamentState {
   temporada: string;
+  homeFeatured?: HomeFeaturedConfig;
   configs: Record<DisciplineId, DisciplineFormatConfig>;
   teams: Team[];
   players: Player[];

@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { Filter, Layers, RotateCcw, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ArrowUpDown, Filter, Layers, RotateCcw, SlidersHorizontal, Users, X } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   computeMatchFilterFacets,
   extractMatchGroups,
   type MatchGroupByMode,
+  type MatchSortOrder,
 } from '../domain/matchFilterEngine';
 import type { DisciplineId, DisciplineMeta, Match, MatchPhase } from '../types/tournament';
 
@@ -24,6 +25,9 @@ export interface MatchFilterBarProps {
   onStageChange: (value: 'ALL' | MatchPhase) => void;
   groupBy?: MatchGroupByMode;
   onGroupByChange?: (value: MatchGroupByMode) => void;
+  /** Chronological order: 'newest' (default, recent/scheduled first) or 'oldest'. */
+  sortOrder?: MatchSortOrder;
+  onSortOrderChange?: (value: MatchSortOrder) => void;
   /** Optional additional dropdowns/inputs (e.g. Sede/Cancha, Estado, Búsqueda) rendered inside the same bar. */
   extraControls?: ReactNode;
   /** Optional override for displayed filtered count when parent applies additional filters (e.g. venue/status/search). */
@@ -50,6 +54,8 @@ export function MatchFilterBar({
   onStageChange,
   groupBy,
   onGroupByChange,
+  sortOrder,
+  onSortOrderChange,
   extraControls,
   filteredCount,
   totalCount,
@@ -72,12 +78,14 @@ export function MatchFilterBar({
   const isGroupFiltered = effectiveGroupValue !== 'ALL';
   const isStageFiltered = stageFilter !== 'ALL';
   const isGroupByFiltered = groupBy !== undefined && groupBy !== 'none';
+  const isSortOrderFiltered = sortOrder !== undefined && sortOrder !== 'newest';
 
   const hasActiveFilters =
     isDisciplineFiltered ||
     isGroupFiltered ||
     isStageFiltered ||
     isGroupByFiltered ||
+    isSortOrderFiltered ||
     hasExtraActiveFilters;
 
   const handleDisciplineSelect = (nextValue: 'ALL' | DisciplineId) => {
@@ -101,6 +109,7 @@ export function MatchFilterBar({
     onGroupChange('ALL');
     onStageChange('ALL');
     onGroupByChange?.('none');
+    onSortOrderChange?.('newest');
   };
 
   const activeDisciplineLabel =
@@ -205,7 +214,29 @@ export function MatchFilterBar({
         {/* 4. OPTIONAL EXTRA CONTROLS (Sede, Estado, etc.) */}
         {extraControls}
 
-        {/* 5. OPTIONAL ORGANIZE BY */}
+        {/* 5. OPTIONAL CHRONOLOGICAL ORDER */}
+        {sortOrder !== undefined && onSortOrderChange && (
+          <div className="min-w-[195px] flex-1">
+            <label
+              htmlFor={`${idPrefix}-sort`}
+              className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+            >
+              <ArrowUpDown className="w-3 h-3 text-[#707ef9]" />
+              <span>Orden</span>
+            </label>
+            <select
+              id={`${idPrefix}-sort`}
+              value={sortOrder}
+              onChange={(e) => onSortOrderChange(e.target.value as MatchSortOrder)}
+              className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+            >
+              <option value="newest">Más recientes / programados</option>
+              <option value="oldest">Más antiguos primero</option>
+            </select>
+          </div>
+        )}
+
+        {/* 6. OPTIONAL ORGANIZE BY */}
         {groupBy !== undefined && onGroupByChange && (
           <div className="min-w-[170px] flex-1">
             <label
@@ -221,7 +252,7 @@ export function MatchFilterBar({
               onChange={(e) => onGroupByChange(e.target.value as MatchGroupByMode)}
               className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
             >
-              <option value="none">Orden cronológico</option>
+              <option value="none">Lista continua</option>
               {allowAllDisciplines && !disciplineLocked && (
                 <option value="disciplina">Agrupar por Disciplina</option>
               )}

@@ -19,7 +19,9 @@ import {
 import {
   filterMatchesByOrg,
   groupMatchesByOrg,
+  sortMatchesChronologically,
   type MatchGroupByMode,
+  type MatchSortOrder,
 } from '../domain/matchFilterEngine';
 import {
   NEWS_CATEGORY_META,
@@ -61,6 +63,7 @@ interface HomeViewProps {
   onOpenMatchInReferee: (matchId: string) => void;
   onOpenNewsArticle: (article: NewsArticle) => void;
   onOpenNewsManager: () => void;
+  onOpenFeaturedManager?: () => void;
   onToggleFavoriteTeam: (teamId: string) => void;
   onOpenAuth: () => void;
 }
@@ -84,6 +87,7 @@ export function HomeView({
   onOpenMatchInReferee,
   onOpenNewsArticle,
   onOpenNewsManager,
+  onOpenFeaturedManager,
   onToggleFavoriteTeam,
   onOpenAuth,
 }: HomeViewProps) {
@@ -91,6 +95,7 @@ export function HomeView({
   const [matchGroupFilter, setMatchGroupFilter] = useState<'ALL' | string>('ALL');
   const [matchStageFilter, setMatchStageFilter] = useState<'ALL' | Match['fase']>('ALL');
   const [matchGroupBy, setMatchGroupBy] = useState<MatchGroupByMode>('none');
+  const [matchSortOrder, setMatchSortOrder] = useState<MatchSortOrder>('newest');
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
 
@@ -99,7 +104,29 @@ export function HomeView({
     [state.matches]
   );
 
-  const featuredMatch: Match | undefined = activeWindowMatches[0] ?? state.matches[0];
+  const chronologicallyNewestMatches = useMemo(
+    () => sortMatchesChronologically(state.matches, 'newest'),
+    [state.matches]
+  );
+
+  const homeFeaturedConfig = state.homeFeatured;
+  const isCustomHeroFeatured =
+    homeFeaturedConfig?.mode === 'custom' && Boolean(homeFeaturedConfig.customTitle?.trim());
+
+  const featuredMatch: Match | undefined = useMemo(() => {
+    if (isCustomHeroFeatured) return undefined;
+    if (homeFeaturedConfig?.mode === 'match' && homeFeaturedConfig.matchId) {
+      const explicit = state.matches.find((m) => m.id === homeFeaturedConfig.matchId);
+      if (explicit) return explicit;
+    }
+    return activeWindowMatches[0] ?? chronologicallyNewestMatches[0];
+  }, [
+    isCustomHeroFeatured,
+    homeFeaturedConfig,
+    state.matches,
+    activeWindowMatches,
+    chronologicallyNewestMatches,
+  ]);
 
   const visibleMatches = useMemo(() => {
     const filtered = filterMatchesByOrg(state.matches, {
@@ -107,13 +134,9 @@ export function HomeView({
       groupName: matchGroupFilter,
       fase: matchStageFilter,
     });
-    const ordered = [...filtered].sort((a, b) => {
-      const weight = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'FINALIZADO' ? 1 : 2);
-      if (weight(a.status) !== weight(b.status)) return weight(a.status) - weight(b.status);
-      return b.fecha.localeCompare(a.fecha);
-    });
+    const ordered = sortMatchesChronologically(filtered, matchSortOrder);
     return ordered.slice(0, matchGroupBy === 'none' ? 8 : 24);
-  }, [state.matches, matchFilter, matchGroupFilter, matchStageFilter, matchGroupBy]);
+  }, [state.matches, matchFilter, matchGroupFilter, matchStageFilter, matchGroupBy, matchSortOrder]);
 
   const visibleMatchSections = useMemo(() => {
     const labels = Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<
@@ -234,18 +257,72 @@ export function HomeView({
               </div>
             </div>
 
-            {/* Hero Featured Match Card or Season Launch Card */}
-            {featuredMatch ? (
+            {/* Hero Featured Custom Highlight, Designated Match Card, or Season Launch Card */}
+            {isCustomHeroFeatured && homeFeaturedConfig ? (
+              <div className="lg:col-span-5 flex flex-col justify-end min-w-0">
+                <div className="bg-[#141418]/95 border border-white/15 p-6 sm:p-7 space-y-5 overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 text-xs text-neutral-300 border-b border-white/10 pb-3">
+                    <span className="font-bold uppercase tracking-wider text-[#707ef9] truncate">
+                      {homeFeaturedConfig.badgeLabel?.trim() || `Destacado · Temporada ${state.temporada}`}
+                    </span>
+                    <Sparkles className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <h2 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-tight leading-tight text-white">
+                      {homeFeaturedConfig.customTitle}
+                    </h2>
+                    {homeFeaturedConfig.customSubtitle && (
+                      <p className="text-xs text-neutral-300 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                        <span>{homeFeaturedConfig.customSubtitle}</span>
+                      </p>
+                    )}
+                    {homeFeaturedConfig.customDescription && (
+                      <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed pt-1">
+                        {homeFeaturedConfig.customDescription}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (homeFeaturedConfig.ctaSection === 'noticias') {
+                          document.getElementById('home-news-heading')?.scrollIntoView({ behavior: 'smooth' });
+                        } else {
+                          onNavigate(homeFeaturedConfig.ctaSection ?? 'posiciones');
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer whitespace-nowrap"
+                    >
+                      <span>{homeFeaturedConfig.ctaLabel || 'Ver más información'}</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    {currentUser?.role === 'admin' && onOpenFeaturedManager && (
+                      <button
+                        type="button"
+                        onClick={onOpenFeaturedManager}
+                        className="text-xs text-neutral-400 hover:text-white font-medium whitespace-nowrap cursor-pointer"
+                      >
+                        Configurar destacado
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : featuredMatch ? (
               <div className="lg:col-span-5 flex flex-col justify-end min-w-0">
                 <div className="bg-[#141418]/95 border border-white/15 p-5 sm:p-7 space-y-5 overflow-hidden">
                   <div className="flex items-center justify-between gap-3 text-xs text-neutral-300 border-b border-white/10 pb-3">
                     <span className="font-medium text-white truncate">
-                      {DISCIPLINE_MAP[featuredMatch.disciplineId].nombreCorto}
+                      {homeFeaturedConfig?.mode === 'match' && homeFeaturedConfig.badgeLabel?.trim()
+                        ? `${homeFeaturedConfig.badgeLabel.trim()} · ${DISCIPLINE_MAP[featuredMatch.disciplineId].nombreCorto}`
+                        : DISCIPLINE_MAP[featuredMatch.disciplineId].nombreCorto}
                     </span>
                     <span className="flex items-center gap-2 whitespace-nowrap shrink-0 tabular-nums">
-                      {canVoteMatchMvp(featuredMatch) && (
-                        <span className="inline-block w-2 h-2 rounded-full bg-[#707ef9]" aria-hidden="true" />
-                      )}
                       <span
                         className={
                           canVoteMatchMvp(featuredMatch)
@@ -256,8 +333,8 @@ export function HomeView({
                         {canVoteMatchMvp(featuredMatch)
                           ? `En horario · ${featuredMatch.hora}`
                           : shouldRevealPublicMatchData(featuredMatch)
-                          ? 'Resultado Oficial'
-                          : `Programado · ${featuredMatch.hora}`}
+                          ? `Resultado Oficial · ${featuredMatch.fecha}`
+                          : `Programado · ${featuredMatch.fecha} ${featuredMatch.hora}`}
                       </span>
                     </span>
                   </div>
@@ -310,7 +387,7 @@ export function HomeView({
                       <span className="truncate">{featuredMatch.cancha}</span>
                     </span>
 
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex flex-wrap items-center gap-3 shrink-0">
                       {canVoteMatchMvp(featuredMatch) ? (
                         <button
                           type="button"
@@ -337,6 +414,16 @@ export function HomeView({
                           className="text-neutral-300 hover:text-white font-medium whitespace-nowrap cursor-pointer"
                         >
                           Mesa arbitral
+                        </button>
+                      )}
+
+                      {currentUser?.role === 'admin' && onOpenFeaturedManager && (
+                        <button
+                          type="button"
+                          onClick={onOpenFeaturedManager}
+                          className="text-neutral-400 hover:text-white font-medium whitespace-nowrap cursor-pointer"
+                        >
+                          Configurar destacado
                         </button>
                       )}
                     </div>
@@ -379,6 +466,15 @@ export function HomeView({
                     >
                       Archivo 2025 Drive
                     </button>
+                    {currentUser?.role === 'admin' && onOpenFeaturedManager && (
+                      <button
+                        type="button"
+                        onClick={onOpenFeaturedManager}
+                        className="text-xs text-neutral-400 hover:text-white font-medium whitespace-nowrap cursor-pointer"
+                      >
+                        Configurar destacado
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -693,6 +789,8 @@ export function HomeView({
             onGroupChange={setMatchGroupFilter}
             stageFilter={matchStageFilter}
             onStageChange={setMatchStageFilter}
+            sortOrder={matchSortOrder}
+            onSortOrderChange={setMatchSortOrder}
             groupBy={matchGroupBy}
             onGroupByChange={setMatchGroupBy}
             filteredCount={visibleMatches.length}
@@ -702,6 +800,7 @@ export function HomeView({
               setMatchGroupFilter('ALL');
               setMatchStageFilter('ALL');
               setMatchGroupBy('none');
+              setMatchSortOrder('newest');
             }}
             compact
           />
@@ -724,6 +823,7 @@ export function HomeView({
                   setMatchGroupFilter('ALL');
                   setMatchStageFilter('ALL');
                   setMatchGroupBy('none');
+                  setMatchSortOrder('newest');
                 }}
                 className="px-5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer"
               >

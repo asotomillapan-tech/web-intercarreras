@@ -1,4 +1,5 @@
 import type { DisciplineId, Match, MatchPhase } from '../types/tournament';
+import { normalizeMatchDateToIso } from './calendarEngine';
 
 export const MATCH_STAGE_ORDER: MatchPhase[] = [
   'Grupos',
@@ -10,6 +11,8 @@ export const MATCH_STAGE_ORDER: MatchPhase[] = [
 ];
 
 export type MatchGroupByMode = 'none' | 'disciplina' | 'grupo' | 'fase';
+
+export type MatchSortOrder = 'newest' | 'oldest';
 
 export interface MatchOrgFilter {
   disciplineId?: 'ALL' | DisciplineId;
@@ -230,5 +233,46 @@ export function computeMatchFilterFacets(
     availableGroups,
     availableStages: MATCH_STAGE_ORDER,
   };
+}
+
+function normalizeTimeSortable(hora: string | undefined | null): string {
+  const raw = (hora ?? '').trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(raw);
+  if (!match) return '00:00';
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
+function getMatchChronologicalKey(match: Match): string {
+  const isoDate = normalizeMatchDateToIso(match.fecha) ?? '0000-00-00';
+  const time = normalizeTimeSortable(match.hora);
+  return `${isoDate}T${time}`;
+}
+
+/**
+ * Sorts matches chronologically.
+ * - 'newest' (default): EN_VIVO first, then most recent / upcoming scheduled date-time descending down to oldest.
+ * - 'oldest': earliest date-time ascending up to newest / upcoming scheduled.
+ */
+export function sortMatchesChronologically(
+  matches: Match[],
+  order: MatchSortOrder = 'newest'
+): Match[] {
+  return [...matches].sort((a, b) => {
+    if (order === 'newest') {
+      const liveA = a.status === 'EN_VIVO' ? 1 : 0;
+      const liveB = b.status === 'EN_VIVO' ? 1 : 0;
+      if (liveA !== liveB) return liveB - liveA;
+    }
+
+    const keyA = getMatchChronologicalKey(a);
+    const keyB = getMatchChronologicalKey(b);
+    const cmp = order === 'newest' ? keyB.localeCompare(keyA) : keyA.localeCompare(keyB);
+    if (cmp !== 0) return cmp;
+
+    const jCmp = order === 'newest' ? (b.jornada ?? 0) - (a.jornada ?? 0) : (a.jornada ?? 0) - (b.jornada ?? 0);
+    if (jCmp !== 0) return jCmp;
+
+    return a.id.localeCompare(b.id);
+  });
 }
 

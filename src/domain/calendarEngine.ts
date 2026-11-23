@@ -176,9 +176,14 @@ export function filterCalendarMatches(
 }
 
 /**
- * Groups matches chronologically by YYYY-MM-DD date, ordering matches inside each day by hora.
+ * Groups matches chronologically by YYYY-MM-DD date.
+ * - 'newest' (default): most recent / upcoming scheduled dates first, latest hour first within a day (EN_VIVO prioritized).
+ * - 'oldest': earliest dates first, earliest hour first within a day.
  */
-export function groupMatchesByDate(matches: Match[]): CalendarDateGroup[] {
+export function groupMatchesByDate(
+  matches: Match[],
+  order: 'newest' | 'oldest' = 'newest'
+): CalendarDateGroup[] {
   const map = new Map<string, Match[]>();
 
   for (const match of matches) {
@@ -189,10 +194,17 @@ export function groupMatchesByDate(matches: Match[]): CalendarDateGroup[] {
   }
 
   return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (order === 'newest' ? b.localeCompare(a) : a.localeCompare(b)))
     .map(([fecha, list]) => {
       const sortedMatches = [...list].sort((a, b) => {
-        const timeCmp = (a.hora || '').localeCompare(b.hora || '');
+        if (order === 'newest') {
+          const liveA = a.status === 'EN_VIVO' ? 1 : 0;
+          const liveB = b.status === 'EN_VIVO' ? 1 : 0;
+          if (liveA !== liveB) return liveB - liveA;
+        }
+        const timeA = (a.hora || '').padStart(5, '0');
+        const timeB = (b.hora || '').padStart(5, '0');
+        const timeCmp = order === 'newest' ? timeB.localeCompare(timeA) : timeA.localeCompare(timeB);
         if (timeCmp !== 0) return timeCmp;
         const discCmp = a.disciplineId.localeCompare(b.disciplineId);
         if (discCmp !== 0) return discCmp;

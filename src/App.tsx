@@ -62,6 +62,12 @@ import {
   fetch2025RandomEditorialPhotos,
   type Editorial2025Photos,
 } from './services/googleDrive';
+import {
+  loadCachedEditorialPhotos,
+  loadCachedPublicTournamentState,
+  saveCachedEditorialPhotos,
+  saveCachedPublicTournamentState,
+} from './services/localCache';
 import { AccountView } from './components/AccountView';
 import { AdminRefereeView, type PanelSubTab } from './components/AdminRefereeView';
 import { AuthModal } from './components/AuthModal';
@@ -88,6 +94,7 @@ import type {
   DisciplineFormatConfig,
   DisciplineId,
   DisciplineTotyConfig,
+  HomeFeaturedConfig,
   LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
@@ -116,7 +123,30 @@ function isPrivacyPath(pathname: string): boolean {
 }
 
 function AppContent() {
-  const [state, setState] = useState<TournamentState>(() => createInitialTournamentState());
+  const [state, setState] = useState<TournamentState>(() => {
+    const base = createInitialTournamentState();
+    const cached = loadCachedPublicTournamentState();
+    if (!cached?.data) return base;
+    return {
+      ...base,
+      ...cached.data,
+      configs: cached.data.configs ?? base.configs,
+      masterSheets: cached.data.masterSheets ?? base.masterSheets,
+      teams: cached.data.teams ?? base.teams,
+      players: cached.data.players ?? base.players,
+      matches: cached.data.matches ?? base.matches,
+      transfers: cached.data.transfers ?? base.transfers,
+      mvpVotes: cached.data.mvpVotes ?? base.mvpVotes,
+      awardNominees: cached.data.awardNominees ?? base.awardNominees,
+      championshipMvpVotes: cached.data.championshipMvpVotes ?? base.championshipMvpVotes,
+      positionAwardVotes: cached.data.positionAwardVotes ?? base.positionAwardVotes,
+      totyBallots: cached.data.totyBallots ?? base.totyBallots,
+      totyConfigs: cached.data.totyConfigs ?? base.totyConfigs,
+      photos: cached.data.photos ?? base.photos,
+      news: cached.data.news ?? base.news,
+      leyendasLeaderboard: cached.data.leyendasLeaderboard ?? base.leyendasLeaderboard,
+    };
+  });
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
     typeof window !== 'undefined' && isPrivacyPath(window.location.pathname)
       ? 'privacidad'
@@ -125,7 +155,9 @@ function AppContent() {
   const [selectedDiscipline, setSelectedDiscipline] = useState<DisciplineId>('f7-h-1');
   const [inspectedPlayer, setInspectedPlayer] = useState<Player | null>(null);
   const [inspectedTeamId, setInspectedTeamId] = useState<string | null>(null);
-  const [editorialPhotos, setEditorialPhotos] = useState<Editorial2025Photos | null>(null);
+  const [editorialPhotos, setEditorialPhotos] = useState<Editorial2025Photos | null>(
+    () => loadCachedEditorialPhotos()?.data ?? null
+  );
   const [panelInitialSubTab, setPanelInitialSubTab] = useState<PanelSubTab>('arbitro');
   const [focusedMatchId, setFocusedMatchId] = useState<string | null>(null);
 
@@ -176,36 +208,71 @@ function AppContent() {
     setCloudError(`${context}: ${detail}`);
   }, []);
 
-  // 1. Hydrate all public tournament data directly from Firestore on mount
+  const inFlightPublicSyncRef = useRef<Promise<Partial<TournamentState>> | null>(null);
+  const lastPublicSyncAtRef = useRef<number>(0);
+
+  const fetchPublicStateDeduped = useCallback(
+    async (force = false): Promise<Partial<TournamentState>> => {
+      if (inFlightPublicSyncRef.current) {
+        return inFlightPublicSyncRef.current;
+      }
+      if (!force && Date.now() - lastPublicSyncAtRef.current < 15_000) {
+        return {};
+      }
+      const promise = loadPublicTournamentState()
+        .then((cloud) => {
+          lastPublicSyncAtRef.current = Date.now();
+          return cloud;
+        })
+        .finally(() => {
+          inFlightPublicSyncRef.current = null;
+        });
+      inFlightPublicSyncRef.current = promise;
+      return promise;
+    },
+    []
+  );
+
+  const applyCloudPublicState = useCallback((cloud: Partial<TournamentState>) => {
+    if (!cloud || Object.keys(cloud).length === 0) return;
+    setState((prev) => {
+      const merged: TournamentState = {
+        ...prev,
+        temporada: cloud.temporada ?? prev.temporada,
+        homeFeatured: cloud.homeFeatured !== undefined ? cloud.homeFeatured : prev.homeFeatured,
+        driveUploadRootFolderId: cloud.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
+        driveUploadRootFolderName: cloud.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
+        masterSheets: cloud.masterSheets ?? prev.masterSheets,
+        autoSyncSheetsEnabled: cloud.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
+        lastSyncedSpreadsheetId: cloud.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
+        lastSyncedAt: cloud.lastSyncedAt ?? prev.lastSyncedAt,
+        configs: cloud.configs ?? prev.configs,
+        teams: cloud.teams ?? prev.teams,
+        players: cloud.players ?? prev.players,
+        matches: cloud.matches ?? prev.matches,
+        transfers: cloud.transfers ?? prev.transfers,
+        mvpVotes: cloud.mvpVotes ?? prev.mvpVotes,
+        awardNominees: cloud.awardNominees ?? prev.awardNominees,
+        championshipMvpVotes: cloud.championshipMvpVotes ?? prev.championshipMvpVotes,
+        positionAwardVotes: cloud.positionAwardVotes ?? prev.positionAwardVotes,
+        totyBallots: cloud.totyBallots ?? prev.totyBallots,
+        totyConfigs: cloud.totyConfigs ?? prev.totyConfigs,
+        photos: cloud.photos ?? prev.photos,
+        news: cloud.news ?? prev.news,
+        leyendasLeaderboard: cloud.leyendasLeaderboard ?? prev.leyendasLeaderboard,
+      };
+      saveCachedPublicTournamentState(merged);
+      return merged;
+    });
+  }, []);
+
+  // 1. Hydrate all public tournament data in background (stale-while-revalidate over localStorage cache)
   useEffect(() => {
     let active = true;
-    loadPublicTournamentState()
+    fetchPublicStateDeduped(true)
       .then((cloud) => {
         if (!active) return;
-        setState((prev) => ({
-          ...prev,
-          temporada: cloud.temporada ?? prev.temporada,
-          driveUploadRootFolderId: cloud.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
-          driveUploadRootFolderName: cloud.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
-          masterSheets: cloud.masterSheets ?? prev.masterSheets,
-          autoSyncSheetsEnabled: cloud.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
-          lastSyncedSpreadsheetId: cloud.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
-          lastSyncedAt: cloud.lastSyncedAt ?? prev.lastSyncedAt,
-          configs: cloud.configs ?? prev.configs,
-          teams: cloud.teams ?? prev.teams,
-          players: cloud.players ?? prev.players,
-          matches: cloud.matches ?? prev.matches,
-          transfers: cloud.transfers ?? prev.transfers,
-          mvpVotes: cloud.mvpVotes ?? prev.mvpVotes,
-          awardNominees: cloud.awardNominees ?? prev.awardNominees,
-          championshipMvpVotes: cloud.championshipMvpVotes ?? prev.championshipMvpVotes,
-          positionAwardVotes: cloud.positionAwardVotes ?? prev.positionAwardVotes,
-          totyBallots: cloud.totyBallots ?? prev.totyBallots,
-          totyConfigs: cloud.totyConfigs ?? prev.totyConfigs,
-          photos: cloud.photos ?? prev.photos,
-          news: cloud.news ?? prev.news,
-          leyendasLeaderboard: cloud.leyendasLeaderboard ?? prev.leyendasLeaderboard,
-        }));
+        applyCloudPublicState(cloud);
       })
       .catch((err) => {
         if (active) reportCloudError('Error cargando datos del campeonato', err);
@@ -213,14 +280,50 @@ function AppContent() {
     return () => {
       active = false;
     };
-  }, [reportCloudError]);
+  }, [fetchPublicStateDeduped, applyCloudPublicState, reportCloudError]);
 
-  // 1B. Fetch random real photographs from the 2025 UFRO Google Drive gallery (replaces stock photos)
+  // 1A. Debounced persistence of public tournament snapshot to localStorage for instant subsequent loads
+  const didMountCacheRef = useRef(false);
   useEffect(() => {
+    if (!didMountCacheRef.current) {
+      didMountCacheRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      saveCachedPublicTournamentState(state);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [
+    state.temporada,
+    state.homeFeatured,
+    state.configs,
+    state.teams,
+    state.players,
+    state.matches,
+    state.transfers,
+    state.mvpVotes,
+    state.awardNominees,
+    state.championshipMvpVotes,
+    state.positionAwardVotes,
+    state.totyBallots,
+    state.totyConfigs,
+    state.photos,
+    state.news,
+    state.leyendasLeaderboard,
+  ]);
+
+  // 1B. Fetch random real photographs from the 2025 UFRO Google Drive gallery (with 30-min cache)
+  useEffect(() => {
+    const cachedPhotos = loadCachedEditorialPhotos();
+    if (cachedPhotos?.isFresh && cachedPhotos.data?.heroUrl) {
+      return;
+    }
     let active = true;
     fetch2025RandomEditorialPhotos()
       .then((photos) => {
-        if (active) setEditorialPhotos(photos);
+        if (!active) return;
+        setEditorialPhotos(photos);
+        saveCachedEditorialPhotos(photos);
       })
       .catch(() => {
         // Non-fatal fallback: dark carbon editorial background remains clean
@@ -323,35 +426,12 @@ function AppContent() {
           });
           setCurrentUserUid(profile.uid);
 
-          // Ensure public state + authorized private PII are synced
-          const freshPublic = await loadPublicTournamentState().catch(() => null);
-          if (freshPublic) {
+          // Deduplicate with mount fetch: await in-flight sync or reuse fresh snapshot
+          const freshPublic = await fetchPublicStateDeduped(false).catch(() => null);
+          if (freshPublic && Object.keys(freshPublic).length > 0) {
             snapshotPlayers = freshPublic.players ?? snapshotPlayers;
             snapshotConfigs = freshPublic.configs ?? snapshotConfigs;
-            setState((prev) => ({
-              ...prev,
-              temporada: freshPublic.temporada ?? prev.temporada,
-              driveUploadRootFolderId: freshPublic.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
-              driveUploadRootFolderName: freshPublic.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
-              masterSheets: freshPublic.masterSheets ?? prev.masterSheets,
-              autoSyncSheetsEnabled: freshPublic.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
-              lastSyncedSpreadsheetId: freshPublic.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
-              lastSyncedAt: freshPublic.lastSyncedAt ?? prev.lastSyncedAt,
-              configs: freshPublic.configs ?? prev.configs,
-              teams: freshPublic.teams ?? prev.teams,
-              players: freshPublic.players ?? prev.players,
-              matches: freshPublic.matches ?? prev.matches,
-              transfers: freshPublic.transfers ?? prev.transfers,
-              mvpVotes: freshPublic.mvpVotes ?? prev.mvpVotes,
-              awardNominees: freshPublic.awardNominees ?? prev.awardNominees,
-              championshipMvpVotes: freshPublic.championshipMvpVotes ?? prev.championshipMvpVotes,
-              positionAwardVotes: freshPublic.positionAwardVotes ?? prev.positionAwardVotes,
-              totyBallots: freshPublic.totyBallots ?? prev.totyBallots,
-              totyConfigs: freshPublic.totyConfigs ?? prev.totyConfigs,
-              photos: freshPublic.photos ?? prev.photos,
-              news: freshPublic.news ?? prev.news,
-              leyendasLeaderboard: freshPublic.leyendasLeaderboard ?? prev.leyendasLeaderboard,
-            }));
+            applyCloudPublicState(freshPublic);
           }
 
           await hydrateForAuthenticatedProfile(profile, snapshotPlayers, snapshotConfigs);
@@ -378,7 +458,7 @@ function AppContent() {
       }
     );
     return () => unsub();
-  }, [hydrateForAuthenticatedProfile, reportCloudError]);
+  }, [fetchPublicStateDeduped, applyCloudPublicState, hydrateForAuthenticatedProfile, reportCloudError]);
 
   // 2B. Real-time Firestore listeners for TOTY ballots & discipline formation configs
   useEffect(() => {
@@ -1182,6 +1262,12 @@ function AppContent() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleOpenFeaturedManager = () => {
+    setPanelInitialSubTab('portada');
+    setActiveSection('panel');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleUpdateMatch = (
     updatedMatch: Match,
     scorerPlayerId?: string,
@@ -1428,6 +1514,24 @@ function AppContent() {
     }).catch((err) => reportCloudError('Error guardando ID de Google Sheets', err));
   };
 
+  const handleSaveHomeFeatured = async (config: HomeFeaturedConfig) => {
+    await saveFirestoreSettings({
+      temporada: state.temporada,
+      driveUploadRootFolderId: state.driveUploadRootFolderId,
+      driveUploadRootFolderName: state.driveUploadRootFolderName,
+      masterSheets: state.masterSheets,
+      autoSyncSheetsEnabled: state.autoSyncSheetsEnabled,
+      lastSyncedSpreadsheetId: state.lastSyncedSpreadsheetId,
+      lastSyncedAt: state.lastSyncedAt,
+      homeFeatured: config,
+    });
+    setState((prev) => {
+      const next = { ...prev, homeFeatured: config };
+      saveCachedPublicTournamentState(next);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-white text-[#0d0d0d]">
       <Navbar
@@ -1476,6 +1580,7 @@ function AppContent() {
             onOpenMatchInReferee={handleOpenMatchInReferee}
             onOpenNewsArticle={setActiveNewsArticle}
             onOpenNewsManager={handleOpenNewsManager}
+            onOpenFeaturedManager={handleOpenFeaturedManager}
             onToggleFavoriteTeam={handleToggleFavoriteTeam}
             onOpenAuth={() => setAuthModalOpen(true)}
           />
@@ -1632,6 +1737,7 @@ function AppContent() {
             totyRealtimeActive={totyRealtimeActive}
             onSaveTotyConfig={handleSaveTotyConfig}
             onResetTotyConfig={handleResetTotyConfig}
+            onSaveHomeFeatured={handleSaveHomeFeatured}
             onRefreshUsers={handleRefreshUsers}
             onOpenAuth={() => setAuthModalOpen(true)}
           />

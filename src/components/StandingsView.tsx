@@ -4,7 +4,9 @@ import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   filterMatchesByOrg,
   groupMatchesByOrg,
+  sortMatchesChronologically,
   type MatchGroupByMode,
+  type MatchSortOrder,
 } from '../domain/matchFilterEngine';
 import { canVoteMatchMvp, shouldRevealPublicMatchData } from '../domain/rbacEngine';
 import { buildFullPlayoffTree, computeStandings } from '../domain/tournamentEngine';
@@ -61,6 +63,7 @@ export function StandingsView({
   const [matchGroupFilter, setMatchGroupFilter] = useState<'ALL' | string>('ALL');
   const [matchStageFilter, setMatchStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [matchGroupBy, setMatchGroupBy] = useState<MatchGroupByMode>('fase');
+  const [matchSortOrder, setMatchSortOrder] = useState<MatchSortOrder>('newest');
 
   useEffect(() => {
     setMatchDisciplineFilter(selectedDiscipline);
@@ -123,22 +126,28 @@ export function StandingsView({
     selectedGroup === 'ALL' || !groups.includes(selectedGroup) ? groups : [selectedGroup];
 
   const organizedDisciplineMatches = useMemo(() => {
-    const filtered = filterMatchesByOrg(state.matches, {
-      disciplineId: matchDisciplineFilter,
-      groupName: matchGroupFilter,
-      fase: matchStageFilter,
-    }).sort((a, b) => {
-      const rank = (s: Match['status']) => (s === 'EN_VIVO' ? 0 : s === 'PROGRAMADO' ? 1 : 2);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-      return `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`);
-    });
+    const filtered = sortMatchesChronologically(
+      filterMatchesByOrg(state.matches, {
+        disciplineId: matchDisciplineFilter,
+        groupName: matchGroupFilter,
+        fase: matchStageFilter,
+      }),
+      matchSortOrder
+    );
     return groupMatchesByOrg(
       filtered,
       matchGroupBy,
       Object.fromEntries(DISCIPLINES.map((d) => [d.id, d.nombre])) as Record<DisciplineId, string>,
       DISCIPLINES.map((d) => d.id)
     );
-  }, [state.matches, matchDisciplineFilter, matchGroupFilter, matchStageFilter, matchGroupBy]);
+  }, [
+    state.matches,
+    matchDisciplineFilter,
+    matchGroupFilter,
+    matchStageFilter,
+    matchGroupBy,
+    matchSortOrder,
+  ]);
 
   const totalFilteredMatches = useMemo(
     () => organizedDisciplineMatches.reduce((acc, sec) => acc + sec.matches.length, 0),
@@ -303,7 +312,10 @@ export function StandingsView({
 
             {displayedGroups.map((group) => {
               const rows = standingsByGroup[group] ?? [];
-              const gMatches = disciplineMatches.filter((m) => m.groupName === group).slice(0, 6);
+              const gMatches = sortMatchesChronologically(
+                disciplineMatches.filter((m) => m.groupName === group),
+                'newest'
+              ).slice(0, 6);
 
               return (
                 <section key={group} className="space-y-4">
@@ -521,6 +533,8 @@ export function StandingsView({
               onGroupChange={setMatchGroupFilter}
               stageFilter={matchStageFilter}
               onStageChange={setMatchStageFilter}
+              sortOrder={matchSortOrder}
+              onSortOrderChange={setMatchSortOrder}
               groupBy={matchGroupBy}
               onGroupByChange={setMatchGroupBy}
               filteredCount={totalFilteredMatches}
@@ -530,6 +544,7 @@ export function StandingsView({
                 setMatchGroupFilter('ALL');
                 setMatchStageFilter('ALL');
                 setMatchGroupBy('fase');
+                setMatchSortOrder('newest');
               }}
             />
 

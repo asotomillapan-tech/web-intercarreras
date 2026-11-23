@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Award,
   Calendar,
@@ -11,13 +11,21 @@ import {
   X,
 } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  findClubSquadsForTeam,
+  formatUnifiedClubDisplayName,
+} from '../domain/identityCrossRefEngine';
 import { canRefereeMatches, shouldRevealPublicMatchData } from '../domain/rbacEngine';
 import {
   computeTeamHistoricalStats,
   computeTeamMatchProgression,
 } from '../domain/tournamentEngine';
 import { TeamProgressionChart } from './TeamProgressionChart';
-import { filterMatchesByOrg } from '../domain/matchFilterEngine';
+import {
+  filterMatchesByOrg,
+  sortMatchesChronologically,
+  type MatchSortOrder,
+} from '../domain/matchFilterEngine';
 import type {
   AppUserProfile,
   Match,
@@ -57,33 +65,59 @@ export function TeamProfileModal({
   onInspectPlayer,
   onAdminEditMatch,
 }: TeamProfileModalProps) {
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(team?.id ?? null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
   const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
   const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
+  const [sortOrder, setSortOrder] = useState<MatchSortOrder>('newest');
+
+  useEffect(() => {
+    setActiveTeamId(team?.id ?? null);
+    setStatusFilter('ALL');
+    setGroupFilter('ALL');
+    setStageFilter('ALL');
+    setSortOrder('newest');
+  }, [team?.id]);
 
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
 
-  const disciplineMeta = team ? DISCIPLINE_MAP[team.disciplineId] : null;
+  const clubSquads = useMemo<Team[]>(() => {
+    if (!team) return [];
+    return findClubSquadsForTeam(team, teams).squads;
+  }, [team, teams]);
+
+  const activeTeam: Team | null = useMemo(() => {
+    if (!team) return null;
+    if (!activeTeamId) return team;
+    return clubSquads.find((s) => s.id === activeTeamId) ?? team;
+  }, [team, activeTeamId, clubSquads]);
+
+  const unifiedClubName = useMemo(() => {
+    if (clubSquads.length <= 1) return activeTeam?.nombre ?? '';
+    return formatUnifiedClubDisplayName(clubSquads);
+  }, [clubSquads, activeTeam]);
+
+  const disciplineMeta = activeTeam ? DISCIPLINE_MAP[activeTeam.disciplineId] : null;
 
   const roster = useMemo(() => {
-    if (!team) return [];
+    if (!activeTeam) return [];
     return players
-      .filter((p) => p.teamId === team.id)
+      .filter((p) => p.teamId === activeTeam.id)
       .sort((a, b) => a.dorsal - b.dorsal);
-  }, [players, team]);
+  }, [players, activeTeam]);
 
   const historicalStats = useMemo(() => {
-    if (!team || !disciplineMeta) return null;
-    return computeTeamHistoricalStats(team, disciplineMeta.sportType, matches);
-  }, [team, disciplineMeta, matches]);
+    if (!activeTeam || !disciplineMeta) return null;
+    return computeTeamHistoricalStats(activeTeam, disciplineMeta.sportType, matches);
+  }, [activeTeam, disciplineMeta, matches]);
 
   const matchProgression = useMemo(() => {
-    if (!team) return [];
-    return computeTeamMatchProgression(team, matches, teamMap);
-  }, [team, matches, teamMap]);
+    if (!activeTeam) return [];
+    return computeTeamMatchProgression(activeTeam, matches, teamMap);
+  }, [activeTeam, matches, teamMap]);
 
   const mvpAwardsCount = useMemo(() => {
-    if (!team || !historicalStats) return 0;
+    if (!activeTeam || !historicalStats) return 0;
     let count = 0;
     for (const item of historicalStats.history) {
       if (item.match.status !== 'FINALIZADO') continue;
@@ -96,33 +130,37 @@ export function TeamProfileModal({
         tallies.set(v.playerId, cur);
       }
       const winner = Array.from(tallies.values()).sort((a, b) => b.votes - a.votes)[0];
-      if (winner && winner.teamId === team.id) {
+      if (winner && winner.teamId === activeTeam.id) {
         count += 1;
       }
     }
     return count;
-  }, [team, historicalStats, mvpVotes]);
+  }, [activeTeam, historicalStats, mvpVotes]);
 
-  if (!team || !disciplineMeta || !historicalStats) return null;
+  if (!activeTeam || !disciplineMeta || !historicalStats) return null;
 
-  const isFavorite = currentUser?.favoriteTeamIds.includes(team.id) ?? false;
+  const isFavorite = currentUser?.favoriteTeamIds.includes(activeTeam.id) ?? false;
   const isAdmin = currentUser?.role === 'admin';
   const selectedUfroCount = roster.filter((p) => p.esSeleccionadoUfro).length;
 
   const teamAllMatches = historicalStats.history.map((h) => h.match);
   const orgAllowedMatchIds = new Set(
     filterMatchesByOrg(teamAllMatches, {
-      disciplineId: team.disciplineId,
+      disciplineId: activeTeam.disciplineId,
       groupName: groupFilter,
       fase: stageFilter,
     }).map((m) => m.id)
   );
 
-  const filteredHistory = historicalStats.history.filter((item) => {
-    if (statusFilter !== 'ALL' && item.match.status !== statusFilter) return false;
-    if (!orgAllowedMatchIds.has(item.match.id)) return false;
+  const historyByMatchId = new Map(historicalStats.history.map((item) => [item.match.id, item]));
+  const matchingMatches = teamAllMatches.filter((m) => {
+    if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
+    if (!orgAllowedMatchIds.has(m.id)) return false;
     return true;
   });
+  const filteredHistory = sortMatchesChronologically(matchingMatches, sortOrder)
+    .map((m) => historyByMatchId.get(m.id))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   const favorLabel =
     disciplineMeta.sportType === 'futbol7'
@@ -159,60 +197,102 @@ export function TeamProfileModal({
     >
       <div className="bg-white w-full max-w-4xl border border-neutral-200 shadow-2xl my-6 overflow-hidden">
         {/* Carbon Editorial Team Header */}
-        <div className="bg-[#0d0d0d] text-white p-6 sm:p-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <TeamCrest
-              escudo={team.escudo}
-              sigla={team.sigla}
-              nombre={team.nombre}
-              size="xl"
-              surface="dark"
-            />
-            <div>
-              <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                {disciplineMeta.nombre} · {team.groupName}
-                {team.anioFundacion ? ` · Fundado en ${team.anioFundacion}` : ''}
-              </p>
-              <h2
-                id="team-profile-title"
-                className="font-display text-3xl sm:text-4xl uppercase tracking-wide mt-1 leading-none"
-              >
-                {team.nombre}
-              </h2>
-              <p className="text-xs text-neutral-300 mt-2">
-                {team.carrera} · {team.facultad}
-              </p>
-              {team.logrosAnteriores && (
-                <p className="text-xs text-[#707ef9] mt-1 flex items-center gap-1.5">
-                  <Trophy className="w-3.5 h-3.5 shrink-0" />
-                  <span>{team.logrosAnteriores}</span>
+        <div className="bg-[#0d0d0d] text-white p-6 sm:p-8 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <TeamCrest
+                escudo={activeTeam.escudo}
+                sigla={activeTeam.sigla}
+                nombre={activeTeam.nombre}
+                size="xl"
+                surface="dark"
+              />
+              <div>
+                <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+                  {disciplineMeta.nombre} · {activeTeam.groupName}
+                  {activeTeam.anioFundacion ? ` · Fundado en ${activeTeam.anioFundacion}` : ''}
                 </p>
-              )}
+                <h2
+                  id="team-profile-title"
+                  className="font-display text-3xl sm:text-4xl uppercase tracking-wide mt-1 leading-none"
+                >
+                  {clubSquads.length > 1 ? unifiedClubName : activeTeam.nombre}
+                </h2>
+                {clubSquads.length > 1 && activeTeam.nombre !== unifiedClubName && (
+                  <p className="text-xs text-neutral-400 mt-1">
+                    Plantel inscrito como: <span className="text-white">{activeTeam.nombre}</span>
+                  </p>
+                )}
+                <p className="text-xs text-neutral-300 mt-2">
+                  {activeTeam.carrera} · {activeTeam.facultad}
+                </p>
+                {activeTeam.logrosAnteriores && (
+                  <p className="text-xs text-[#707ef9] mt-1 flex items-center gap-1.5">
+                    <Trophy className="w-3.5 h-3.5 shrink-0" />
+                    <span>{activeTeam.logrosAnteriores}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
+              <button
+                type="button"
+                onClick={() => onToggleFavoriteTeam(activeTeam.id)}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display uppercase tracking-widest border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  isFavorite
+                    ? 'bg-[#707ef9] border-[#707ef9] text-white'
+                    : 'border-white/25 text-white hover:border-[#707ef9]'
+                }`}
+              >
+                <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-white' : ''}`} />
+                <span>{isFavorite ? 'En favoritos' : 'Seguir equipo'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Cerrar perfil del equipo"
+                className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
-            <button
-              type="button"
-              onClick={() => onToggleFavoriteTeam(team.id)}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display uppercase tracking-widest border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                isFavorite
-                  ? 'bg-[#707ef9] border-[#707ef9] text-white'
-                  : 'border-white/25 text-white hover:border-[#707ef9]'
-              }`}
-            >
-              <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-white' : ''}`} />
-              <span>{isFavorite ? 'En favoritos' : 'Seguir equipo'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Cerrar perfil del equipo"
-              className="p-2 text-neutral-400 hover:text-white cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          {/* Multi-Discipline Club Switcher Tabs */}
+          {clubSquads.length > 1 && (
+            <div className="pt-4 border-t border-white/10 space-y-2">
+              <p className="text-[11px] uppercase tracking-widest text-neutral-400">
+                Club Multidisciplina · {clubSquads.length} disciplinas activas
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {clubSquads.map((squad) => {
+                  const squadMeta = DISCIPLINE_MAP[squad.disciplineId];
+                  const selected = squad.id === activeTeam.id;
+                  return (
+                    <button
+                      key={squad.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setActiveTeamId(squad.id);
+                        setGroupFilter('ALL');
+                        setStageFilter('ALL');
+                        setStatusFilter('ALL');
+                      }}
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        selected
+                          ? 'bg-[#707ef9] text-white font-bold'
+                          : 'bg-white/10 text-neutral-300 hover:bg-white/20 hover:text-white'
+                      }`}
+                    >
+                      {squadMeta.nombreCorto} ({squad.groupName})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="p-6 sm:p-8 space-y-8">
@@ -340,7 +420,7 @@ export function TeamProfileModal({
           <TeamProgressionChart
             progression={matchProgression}
             sportType={disciplineMeta.sportType}
-            teamName={team.nombre}
+            teamName={activeTeam.nombre}
           />
 
           {/* COMPLETE MATCH HISTORY SECTION */}
@@ -394,7 +474,7 @@ export function TeamProfileModal({
             <MatchFilterBar
               idPrefix="team-history"
               matches={teamAllMatches}
-              disciplineFilter={team.disciplineId}
+              disciplineFilter={activeTeam.disciplineId}
               disciplineOptions={[disciplineMeta]}
               allowAllDisciplines={false}
               disciplineLocked
@@ -402,6 +482,8 @@ export function TeamProfileModal({
               onGroupChange={setGroupFilter}
               stageFilter={stageFilter}
               onStageChange={setStageFilter}
+              sortOrder={sortOrder}
+              onSortOrderChange={setSortOrder}
               filteredCount={filteredHistory.length}
               totalCount={historicalStats.history.length}
               hasExtraActiveFilters={statusFilter !== 'ALL'}
@@ -409,6 +491,7 @@ export function TeamProfileModal({
                 setGroupFilter('ALL');
                 setStageFilter('ALL');
                 setStatusFilter('ALL');
+                setSortOrder('newest');
               }}
               compact
             />

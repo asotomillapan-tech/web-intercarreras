@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardList,
+  Layers,
   Newspaper,
   Shield,
   Star,
@@ -13,6 +14,7 @@ import {
   UserCog,
 } from 'lucide-react';
 import { DISCIPLINE_MAP, UFRO_CAREERS } from '../data/ufroSeed';
+import { findPlayerParticipations } from '../domain/identityCrossRefEngine';
 import {
   buildFavoriteNotifications,
   ROLE_META,
@@ -104,9 +106,26 @@ export function AccountView({
     );
   }, [currentUser, state.players]);
 
+  const linkedParticipations = useMemo(() => {
+    if (!linkedPlayer) return [];
+    return findPlayerParticipations(linkedPlayer, state.players, state.teams);
+  }, [linkedPlayer, state.players, state.teams]);
+
+  const [selectedLinkedPlayerId, setSelectedLinkedPlayerId] = useState<string | null>(null);
+  const activeLinkedPlayer = useMemo(() => {
+    if (!linkedPlayer) return null;
+    if (selectedLinkedPlayerId) {
+      const found = linkedParticipations.find((p) => p.player.id === selectedLinkedPlayerId);
+      if (found) return found.player;
+    }
+    return linkedPlayer;
+  }, [linkedPlayer, selectedLinkedPlayerId, linkedParticipations]);
+
   const [draftPlayer, setDraftPlayer] = useState<Player | null>(null);
   const activeDraft =
-    draftPlayer && linkedPlayer && draftPlayer.id === linkedPlayer.id ? draftPlayer : linkedPlayer;
+    draftPlayer && activeLinkedPlayer && draftPlayer.id === activeLinkedPlayer.id
+      ? draftPlayer
+      : activeLinkedPlayer;
 
   const notifications = useMemo(
     () => buildFavoriteNotifications(currentUser, state.matches, state.teams, state.mvpVotes),
@@ -589,10 +608,77 @@ export function AccountView({
           </form>
         </section>
 
+        {/* UNIFIED ACTIVE TEAM PARTICIPATIONS (Shows all teams/disciplines where this user plays) */}
+        {linkedParticipations.length > 0 && (
+          <section className="border border-neutral-200 bg-[#f5f6f8] p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Layers className="w-5 h-5 text-[#707ef9]" />
+                <div>
+                  <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                    Equipos donde juego ({linkedParticipations.length})
+                  </h2>
+                  <p className="text-xs text-neutral-600">
+                    Tu perfil de usuario agrupa automáticamente todas tus inscripciones activas en
+                    distintos equipos y disciplinas del campeonato.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {linkedParticipations.map((part) => {
+                const pDisc = DISCIPLINE_MAP[part.disciplineId];
+                const isSelected = activeLinkedPlayer?.id === part.player.id;
+                return (
+                  <div
+                    key={part.player.id}
+                    className={`bg-white border p-4 flex flex-col justify-between gap-3 ${
+                      isSelected ? 'border-[#707ef9]' : 'border-neutral-200'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-[11px] font-mono uppercase tracking-wider text-[#707ef9] font-semibold">
+                        {pDisc.nombreCorto}
+                      </p>
+                      <p className="font-display text-xl font-bold uppercase text-[#0d0d0d] mt-0.5 truncate">
+                        {part.team?.nombre ?? part.player.teamId}
+                      </p>
+                      <p className="text-xs text-neutral-500 mt-0.5">
+                        Dorsal #{part.player.dorsal} · {part.player.posicion} ·{' '}
+                        {part.player.stats.partidosJugados} PJ
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-neutral-100">
+                      <button
+                        type="button"
+                        onClick={() => onInspectTeam(part.player.teamId)}
+                        className="text-xs font-bold text-[#0d0d0d] hover:text-[#707ef9] cursor-pointer"
+                      >
+                        Ver equipo →
+                      </button>
+                      {currentUser.role === 'jugador' && linkedParticipations.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLinkedPlayerId(part.player.id)}
+                          className={`text-[11px] font-bold uppercase cursor-pointer ${
+                            isSelected ? 'text-emerald-700' : 'text-[#707ef9] hover:underline'
+                          }`}
+                        >
+                          {isSelected ? 'Editando ficha' : 'Editar esta ficha'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* PLAYER SELF-SERVICE PROFILE EDITOR (ONLY for 'jugador' or linked player) */}
         {currentUser.role === 'jugador' && activeDraft && (
           <section className="border border-neutral-200 p-6 sm:p-8 space-y-6">
-            <div className="flex items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 pb-4">
               <div className="flex items-center gap-2.5">
                 <UserCog className="w-5 h-5 text-[#707ef9]" />
                 <div>
@@ -605,6 +691,20 @@ export function AccountView({
                   </p>
                 </div>
               </div>
+              {linkedParticipations.length > 1 && (
+                <select
+                  aria-label="Seleccionar ficha de equipo a editar"
+                  value={activeDraft.id}
+                  onChange={(e) => setSelectedLinkedPlayerId(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-medium border border-neutral-300 bg-white focus:border-[#707ef9] focus:outline-none"
+                >
+                  {linkedParticipations.map((part) => (
+                    <option key={part.player.id} value={part.player.id}>
+                      {part.team?.nombre ?? part.player.teamId} ({DISCIPLINE_MAP[part.disciplineId].nombreCorto})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {profileSavedMsg && (

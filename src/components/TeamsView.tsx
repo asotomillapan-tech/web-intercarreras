@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, Calendar, Search, Shield, Trophy, Users } from 'lucide-react';
+import { ArrowRight, Calendar, Layers, Search, Shield, Trophy, Users } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import { buildUnifiedClubs, type UnifiedClubProfile } from '../domain/identityCrossRefEngine';
 import { computeTeamHistoricalStats } from '../domain/tournamentEngine';
 import type { DisciplineId, Team, TournamentState } from '../types/tournament';
 import { TeamCrest } from './TeamCrest';
@@ -18,39 +19,65 @@ export function TeamsView({
   onSelectDiscipline,
   onOpenTeamProfile,
 }: TeamsViewProps) {
-  const [showAllDisciplines, setShowAllDisciplines] = useState(false);
+  const [showAllDisciplines, setShowAllDisciplines] = useState(true);
   const [groupFilter, setGroupFilter] = useState<string>('ALL');
   const [queryText, setQueryText] = useState('');
 
-  const scopedTeams = useMemo(() => {
-    const base = showAllDisciplines
-      ? state.teams
-      : state.teams.filter((t) => t.disciplineId === selectedDiscipline);
-    return base;
-  }, [state.teams, selectedDiscipline, showAllDisciplines]);
+  // Cross-reference all clubs by name equivalence across disciplines
+  const allUnifiedClubs = useMemo(
+    () => buildUnifiedClubs(state.teams, state.players, state.matches),
+    [state.teams, state.players, state.matches]
+  );
+
+  const multiDisciplineClubCount = useMemo(
+    () => allUnifiedClubs.filter((c) => c.disciplines.length > 1).length,
+    [allUnifiedClubs]
+  );
+
+  const scopedClubs = useMemo(() => {
+    if (showAllDisciplines) return allUnifiedClubs;
+    return allUnifiedClubs.filter((club) => club.disciplines.includes(selectedDiscipline));
+  }, [allUnifiedClubs, selectedDiscipline, showAllDisciplines]);
 
   const availableGroups = useMemo(() => {
-    return Array.from(new Set(scopedTeams.map((t) => t.groupName).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b, 'es')
-    );
-  }, [scopedTeams]);
+    const groups = new Set<string>();
+    scopedClubs.forEach((club) => {
+      club.teams.forEach((t) => {
+        if (showAllDisciplines || t.disciplineId === selectedDiscipline) {
+          if (t.groupName) groups.add(t.groupName);
+        }
+      });
+    });
+    return Array.from(groups).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [scopedClubs, showAllDisciplines, selectedDiscipline]);
 
-  const filteredTeams = useMemo(() => {
+  const filteredClubs = useMemo(() => {
     const q = queryText.trim().toLowerCase();
-    return scopedTeams
-      .filter((t) => {
-        if (groupFilter !== 'ALL' && t.groupName !== groupFilter) return false;
-        if (!q) return true;
-        return (
-          t.nombre.toLowerCase().includes(q) ||
-          t.sigla.toLowerCase().includes(q) ||
-          t.carrera.toLowerCase().includes(q) ||
-          t.facultad.toLowerCase().includes(q) ||
-          (t.logrosAnteriores ?? '').toLowerCase().includes(q)
+    return scopedClubs.filter((club) => {
+      if (groupFilter !== 'ALL') {
+        const matchesGroup = club.teams.some(
+          (t) =>
+            (showAllDisciplines || t.disciplineId === selectedDiscipline) &&
+            t.groupName === groupFilter
         );
-      })
-      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  }, [scopedTeams, groupFilter, queryText]);
+        if (!matchesGroup) return false;
+      }
+      if (!q) return true;
+      return (
+        club.displayName.toLowerCase().includes(q) ||
+        club.sigla.toLowerCase().includes(q) ||
+        club.careers.some((c) => c.toLowerCase().includes(q)) ||
+        club.faculties.some((f) => f.toLowerCase().includes(q)) ||
+        (club.logrosAnteriores ?? '').toLowerCase().includes(q) ||
+        club.teams.some(
+          (t) =>
+            t.nombre.toLowerCase().includes(q) ||
+            DISCIPLINE_MAP[t.disciplineId].nombre.toLowerCase().includes(q) ||
+            DISCIPLINE_MAP[t.disciplineId].nombreCorto.toLowerCase().includes(q)
+        )
+      );
+    });
+  }, [scopedClubs, groupFilter, queryText, showAllDisciplines, selectedDiscipline]);
 
   const rosterCountMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -61,6 +88,14 @@ export function TeamsView({
   }, [state.players]);
 
   const activeDisciplineMeta = DISCIPLINE_MAP[selectedDiscipline];
+
+  const resolveOpeningSquad = (club: UnifiedClubProfile): Team => {
+    if (!showAllDisciplines) {
+      const exact = club.teams.find((t) => t.disciplineId === selectedDiscipline);
+      if (exact) return exact;
+    }
+    return club.primaryTeam;
+  };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] pb-16">
@@ -73,34 +108,35 @@ export function TeamsView({
                 Directorio Oficial · Temporada {state.temporada}
               </p>
               <h1 className="font-display text-4xl sm:text-5xl font-bold uppercase tracking-tight mt-2">
-                Equipos del Campeonato
+                Equipos y Clubes del Campeonato
               </h1>
               <p className="text-sm text-neutral-300 mt-2 max-w-2xl">
-                Explora la identidad oficial de cada club intercarreras: escudo institucional, año de
-                fundación, palmarés histórico, plantel inscrito y rendimiento acumulado.
+                Clubes intercarreras consolidados por nombre en todas las disciplinas: si un mismo
+                club participa en varios deportes, se presenta unificado con acceso directo a cada
+                rama y plantel.
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-6 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-8">
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Equipos visibles
+                  Clubes visibles
                 </p>
                 <p className="font-display text-3xl font-bold tabular-nums mt-0.5">
-                  {filteredTeams.length}
+                  {filteredClubs.length}
                 </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Con escudo
+                  Multidisciplina
                 </p>
                 <p className="font-display text-3xl font-bold tabular-nums text-[#707ef9] mt-0.5">
-                  {filteredTeams.filter((t) => Boolean(t.escudo)).length}
+                  {multiDisciplineClubCount}
                 </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Total torneo
+                  Planteles totales
                 </p>
                 <p className="font-display text-3xl font-bold tabular-nums mt-0.5">
                   {state.teams.length}
@@ -123,7 +159,7 @@ export function TeamsView({
                   : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
               }`}
             >
-              Todas las disciplinas
+              Todos los clubes ({allUnifiedClubs.length})
             </button>
             {DISCIPLINES.map((d) => {
               const active = !showAllDisciplines && selectedDiscipline === d.id;
@@ -159,7 +195,8 @@ export function TeamsView({
               type="text"
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
-              placeholder="Buscar por equipo, sigla, carrera o títulos..."
+              placeholder="Buscar por club, disciplina, sigla, carrera o títulos..."
+              aria-label="Buscar equipos y clubes"
               className="w-full pl-9 pr-3 py-2 text-sm border border-neutral-300 focus:border-[#707ef9] focus:outline-none bg-white"
             />
           </div>
@@ -182,13 +219,13 @@ export function TeamsView({
             )}
             <span className="text-xs text-neutral-500 font-mono">
               {showAllDisciplines
-                ? 'Vista general'
-                : `${activeDisciplineMeta.nombre} · ${filteredTeams.length} equipos`}
+                ? `${filteredClubs.length} clubes unificados`
+                : `${activeDisciplineMeta.nombre} · ${filteredClubs.length} equipo(s)`}
             </span>
           </div>
         </div>
 
-        {filteredTeams.length === 0 ? (
+        {filteredClubs.length === 0 ? (
           <div className="bg-white border border-neutral-200 p-12 text-center space-y-2">
             <Shield className="w-10 h-10 text-neutral-300 mx-auto" />
             <h2 className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
@@ -201,61 +238,101 @@ export function TeamsView({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
-            {filteredTeams.map((team) => {
-              const disc = DISCIPLINE_MAP[team.disciplineId];
-              const stats = computeTeamHistoricalStats(team, disc.sportType, state.matches);
-              const playerCount = rosterCountMap.get(team.id) ?? 0;
+            {filteredClubs.map((club) => {
+              const targetSquad = resolveOpeningSquad(club);
+              const isMulti = club.teams.length > 1;
+              const targetDisc = DISCIPLINE_MAP[targetSquad.disciplineId];
+              const singleStats = computeTeamHistoricalStats(
+                targetSquad,
+                targetDisc.sportType,
+                state.matches
+              );
+
+              const cardRosterCount = showAllDisciplines
+                ? club.uniquePlayerCount
+                : rosterCountMap.get(targetSquad.id) ?? 0;
 
               return (
                 <article
-                  key={team.id}
-                  onClick={() => onOpenTeamProfile(team)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onOpenTeamProfile(team);
-                    }
-                  }}
-                  className="group bg-white border border-neutral-200 hover:border-[#0d0d0d] transition-colors flex flex-col justify-between cursor-pointer"
+                  key={club.clubKey}
+                  className="group bg-white border border-neutral-200 hover:border-[#0d0d0d] transition-colors flex flex-col justify-between"
                 >
                   <div className="p-5 space-y-4">
-                    {/* Top row: Crest + Name + Discipline */}
-                    <div className="flex items-start gap-4">
+                    {/* Top row: Crest + Unified Name + Year */}
+                    <button
+                      type="button"
+                      onClick={() => onOpenTeamProfile(targetSquad)}
+                      className="w-full text-left flex items-start gap-4 cursor-pointer"
+                    >
                       <TeamCrest
-                        escudo={team.escudo}
-                        sigla={team.sigla}
-                        nombre={team.nombre}
+                        escudo={club.escudo}
+                        sigla={club.sigla}
+                        nombre={club.displayName}
                         size="lg"
                         surface="light"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-mono uppercase tracking-wider text-[#707ef9] font-semibold">
-                            {team.sigla} · {team.groupName}
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-[#707ef9] font-semibold truncate">
+                            {club.sigla}
+                            {!isMulti ? ` · ${targetSquad.groupName}` : ` · ${club.disciplines.length} ramas`}
                           </span>
-                          {team.anioFundacion && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500 font-mono">
+                          {club.anioFundacion && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500 font-mono shrink-0">
                               <Calendar className="w-3 h-3" />
-                              Est. {team.anioFundacion}
+                              Est. {club.anioFundacion}
                             </span>
                           )}
                         </div>
                         <h2 className="font-display text-2xl font-bold uppercase tracking-tight text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors leading-tight mt-0.5 truncate">
-                          {team.nombre}
+                          {club.displayName}
                         </h2>
-                        <p className="text-xs text-neutral-600 truncate mt-0.5">{team.carrera}</p>
-                        <p className="text-[11px] text-neutral-400 truncate">{disc.nombreCorto}</p>
+                        <p className="text-xs text-neutral-600 truncate mt-0.5">
+                          {club.careers.join(' · ')}
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Disciplines Breakdown (Interactive squad buttons for multi-discipline clubs) */}
+                    <div className="border-t border-neutral-100 pt-3 space-y-1.5">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 flex items-center gap-1">
+                        <Layers className="w-3 h-3 text-[#707ef9]" />
+                        <span>
+                          {isMulti
+                            ? `Disciplinas del club (${club.teams.length})`
+                            : 'Disciplina inscrita'}
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {club.teams.map((sq) => {
+                          const sqDisc = DISCIPLINE_MAP[sq.disciplineId];
+                          const isCurrentScope =
+                            !showAllDisciplines && sq.disciplineId === selectedDiscipline;
+                          return (
+                            <button
+                              key={sq.id}
+                              type="button"
+                              onClick={() => onOpenTeamProfile(sq)}
+                              className={`px-2 py-1 text-[11px] font-medium border transition-colors cursor-pointer ${
+                                isCurrentScope
+                                  ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
+                                  : 'bg-[#f5f6f8] text-[#0d0d0d] border-neutral-200 hover:border-[#707ef9] hover:text-[#707ef9]'
+                              }`}
+                              title={`Abrir ficha de ${sq.nombre} (${sqDisc.nombre})`}
+                            >
+                              {sqDisc.nombreCorto}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
                     {/* Titles / Honors */}
-                    <div className="border-t border-neutral-100 pt-3 min-h-[44px]">
-                      {team.logrosAnteriores ? (
+                    <div className="border-t border-neutral-100 pt-3 min-h-[40px]">
+                      {club.logrosAnteriores ? (
                         <div className="flex items-start gap-2 text-xs text-neutral-700">
                           <Trophy className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                          <p className="line-clamp-2">{team.logrosAnteriores}</p>
+                          <p className="line-clamp-2">{club.logrosAnteriores}</p>
                         </div>
                       ) : (
                         <p className="text-xs text-neutral-400 italic">
@@ -265,44 +342,91 @@ export function TeamsView({
                     </div>
 
                     {/* Compact Campaign Strip */}
-                    <div className="grid grid-cols-4 gap-2 bg-[#f5f6f8] border border-neutral-200/80 p-2.5 text-center">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                          Plantel
-                        </p>
-                        <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
-                          {playerCount}
-                        </p>
+                    {showAllDisciplines && isMulti ? (
+                      <div className="grid grid-cols-4 gap-2 bg-[#f5f6f8] border border-neutral-200/80 p-2.5 text-center">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            Ramas
+                          </p>
+                          <p className="font-display text-base font-bold text-[#707ef9] tabular-nums">
+                            {club.disciplines.length}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            Jugadores
+                          </p>
+                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                            {cardRosterCount}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            PJ Club
+                          </p>
+                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                            {club.totalMatchesPlayed}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            PG Club
+                          </p>
+                          <p className="font-display text-base font-bold text-emerald-700 tabular-nums">
+                            {club.totalWins}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-neutral-500">PJ</p>
-                        <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
-                          {stats.pj}
-                        </p>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-2 bg-[#f5f6f8] border border-neutral-200/80 p-2.5 text-center">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            Plantel
+                          </p>
+                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                            {cardRosterCount}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            PJ
+                          </p>
+                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                            {singleStats.pj}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            PG
+                          </p>
+                          <p className="font-display text-base font-bold text-emerald-700 tabular-nums">
+                            {singleStats.pg}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                            PTS
+                          </p>
+                          <p className="font-display text-base font-bold text-[#707ef9] tabular-nums">
+                            {singleStats.puntos}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-neutral-500">PG</p>
-                        <p className="font-display text-base font-bold text-emerald-700 tabular-nums">
-                          {stats.pg}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-neutral-500">PTS</p>
-                        <p className="font-display text-base font-bold text-[#707ef9] tabular-nums">
-                          {stats.puntos}
-                        </p>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Card Footer */}
-                  <div className="px-5 py-3 border-t border-neutral-200 bg-neutral-50/70 flex items-center justify-between text-xs font-display font-bold uppercase tracking-wider text-[#0d0d0d] group-hover:bg-[#0d0d0d] group-hover:text-white transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => onOpenTeamProfile(targetSquad)}
+                    className="w-full px-5 py-3 border-t border-neutral-200 bg-neutral-50/70 flex items-center justify-between text-xs font-display font-bold uppercase tracking-wider text-[#0d0d0d] hover:bg-[#0d0d0d] hover:text-white transition-colors cursor-pointer"
+                  >
                     <span className="inline-flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5" />
-                      Ver ficha y plantel completo
+                      {isMulti ? 'Ver ficha del club y ramas' : 'Ver ficha y plantel completo'}
                     </span>
                     <ArrowRight className="w-3.5 h-3.5" />
-                  </div>
+                  </button>
                 </article>
               );
             })}
@@ -312,3 +436,4 @@ export function TeamsView({
     </div>
   );
 }
+

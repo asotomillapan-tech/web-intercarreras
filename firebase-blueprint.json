@@ -134,6 +134,10 @@
           "type": "string",
           "maxLength": 64
         },
+        "homeFeatured": {
+          "type": "object",
+          "description": "Configuración administrada del bloque destacado de la portada (modo auto, partido específico o anuncio personalizado)."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"

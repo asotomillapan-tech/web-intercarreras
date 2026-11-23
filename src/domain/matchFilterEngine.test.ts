@@ -7,6 +7,7 @@ import {
   extractMatchStages,
   filterMatchesByOrg,
   groupMatchesByOrg,
+  sortMatchesChronologically,
 } from './matchFilterEngine';
 
 function makeMatch(overrides: Partial<Match>): Match {
@@ -144,5 +145,24 @@ describe('matchFilterEngine', () => {
     assert.equal(facetsScoped.stageCounts['Semifinal'], 1);
     assert.equal(facetsScoped.stageCounts['Final'], 1);
     assert.equal(facetsScoped.stageCounts['Grupos'], undefined);
+  });
+
+  it('sorts matches chronologically with newest/scheduled first by default and oldest ascending on demand', () => {
+    const datedMatches: Match[] = [
+      makeMatch({ id: 'old', fecha: '2026-04-10', hora: '15:00', status: 'FINALIZADO' }),
+      makeMatch({ id: 'live', fecha: '2026-05-01', hora: '16:00', status: 'EN_VIVO' }),
+      makeMatch({ id: 'future', fecha: '18/05/2026', hora: '19:30', status: 'PROGRAMADO' }),
+      makeMatch({ id: 'recent', fecha: '2026-05-12', hora: '18:00', status: 'FINALIZADO' }),
+    ];
+
+    assert.deepEqual(
+      sortMatchesChronologically(datedMatches).map((m) => m.id),
+      ['live', 'future', 'recent', 'old']
+    );
+
+    assert.deepEqual(
+      sortMatchesChronologically(datedMatches, 'oldest').map((m) => m.id),
+      ['old', 'live', 'recent', 'future']
+    );
   });
 });

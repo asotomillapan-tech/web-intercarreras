@@ -90,21 +90,30 @@ test('filterCalendarMatches filters accurately by discipline, venue, and status'
   );
 });
 
-test('groupMatchesByDate groups chronologically and sorts matches within a day by hora', () => {
+test('groupMatchesByDate defaults to newest/scheduled first and supports oldest first', () => {
   const matches = [
     makeMatch({ id: 'm3', fecha: '2026-11-20', hora: '19:00' }),
     makeMatch({ id: 'm1', fecha: '2026-11-18', hora: '20:30' }),
     makeMatch({ id: 'm2', fecha: '2026-11-18', hora: '17:00' }),
   ];
 
-  const groups = groupMatchesByDate(matches);
-  assert.equal(groups.length, 2);
-  assert.equal(groups[0].fecha, '2026-11-18');
+  const newestGroups = groupMatchesByDate(matches);
+  assert.equal(newestGroups.length, 2);
+  assert.equal(newestGroups[0].fecha, '2026-11-20');
+  assert.equal(newestGroups[1].fecha, '2026-11-18');
   assert.deepEqual(
-    groups[0].matches.map((m) => m.id),
+    newestGroups[1].matches.map((m) => m.id),
+    ['m1', 'm2']
+  );
+
+  const oldestGroups = groupMatchesByDate(matches, 'oldest');
+  assert.equal(oldestGroups.length, 2);
+  assert.equal(oldestGroups[0].fecha, '2026-11-18');
+  assert.deepEqual(
+    oldestGroups[0].matches.map((m) => m.id),
     ['m2', 'm1']
   );
-  assert.equal(groups[1].fecha, '2026-11-20');
+  assert.equal(oldestGroups[1].fecha, '2026-11-20');
   assert.equal(formatCalendarDateEs('2026-11-18').shortDateLabel, '18 nov');
 });
 
@@ -164,7 +173,7 @@ test('supports Chilean DD/MM/YYYY dates from Google Sheets across grid, grouping
   assert.equal(grid.find((c) => c.dateIso === '2026-11-12')?.matchCount, 1);
   assert.equal(grid.find((c) => c.dateIso === '2026-11-14')?.matchCount, 2);
 
-  const groups = groupMatchesByDate(sheetMatches);
+  const groups = groupMatchesByDate(sheetMatches, 'oldest');
   assert.equal(groups.length, 2);
   assert.equal(groups[0].fecha, '2026-11-12');
   assert.equal(groups[0].fullDateLabel, 'Jueves 12 de noviembre 2026');

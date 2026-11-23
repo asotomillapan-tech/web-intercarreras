@@ -19,7 +19,11 @@ import {
   normalizeMatchDateToIso,
   pickInitialCalendarMonth,
 } from '../domain/calendarEngine';
-import { extractMatchGroups, filterMatchesByOrg } from '../domain/matchFilterEngine';
+import {
+  extractMatchGroups,
+  filterMatchesByOrg,
+  type MatchSortOrder,
+} from '../domain/matchFilterEngine';
 import {
   canRefereeMatches,
   canVoteMatchMvp,
@@ -62,6 +66,7 @@ export function HomeMatchCalendar({
   const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
   const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [venueFilter, setVenueFilter] = useState<'ALL' | string>('ALL');
+  const [sortOrder, setSortOrder] = useState<MatchSortOrder>('newest');
   const [statusMode, setStatusMode] = useState<'PROGRAMADO' | 'ALL'>('PROGRAMADO');
   const [userToggledStatus, setUserToggledStatus] = useState(false);
   const [selectedDateIso, setSelectedDateIso] = useState<string | null>(null);
@@ -154,13 +159,13 @@ export function HomeMatchCalendar({
       const dayMatches = filteredMatches.filter(
         (m) => normalizeMatchDateToIso(m.fecha) === selectedDateIso
       );
-      return groupMatchesByDate(dayMatches);
+      return groupMatchesByDate(dayMatches, sortOrder);
     }
     if (monthMatches.length > 0) {
-      return groupMatchesByDate(monthMatches);
+      return groupMatchesByDate(monthMatches, sortOrder);
     }
-    return groupMatchesByDate(filteredMatches);
-  }, [selectedDateIso, filteredMatches, monthMatches]);
+    return groupMatchesByDate(filteredMatches, sortOrder);
+  }, [selectedDateIso, filteredMatches, monthMatches, sortOrder]);
 
   const handlePrevMonth = () => {
     setUserNavigatedMonth(true);
@@ -189,6 +194,7 @@ export function HomeMatchCalendar({
     setGroupFilter('ALL');
     setStageFilter('ALL');
     setVenueFilter('ALL');
+    setSortOrder('newest');
     setSelectedDateIso(null);
     setUserToggledStatus(false);
     setStatusMode(hasAnyScheduled ? 'PROGRAMADO' : 'ALL');
@@ -286,6 +292,8 @@ export function HomeMatchCalendar({
             setStageFilter(val);
             setSelectedDateIso(null);
           }}
+          sortOrder={sortOrder}
+          onSortOrderChange={setSortOrder}
           filteredCount={filteredMatches.length}
           totalCount={statusScopedMatches.length}
           hasExtraActiveFilters={venueFilter !== 'ALL' || selectedDateIso !== null}

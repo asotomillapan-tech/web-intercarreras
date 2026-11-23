@@ -588,24 +588,36 @@ export async function syncMultipleMasterSheets(
   const succeeded: SheetSyncSummary[] = [];
   const failed: Array<{ masterKey: MasterSheetKey; label: string; error: string }> = [];
 
-  for (const target of targets) {
-    try {
-      const summary = await syncMasterSheet(
-        accessToken,
-        target.key,
-        target.spreadsheetId,
-        state,
-        undefined,
-        deletedIds
-      );
-      succeeded.push(summary);
-    } catch (err: unknown) {
-      failed.push({
-        masterKey: target.key,
-        label: target.meta.label,
-        error: err instanceof Error ? err.message : 'Error sincronizando planilla.',
-      });
-    }
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const batch = targets.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((target) =>
+        syncMasterSheet(
+          accessToken,
+          target.key,
+          target.spreadsheetId,
+          state,
+          undefined,
+          deletedIds
+        )
+      )
+    );
+    results.forEach((res, idx) => {
+      const target = batch[idx];
+      if (res.status === 'fulfilled') {
+        succeeded.push(res.value);
+      } else {
+        failed.push({
+          masterKey: target.key,
+          label: target.meta.label,
+          error:
+            res.reason instanceof Error
+              ? res.reason.message
+              : 'Error sincronizando planilla.',
+        });
+      }
+    });
   }
 
   return { succeeded, failed };

@@ -14,7 +14,9 @@ import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   filterMatchesByOrg,
   groupMatchesByOrg,
+  sortMatchesChronologically,
   type MatchGroupByMode,
+  type MatchSortOrder,
 } from '../domain/matchFilterEngine';
 import type {
   DisciplineId,
@@ -60,6 +62,7 @@ export function AdminMatchEditor({
   const [groupFilter, setGroupFilter] = useState<'ALL' | string>('ALL');
   const [stageFilter, setStageFilter] = useState<'ALL' | MatchPhase>('ALL');
   const [groupBy, setGroupBy] = useState<MatchGroupByMode>('none');
+  const [sortOrder, setSortOrder] = useState<MatchSortOrder>('newest');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
   const [query, setQuery] = useState('');
 
@@ -92,28 +95,22 @@ export function AdminMatchEditor({
       groupName: groupFilter,
       fase: stageFilter,
     });
-    return orgFiltered
-      .filter((m) => {
-        if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
-        if (!q) return true;
-        const homeName = teamMap.get(m.homeTeamId)?.nombre.toLowerCase() ?? '';
-        const awayName = teamMap.get(m.awayTeamId)?.nombre.toLowerCase() ?? '';
-        return (
-          homeName.includes(q) ||
-          awayName.includes(q) ||
-          m.cancha.toLowerCase().includes(q) ||
-          m.groupName.toLowerCase().includes(q) ||
-          m.fase.toLowerCase().includes(q) ||
-          m.fecha.includes(q)
-        );
-      })
-      .sort((a, b) => {
-        // Put FINALIZADO first so past matches are immediately accessible, then newest date
-        const rank = (s: MatchStatus) => (s === 'FINALIZADO' ? 0 : s === 'EN_VIVO' ? 1 : 2);
-        if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-        return `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`);
-      });
-  }, [state.matches, disciplineFilter, groupFilter, stageFilter, statusFilter, query, teamMap]);
+    const matched = orgFiltered.filter((m) => {
+      if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
+      if (!q) return true;
+      const homeName = teamMap.get(m.homeTeamId)?.nombre.toLowerCase() ?? '';
+      const awayName = teamMap.get(m.awayTeamId)?.nombre.toLowerCase() ?? '';
+      return (
+        homeName.includes(q) ||
+        awayName.includes(q) ||
+        m.cancha.toLowerCase().includes(q) ||
+        m.groupName.toLowerCase().includes(q) ||
+        m.fase.toLowerCase().includes(q) ||
+        m.fecha.includes(q)
+      );
+    });
+    return sortMatchesChronologically(matched, sortOrder);
+  }, [state.matches, disciplineFilter, groupFilter, stageFilter, statusFilter, query, teamMap, sortOrder]);
 
   const groupedMatchSections = useMemo(
     () =>
@@ -856,6 +853,8 @@ export function AdminMatchEditor({
           onGroupChange={setGroupFilter}
           stageFilter={stageFilter}
           onStageChange={setStageFilter}
+          sortOrder={sortOrder}
+          onSortOrderChange={setSortOrder}
           groupBy={groupBy}
           onGroupByChange={setGroupBy}
           filteredCount={filteredMatches.length}
@@ -866,6 +865,7 @@ export function AdminMatchEditor({
             setGroupFilter('ALL');
             setStageFilter('ALL');
             setGroupBy('none');
+            setSortOrder('newest');
             setStatusFilter('ALL');
             setQuery('');
           }}

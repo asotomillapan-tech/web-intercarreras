@@ -23,7 +23,11 @@ import {
   getTotyFormationForSport,
   normalizeTotyBallotSelections,
 } from '../domain/awardsEngine';
-import { filterMatchesByOrg } from '../domain/matchFilterEngine';
+import {
+  filterMatchesByOrg,
+  sortMatchesChronologically,
+  type MatchSortOrder,
+} from '../domain/matchFilterEngine';
 import {
   canVoteMatchMvp,
   computeMatchMvpStandings,
@@ -58,6 +62,137 @@ function playerMatchesQuery(player: Player, team: Team | undefined, rawQuery: st
     `${player.nombre} ${player.apellidoPaterno} ${player.apellidoMaterno ?? ''} #${player.dorsal} ${player.dorsal} ${player.posicion} ${player.carrera} ${team?.nombre ?? ''} ${team?.sigla ?? ''}`
   );
   return q.split(/\s+/).every((token) => haystack.includes(token));
+}
+
+interface AutocompletePlayerOption {
+  id: string;
+  label: string;
+  subtitle: string;
+  badge?: string;
+  escudo?: string;
+  sigla: string;
+  teamName: string;
+  disabled?: boolean;
+}
+
+interface VotingPlayerAutocompleteBarProps {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+  options: AutocompletePlayerOption[];
+  onSelectOption: (option: AutocompletePlayerOption) => void;
+  actionHint?: string;
+}
+
+function VotingPlayerAutocompleteBar({
+  id,
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+  options,
+  onSelectOption,
+  actionHint = 'Seleccionar',
+}: VotingPlayerAutocompleteBarProps) {
+  const [focused, setFocused] = useState(false);
+
+  const visibleSuggestions = useMemo(() => {
+    if (!focused) return [];
+    const q = normalizeSearchText(value);
+    if (!q) return options.slice(0, 8);
+    return options.slice(0, 10);
+  }, [focused, value, options]);
+
+  return (
+    <div className="relative">
+      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      <input
+        id={id}
+        type="text"
+        role="combobox"
+        aria-expanded={focused && visibleSuggestions.length > 0}
+        aria-controls={`${id}-listbox`}
+        aria-autocomplete="list"
+        aria-label={ariaLabel}
+        value={value}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          // Delay close briefly so button click registers before unmount
+          window.setTimeout(() => setFocused(false), 160);
+        }}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setFocused(true);
+        }}
+        placeholder={placeholder}
+        className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+      />
+      {value && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onChange('')}
+          aria-label="Limpiar búsqueda de jugador"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {focused && value.trim().length > 0 && (
+        <div
+          id={`${id}-listbox`}
+          role="listbox"
+          aria-label="Sugerencias de jugadores"
+          className="absolute left-0 right-0 top-full mt-1 z-30 border border-neutral-300 bg-white shadow-xl max-h-64 overflow-y-auto divide-y divide-neutral-100"
+        >
+          {visibleSuggestions.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-neutral-500 text-center">
+              Sin coincidencias para &ldquo;{value}&rdquo;.
+            </p>
+          ) : (
+            visibleSuggestions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="option"
+                disabled={opt.disabled}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (opt.disabled) return;
+                  onSelectOption(opt);
+                  setFocused(false);
+                }}
+                className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors ${
+                  opt.disabled
+                    ? 'bg-neutral-50 opacity-50 cursor-not-allowed'
+                    : 'hover:bg-[#f5f6f8] cursor-pointer'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <TeamCrest
+                    escudo={opt.escudo}
+                    sigla={opt.sigla}
+                    nombre={opt.teamName}
+                    size="xs"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-[#0d0d0d] truncate">{opt.label}</p>
+                    <p className="text-[11px] text-neutral-500 truncate">{opt.subtitle}</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono uppercase text-[#707ef9] font-semibold shrink-0">
+                  {opt.badge ?? actionHint}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TotyPlayerSearchPickerProps {
@@ -320,10 +455,13 @@ export function VotationsView({
   );
   const [potmGroupFilter, setPotmGroupFilter] = useState<'ALL' | string>('ALL');
   const [potmStageFilter, setPotmStageFilter] = useState<'ALL' | MatchPhase>('ALL');
+  const [potmSortOrder, setPotmSortOrder] = useState<MatchSortOrder>('newest');
+  const [mvpSearchQuery, setMvpSearchQuery] = useState('');
   const [selectedPositionKey, setSelectedPositionKey] = useState<string>('');
   const [showAllPlayersForPosition, setShowAllPlayersForPosition] = useState(false);
   const [positionPlayerSearch, setPositionPlayerSearch] = useState('');
   const [positionTeamFilter, setPositionTeamFilter] = useState<'ALL' | string>('ALL');
+  const [totyQuickSearch, setTotyQuickSearch] = useState('');
   const [totyDraft, setTotyDraft] = useState<Record<string, string>>({});
   const [totyBoardMode, setTotyBoardMode] = useState<'community' | 'draft'>('community');
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -348,9 +486,11 @@ export function VotationsView({
     setPotmDisciplineFilter(selectedDiscipline);
     setPotmGroupFilter('ALL');
     setPotmStageFilter('ALL');
+    setMvpSearchQuery('');
     setShowAllPlayersForPosition(false);
     setPositionPlayerSearch('');
     setPositionTeamFilter('ALL');
+    setTotyQuickSearch('');
     setFeedbackMsg(null);
   }, [selectedDiscipline, sportPositions, selectedPositionKey]);
 
@@ -370,11 +510,8 @@ export function VotationsView({
   );
 
   const sortedAllMatches = useMemo(
-    () =>
-      [...state.matches].sort((a, b) =>
-        `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`)
-      ),
-    [state.matches]
+    () => sortMatchesChronologically(state.matches, potmSortOrder),
+    [state.matches, potmSortOrder]
   );
 
   const filteredPotmMatches = useMemo(
@@ -436,6 +573,31 @@ export function VotationsView({
         state.teams
       ),
     [selectedDiscipline, nomineeIds, state.championshipMvpVotes, state.players, state.teams]
+  );
+
+  const filteredMvpCandidates = useMemo(() => {
+    const q = normalizeSearchText(mvpSearchQuery);
+    if (!q) return championshipMvpSummary.candidates;
+    return championshipMvpSummary.candidates.filter((c) => {
+      const hay = normalizeSearchText(
+        `${c.playerName} #${c.dorsal} ${c.dorsal} ${c.posicion} ${c.teamName} ${c.teamSigla}`
+      );
+      return q.split(/\s+/).every((tok) => hay.includes(tok));
+    });
+  }, [championshipMvpSummary.candidates, mvpSearchQuery]);
+
+  const mvpAutocompleteOptions = useMemo<AutocompletePlayerOption[]>(
+    () =>
+      filteredMvpCandidates.map((c) => ({
+        id: c.playerId,
+        label: `#${c.dorsal} ${c.playerName}`,
+        subtitle: `${c.teamName} · ${c.posicion}`,
+        badge: `${c.votes} v.`,
+        escudo: c.teamEscudo,
+        sigla: c.teamSigla,
+        teamName: c.teamName,
+      })),
+    [filteredMvpCandidates]
   );
 
   const userChampionshipMvpVote = useMemo(() => {
@@ -621,7 +783,11 @@ export function VotationsView({
       onOpenAuth();
       return;
     }
-    const cleanSelections = normalizeTotyBallotSelections(totyDraft, discMeta.sportType);
+    const cleanSelections = normalizeTotyBallotSelections(
+      totyDraft,
+      discMeta.sportType,
+      activeTotyConfig
+    );
     const selectedEntries = Object.entries(cleanSelections);
     if (selectedEntries.length === 0) {
       setFeedbackMsg('Selecciona al menos un jugador antes de guardar tu TOTY.');
@@ -637,6 +803,84 @@ export function VotationsView({
     } finally {
       setSavingKey(null);
     }
+  };
+
+  // Real-time autocomplete options for Position Awards
+  const positionAutocompleteOptions = useMemo<AutocompletePlayerOption[]>(
+    () =>
+      positionCandidatesToDisplay.map((pl) => {
+        const tm = teamMap.get(pl.teamId);
+        return {
+          id: pl.id,
+          label: `#${pl.dorsal} ${pl.nombre} ${pl.apellidoPaterno}`,
+          subtitle: `${tm?.nombre ?? pl.teamId} · ${pl.posicion}`,
+          badge: userPositionVote?.playerId === pl.id ? 'Votado' : 'Filtrar',
+          escudo: tm?.escudo,
+          sigla: tm?.sigla ?? 'EQ',
+          teamName: tm?.nombre ?? pl.teamId,
+        };
+      }),
+    [positionCandidatesToDisplay, teamMap, userPositionVote]
+  );
+
+  // Real-time autocomplete options & quick assignment for TOTY
+  const totyFilteredQuickPlayers = useMemo(() => {
+    if (!totyQuickSearch.trim()) return disciplinePlayers;
+    return disciplinePlayers.filter((pl) =>
+      playerMatchesQuery(pl, teamMap.get(pl.teamId), totyQuickSearch)
+    );
+  }, [disciplinePlayers, teamMap, totyQuickSearch]);
+
+  const totyQuickAutocompleteOptions = useMemo<AutocompletePlayerOption[]>(
+    () =>
+      totyFilteredQuickPlayers.map((pl) => {
+        const tm = teamMap.get(pl.teamId);
+        const alreadyInToty = totyDraftPlayerIdSet.has(pl.id);
+        return {
+          id: pl.id,
+          label: `#${pl.dorsal} ${pl.nombre} ${pl.apellidoPaterno}`,
+          subtitle: `${tm?.nombre ?? pl.teamId} · ${pl.posicion}`,
+          badge: alreadyInToty ? 'En tu TOTY' : 'Asignar',
+          escudo: tm?.escudo,
+          sigla: tm?.sigla ?? 'EQ',
+          teamName: tm?.nombre ?? pl.teamId,
+          disabled: alreadyInToty,
+        };
+      }),
+    [totyFilteredQuickPlayers, teamMap, totyDraftPlayerIdSet]
+  );
+
+  const handleQuickAssignTotyPlayer = (playerId: string) => {
+    const player = disciplinePlayers.find((p) => p.id === playerId);
+    if (!player || totyDraftPlayerIdSet.has(playerId)) return;
+
+    // 1. Prefer an empty slot whose position matches this player
+    const compatibleEmpty = totyFormation.slots.find((slot) => {
+      if (totyDraft[slot.slotKey]) return false;
+      const { matched } = getEligiblePlayersForPosition(
+        [player],
+        discMeta.sportType,
+        slot.positionKey
+      );
+      return matched.length > 0;
+    });
+    // 2. Fallback to first empty slot in the formation
+    const fallbackEmpty = totyFormation.slots.find((slot) => !totyDraft[slot.slotKey]);
+    const targetSlot = compatibleEmpty ?? fallbackEmpty;
+
+    if (!targetSlot) {
+      setFeedbackMsg(
+        'Tu formación TOTY ya está completa. Quita algún jugador de un puesto para asignar otro.'
+      );
+      return;
+    }
+
+    setTotyDraft((prev) => ({ ...prev, [targetSlot.slotKey]: player.id }));
+    setTotyBoardMode('draft');
+    setTotyQuickSearch('');
+    setFeedbackMsg(
+      `${player.nombre} ${player.apellidoPaterno} asignado a ${targetSlot.label} en tu papeleta TOTY.`
+    );
   };
 
   return (
@@ -797,10 +1041,13 @@ export function VotationsView({
               onStageChange={setPotmStageFilter}
               filteredCount={filteredPotmMatches.length}
               totalCount={sortedAllMatches.length}
+              sortOrder={potmSortOrder}
+              onSortOrderChange={setPotmSortOrder}
               onReset={() => {
                 setPotmDisciplineFilter(selectedDiscipline);
                 setPotmGroupFilter('ALL');
                 setPotmStageFilter('ALL');
+                setPotmSortOrder('newest');
               }}
               compact
             />
@@ -1079,79 +1326,125 @@ export function VotationsView({
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
-                {championshipMvpSummary.candidates.map((cand, index) => {
-                  const isMyPick = userChampionshipMvpVote?.playerId === cand.playerId;
-                  const isLeader = index === 0 && cand.votes > 0;
-                  return (
-                    <div
-                      key={cand.playerId}
-                      className={`bg-white border p-5 flex flex-col justify-between gap-5 ${
-                        isMyPick
-                          ? 'border-[#707ef9] ring-1 ring-[#707ef9]'
-                          : 'border-neutral-200'
-                      }`}
+              <div className="space-y-4">
+                <div className="bg-white border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex-1 max-w-lg">
+                    <VotingPlayerAutocompleteBar
+                      id="votations-mvp-autocomplete"
+                      value={mvpSearchQuery}
+                      onChange={setMvpSearchQuery}
+                      placeholder="Buscar nominado al MVP por nombre, dorsal, posición o equipo..."
+                      ariaLabel="Buscar nominado al MVP del campeonato"
+                      options={mvpAutocompleteOptions}
+                      actionHint="Ver nominado"
+                      onSelectOption={(opt) => {
+                        const picked = championshipMvpSummary.candidates.find(
+                          (c) => c.playerId === opt.id
+                        );
+                        if (picked) {
+                          setMvpSearchQuery(picked.playerName);
+                        }
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                    Mostrando {filteredMvpCandidates.length} de{' '}
+                    {championshipMvpSummary.candidates.length} nominados
+                  </span>
+                </div>
+
+                {filteredMvpCandidates.length === 0 ? (
+                  <div className="bg-white border border-neutral-200 p-8 text-center space-y-2">
+                    <p className="text-sm text-neutral-600">
+                      Ningún nominado al MVP coincide con &ldquo;{mvpSearchQuery}&rdquo;.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setMvpSearchQuery('')}
+                      className="text-xs font-bold uppercase tracking-wider text-[#707ef9] hover:underline cursor-pointer"
                     >
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <TeamCrest
-                              escudo={cand.teamEscudo}
-                              sigla={cand.teamSigla}
-                              nombre={cand.teamName}
-                              size="md"
-                            />
-                            <div className="min-w-0">
-                              <p className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
-                                #{index + 1} · Dorsal {cand.dorsal} · {cand.posicion}
-                              </p>
-                              <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
-                                {cand.playerName}
-                              </h3>
-                              <p className="text-xs text-neutral-600 truncate">{cand.teamName}</p>
+                      Mostrar todos los nominados
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-stretch">
+                    {filteredMvpCandidates.map((cand) => {
+                      const rankIndex = championshipMvpSummary.candidates.findIndex(
+                        (c) => c.playerId === cand.playerId
+                      );
+                      const isMyPick = userChampionshipMvpVote?.playerId === cand.playerId;
+                      const isLeader = rankIndex === 0 && cand.votes > 0;
+                      return (
+                        <div
+                          key={cand.playerId}
+                          className={`bg-white border p-5 flex flex-col justify-between gap-5 ${
+                            isMyPick
+                              ? 'border-[#707ef9] ring-1 ring-[#707ef9]'
+                              : 'border-neutral-200'
+                          }`}
+                        >
+                          <div className="space-y-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <TeamCrest
+                                  escudo={cand.teamEscudo}
+                                  sigla={cand.teamSigla}
+                                  nombre={cand.teamName}
+                                  size="md"
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
+                                    #{rankIndex + 1} · Dorsal {cand.dorsal} · {cand.posicion}
+                                  </p>
+                                  <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
+                                    {cand.playerName}
+                                  </h3>
+                                  <p className="text-xs text-neutral-600 truncate">{cand.teamName}</p>
+                                </div>
+                              </div>
+                              {isLeader && (
+                                <Trophy className="w-5 h-5 text-amber-500 shrink-0" aria-label="Líder actual" />
+                              )}
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-xs font-mono">
+                                <span className="font-semibold text-[#0d0d0d]">{cand.votes} votos</span>
+                                <span className="text-[#707ef9] font-semibold">{cand.percentage}%</span>
+                              </div>
+                              <div className="h-2 bg-neutral-100 overflow-hidden">
+                                <div
+                                  className="h-full bg-[#707ef9] transition-all"
+                                  style={{ width: `${cand.percentage}%` }}
+                                />
+                              </div>
                             </div>
                           </div>
-                          {isLeader && (
-                            <Trophy className="w-5 h-5 text-amber-500 shrink-0" aria-label="Líder actual" />
-                          )}
-                        </div>
 
-                        {/* Progress bar */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs font-mono">
-                            <span className="font-semibold text-[#0d0d0d]">{cand.votes} votos</span>
-                            <span className="text-[#707ef9] font-semibold">{cand.percentage}%</span>
-                          </div>
-                          <div className="h-2 bg-neutral-100 overflow-hidden">
-                            <div
-                              className="h-full bg-[#707ef9] transition-all"
-                              style={{ width: `${cand.percentage}%` }}
-                            />
-                          </div>
+                          <button
+                            type="button"
+                            disabled={savingKey === `mvp-${cand.playerId}`}
+                            onClick={() => handleChampionshipMvpClick(cand.playerId)}
+                            className={`w-full py-2.5 text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                              isMyPick
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
+                            }`}
+                          >
+                            {isMyPick
+                              ? 'Tu voto actual al MVP'
+                              : savingKey === `mvp-${cand.playerId}`
+                              ? 'Guardando...'
+                              : currentUser
+                              ? 'Votar por este jugador'
+                              : 'Ingresar para votar'}
+                          </button>
                         </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={savingKey === `mvp-${cand.playerId}`}
-                        onClick={() => handleChampionshipMvpClick(cand.playerId)}
-                        className={`w-full py-2.5 text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                          isMyPick
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
-                        }`}
-                      >
-                        {isMyPick
-                          ? 'Tu voto actual al MVP'
-                          : savingKey === `mvp-${cand.playerId}`
-                          ? 'Guardando...'
-                          : currentUser
-                          ? 'Votar por este jugador'
-                          : 'Ingresar para votar'}
-                      </button>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1295,29 +1588,24 @@ export function VotationsView({
                   )}
                 </div>
 
-                {/* Manual Player Search + Team Filter */}
+                {/* Manual Player Autocomplete Search + Team Filter */}
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                  <div className="sm:col-span-7 relative">
-                    <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
+                  <div className="sm:col-span-7">
+                    <VotingPlayerAutocompleteBar
                       id="votations-position-player-search"
-                      type="text"
                       value={positionPlayerSearch}
-                      onChange={(e) => setPositionPlayerSearch(e.target.value)}
-                      placeholder="Buscar jugador por nombre, apellido, dorsal o equipo..."
-                      aria-label="Buscar jugador manualmente para votar"
-                      className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+                      onChange={setPositionPlayerSearch}
+                      placeholder="Buscar jugador con autocompletado (nombre, dorsal o equipo)..."
+                      ariaLabel="Buscar jugador manualmente para votar"
+                      options={positionAutocompleteOptions}
+                      actionHint="Elegir"
+                      onSelectOption={(opt) => {
+                        const found = positionCandidatesToDisplay.find((p) => p.id === opt.id);
+                        if (found) {
+                          setPositionPlayerSearch(`${found.nombre} ${found.apellidoPaterno}`);
+                        }
+                      }}
                     />
-                    {positionPlayerSearch && (
-                      <button
-                        type="button"
-                        onClick={() => setPositionPlayerSearch('')}
-                        aria-label="Limpiar búsqueda de jugador"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
                   </div>
 
                   <div className="sm:col-span-5">
@@ -1714,9 +2002,35 @@ export function VotationsView({
                 </p>
               ) : (
                 <div className="space-y-4">
+                  {/* Top-level real-time autocomplete search bar for TOTY */}
+                  <div className="bg-[#f5f6f8] border border-neutral-200 p-3 space-y-2">
+                    <label
+                      htmlFor="toty-quick-autocomplete"
+                      className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600"
+                    >
+                      Búsqueda rápida con autocompletado para tu TOTY
+                    </label>
+                    <VotingPlayerAutocompleteBar
+                      id="toty-quick-autocomplete"
+                      value={totyQuickSearch}
+                      onChange={setTotyQuickSearch}
+                      placeholder="Escribe nombre, dorsal o equipo para filtrar o asignar rápido..."
+                      ariaLabel="Buscar jugador con autocompletado para el TOTY"
+                      options={totyQuickAutocompleteOptions}
+                      actionHint="Asignar al TOTY"
+                      onSelectOption={(opt) => handleQuickAssignTotyPlayer(opt.id)}
+                    />
+                    {totyQuickSearch.trim().length > 0 && (
+                      <p className="text-[11px] text-neutral-500">
+                        Filtrando opciones en vivo: <strong>{totyFilteredQuickPlayers.length}</strong>{' '}
+                        jugador(es) disponible(s). Haz clic en una sugerencia para asignarlo automáticamente.
+                      </p>
+                    )}
+                  </div>
+
                   {totyFormation.slots.map((slot) => {
                     const { matched, all } = getEligiblePlayersForPosition(
-                      disciplinePlayers,
+                      totyFilteredQuickPlayers,
                       discMeta.sportType,
                       slot.positionKey
                     );
