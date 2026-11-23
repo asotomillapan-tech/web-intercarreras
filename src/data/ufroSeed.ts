@@ -319,6 +319,7 @@ export function createInitialTournamentState(): TournamentState {
     championshipMvpVotes: [],
     positionAwardVotes: [],
     totyBallots: [],
+    totyConfigs: {},
     photos: [],
     news: [],
     leyendasLeaderboard: [],

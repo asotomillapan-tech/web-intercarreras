@@ -792,6 +792,28 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidTotyConfig(data) {
+      return data.keys().hasAll([
+          'disciplineId',
+          'temporada',
+          'formationName',
+          'positionCounts',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'disciplineId',
+          'temporada',
+          'formationName',
+          'positionCounts',
+          'updatedAt'
+        ])
+        && isValidDiscipline(data.disciplineId)
+        && data.temporada is string && data.temporada.size() >= 4 && data.temporada.size() <= 16
+        && data.formationName is string && data.formationName.size() >= 2 && data.formationName.size() <= 80
+        && data.positionCounts is map && data.positionCounts.size() >= 1 && data.positionCounts.size() <= 8
+        && data.updatedAt is timestamp;
+    }
+
     function isValidLeyendasStats(stats) {
       return stats is map
         && stats.keys().hasAll(['g', 'a', 'm', 'pts', 'reb', 'ast', 'blk', 'ace'])
@@ -1728,7 +1750,35 @@ service cloud.firestore {
       allow delete: if isValidId(ballotId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
     }
 
-    // --- Collection 17: /leyendas_leaderboard/{entryId} (LEYENDAS Weekly Global Ranking) ---
+    // --- Collection 17: /toty_configs/{disciplineId} (Admin-Managed TOTY Formation per Discipline) ---
+    match /toty_configs/{disciplineId} {
+      allow get: if isValidDiscipline(disciplineId);
+      allow list: if isValidDiscipline(resource.data.disciplineId);
+
+      allow create: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isAdmin()
+        && isValidTotyConfig(incoming())
+        && incoming().disciplineId == disciplineId
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidDiscipline(disciplineId)
+        && isAdmin()
+        && isValidTotyConfig(incoming())
+        && incoming().disciplineId == existing().disciplineId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'temporada',
+          'formationName',
+          'positionCounts',
+          'updatedAt'
+        ]);
+
+      allow delete: if isValidDiscipline(disciplineId) && isAdmin();
+    }
+
+    // --- Collection 18: /leyendas_leaderboard/{entryId} (LEYENDAS Weekly Global Ranking) ---
     match /leyendas_leaderboard/{entryId} {
       allow get: if isValidId(entryId);
       allow list: if resource.data.sportKey in ['futbol', 'basquet', 'voley'];

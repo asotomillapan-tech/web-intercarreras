@@ -442,6 +442,14 @@ export interface TotyBallotRecord {
   updatedAt: string;
 }
 
+export interface DisciplineTotyConfig {
+  disciplineId: DisciplineId;
+  temporada: string;
+  formationName: string;
+  positionCounts: Record<string, number>;
+  updatedAt?: string;
+}
+
 export interface LeyendasStintRecord {
   team: string;
   teamId?: string;
@@ -515,6 +523,7 @@ export interface TournamentState {
   championshipMvpVotes: ChampionshipMvpVoteRecord[];
   positionAwardVotes: PositionAwardVoteRecord[];
   totyBallots: TotyBallotRecord[];
+  totyConfigs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
   photos: PhotoEntry[];
   news: NewsArticle[];
   leyendasLeaderboard: LeyendasLeaderboardEntry[];

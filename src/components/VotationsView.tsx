@@ -330,13 +330,14 @@ export function VotationsView({
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
   const discMeta = DISCIPLINE_MAP[selectedDiscipline];
+  const activeTotyConfig = state.totyConfigs?.[selectedDiscipline] ?? null;
   const sportPositions = useMemo(
     () => getPositionsForSport(discMeta.sportType),
     [discMeta.sportType]
   );
   const totyFormation = useMemo(
-    () => getTotyFormationForSport(discMeta.sportType),
-    [discMeta.sportType]
+    () => getTotyFormationForSport(discMeta.sportType, activeTotyConfig),
+    [discMeta.sportType, activeTotyConfig]
   );
 
   // Keep selectedPositionKey & POTM filters valid when switching discipline/sport
@@ -397,10 +398,14 @@ export function VotationsView({
   useEffect(() => {
     setTotyDraft(
       existingTotyBallot?.selections
-        ? normalizeTotyBallotSelections(existingTotyBallot.selections, discMeta.sportType)
+        ? normalizeTotyBallotSelections(
+            existingTotyBallot.selections,
+            discMeta.sportType,
+            activeTotyConfig
+          )
         : {}
     );
-  }, [existingTotyBallot, selectedDiscipline, discMeta.sportType]);
+  }, [existingTotyBallot, selectedDiscipline, discMeta.sportType, activeTotyConfig]);
 
   // --- POTM Matches Categorization ---
   const potmBuckets = useMemo(() => {
@@ -517,9 +522,17 @@ export function VotationsView({
         discMeta.sportType,
         state.totyBallots,
         state.players,
-        state.teams
+        state.teams,
+        activeTotyConfig
       ),
-    [selectedDiscipline, discMeta.sportType, state.totyBallots, state.players, state.teams]
+    [
+      selectedDiscipline,
+      discMeta.sportType,
+      state.totyBallots,
+      state.players,
+      state.teams,
+      activeTotyConfig,
+    ]
   );
 
   const handleChampionshipMvpClick = async (playerId: string) => {

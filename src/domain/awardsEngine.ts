@@ -1,6 +1,7 @@
 import type {
   ChampionshipMvpVoteRecord,
   DisciplineId,
+  DisciplineTotyConfig,
   Player,
   PositionAwardVoteRecord,
   SportType,
@@ -397,22 +398,395 @@ export const TOTY_FORMATIONS: Record<SportType, TotyFormationConfig> = {
   },
 };
 
-export function getTotyFormationForSport(sportType: SportType): TotyFormationConfig {
-  return TOTY_FORMATIONS[sportType] ?? TOTY_FORMATIONS.futbol7;
+export const TOTY_MAX_SLOTS = 10;
+export const TOTY_MAX_PER_POSITION = 6;
+
+export interface TotyFormationPreset {
+  id: string;
+  label: string;
+  formationName: string;
+  positionCounts: Record<string, number>;
+}
+
+export const TOTY_FORMATION_PRESETS: Record<SportType, TotyFormationPreset[]> = {
+  futbol7: [
+    {
+      id: 'f7-1-2-2-2',
+      label: '1-2-2-2 (Oficial · 7)',
+      formationName: 'Formación 1-2-2-2',
+      positionCounts: { arquero: 1, defensa: 2, mediocampista: 2, delantero: 2 },
+    },
+    {
+      id: 'f7-1-3-2-1',
+      label: '1-3-2-1 (Defensiva · 7)',
+      formationName: 'Formación 1-3-2-1',
+      positionCounts: { arquero: 1, defensa: 3, mediocampista: 2, delantero: 1 },
+    },
+    {
+      id: 'f7-1-2-3-1',
+      label: '1-2-3-1 (Control · 7)',
+      formationName: 'Formación 1-2-3-1',
+      positionCounts: { arquero: 1, defensa: 2, mediocampista: 3, delantero: 1 },
+    },
+    {
+      id: 'f7-1-3-1-2',
+      label: '1-3-1-2 (Vertical · 7)',
+      formationName: 'Formación 1-3-1-2',
+      positionCounts: { arquero: 1, defensa: 3, mediocampista: 1, delantero: 2 },
+    },
+  ],
+  basquetbol: [
+    {
+      id: 'bk-classic',
+      label: 'Quinteto Clásico (5)',
+      formationName: 'Quinteto Ideal 5x5',
+      positionCounts: { base: 1, escolta: 1, alero: 1, ala_pivot: 1, pivot: 1 },
+    },
+    {
+      id: 'bk-small-ball',
+      label: 'Small Ball (2 PG · 5)',
+      formationName: 'Quinteto Small Ball',
+      positionCounts: { base: 2, escolta: 1, alero: 1, ala_pivot: 1, pivot: 0 },
+    },
+    {
+      id: 'bk-twin-towers',
+      label: 'Torres Gemelas (2 C · 5)',
+      formationName: 'Quinteto Torres Gemelas',
+      positionCounts: { base: 1, escolta: 1, alero: 1, ala_pivot: 0, pivot: 2 },
+    },
+  ],
+  basquetbol3x3: [
+    {
+      id: 'bk3-classic',
+      label: 'Trío Clásico (3)',
+      formationName: 'Trío Ideal 3x3',
+      positionCounts: { base: 1, alero: 1, pivot: 1 },
+    },
+    {
+      id: 'bk3-perimeter',
+      label: 'Perimetral (2 PER · 3)',
+      formationName: 'Trío Perimetral 3x3',
+      positionCounts: { base: 2, alero: 0, pivot: 1 },
+    },
+  ],
+  voleibol: [
+    {
+      id: 'vl-6-libero',
+      label: 'Sexteto + Líbero (7)',
+      formationName: 'Sexteto Titular + Líbero',
+      positionCounts: { armador: 1, punta: 2, central: 2, opuesto: 1, libero: 1 },
+    },
+    {
+      id: 'vl-6-only',
+      label: 'Sexteto sin Líbero (6)',
+      formationName: 'Sexteto Titular 6',
+      positionCounts: { armador: 1, punta: 2, central: 2, opuesto: 1, libero: 0 },
+    },
+  ],
+};
+
+const POSITION_PLURAL_LABELS: Record<string, { singular: string; plural: string }> = {
+  arquero: { singular: 'Portero', plural: 'Porteros' },
+  defensa: { singular: 'Defensa', plural: 'Defensas' },
+  mediocampista: { singular: 'Mediocampista', plural: 'Mediocampistas' },
+  delantero: { singular: 'Delantero', plural: 'Delanteros' },
+  base: { singular: 'Base', plural: 'Bases' },
+  escolta: { singular: 'Escolta', plural: 'Escoltas' },
+  alero: { singular: 'Alero', plural: 'Aleros' },
+  ala_pivot: { singular: 'Ala-Pívot', plural: 'Ala-Pívots' },
+  pivot: { singular: 'Pívot', plural: 'Pívots' },
+  armador: { singular: 'Armador', plural: 'Armadores' },
+  punta: { singular: 'Punta', plural: 'Puntas' },
+  central: { singular: 'Central', plural: 'Centrales' },
+  opuesto: { singular: 'Opuesto', plural: 'Opuestos' },
+  libero: { singular: 'Líbero', plural: 'Líberos' },
+};
+
+const ROW_BASE_LABELS: Record<SportType, Record<number, string>> = {
+  futbol7: {
+    0: 'Portería',
+    1: 'Defensa',
+    2: 'Mediocampo',
+    3: 'Delantera',
+  },
+  basquetbol: {
+    0: 'Conducción',
+    1: 'Perímetro / Alas',
+    2: 'Juego Interior',
+  },
+  basquetbol3x3: {
+    0: 'Perímetro',
+    1: 'Frente de Ataque',
+    2: 'Juego Interior',
+  },
+  voleibol: {
+    0: 'Especialista Defensivo',
+    1: 'Segunda Línea',
+    2: 'Primera Línea / Red',
+  },
+};
+
+export function getDefaultPositionCountsForSport(sportType: SportType): Record<string, number> {
+  const defaultFormation = TOTY_FORMATIONS[sportType] ?? TOTY_FORMATIONS.futbol7;
+  const categories = getPositionsForSport(sportType);
+  const counts: Record<string, number> = {};
+  for (const cat of categories) {
+    counts[cat.key] = 0;
+  }
+  for (const slot of defaultFormation.slots) {
+    counts[slot.positionKey] = (counts[slot.positionKey] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export function formatTotyFormationSummary(
+  sportType: SportType,
+  positionCounts: Record<string, number>
+): string {
+  const categories = getPositionsForSport(sportType);
+  const parts: string[] = [];
+  for (const cat of categories) {
+    const count = Math.max(0, Math.trunc(Number(positionCounts[cat.key]) || 0));
+    if (count <= 0) continue;
+    const labels = POSITION_PLURAL_LABELS[cat.key];
+    const word = labels ? (count === 1 ? labels.singular : labels.plural) : cat.label;
+    parts.push(`${count} ${word}`);
+  }
+  return parts.join(' · ');
+}
+
+export function suggestTotyFormationName(
+  sportType: SportType,
+  positionCounts: Record<string, number>
+): string {
+  if (sportType === 'futbol7') {
+    const arq = Math.max(0, Math.trunc(Number(positionCounts.arquero) || 0));
+    const def = Math.max(0, Math.trunc(Number(positionCounts.defensa) || 0));
+    const med = Math.max(0, Math.trunc(Number(positionCounts.mediocampista) || 0));
+    const del = Math.max(0, Math.trunc(Number(positionCounts.delantero) || 0));
+    return `Formación ${arq}-${def}-${med}-${del}`;
+  }
+  const total = Object.values(positionCounts).reduce(
+    (sum, n) => sum + Math.max(0, Math.trunc(Number(n) || 0)),
+    0
+  );
+  if (sportType === 'basquetbol') {
+    return total === 5 ? 'Quinteto Ideal 5x5' : `Formación Ideal (${total})`;
+  }
+  if (sportType === 'basquetbol3x3') {
+    return total === 3 ? 'Trío Ideal 3x3' : `Formación 3x3 (${total})`;
+  }
+  const lib = Math.max(0, Math.trunc(Number(positionCounts.libero) || 0));
+  const field = total - lib;
+  if (field === 6 && lib === 1) return 'Sexteto Titular + Líbero';
+  if (lib > 0) return `Formación ${field} + ${lib} Líbero`;
+  return `Formación Voleibol (${total})`;
+}
+
+export function validateDisciplineTotyConfig(
+  sportType: SportType,
+  positionCounts: Record<string, number>,
+  formationName: string
+): {
+  valid: boolean;
+  totalSlots: number;
+  error?: string;
+  sanitizedCounts: Record<string, number>;
+  sanitizedName: string;
+} {
+  const categories = getPositionsForSport(sportType);
+  const allowedKeys = new Set(categories.map((c) => c.key));
+  const sanitizedCounts: Record<string, number> = {};
+
+  for (const key of Object.keys(positionCounts)) {
+    if (!allowedKeys.has(key)) {
+      return {
+        valid: false,
+        totalSlots: 0,
+        error: `La posición "${key}" no corresponde a este deporte.`,
+        sanitizedCounts: {},
+        sanitizedName: formationName.trim(),
+      };
+    }
+    const rawVal = Number(positionCounts[key]);
+    if (!Number.isFinite(rawVal) || rawVal < 0 || Math.trunc(rawVal) !== rawVal) {
+      return {
+        valid: false,
+        totalSlots: 0,
+        error: 'Cada posición debe tener un número entero mayor o igual a 0.',
+        sanitizedCounts: {},
+        sanitizedName: formationName.trim(),
+      };
+    }
+    if (rawVal > TOTY_MAX_PER_POSITION) {
+      return {
+        valid: false,
+        totalSlots: 0,
+        error: `El máximo permitido por posición es ${TOTY_MAX_PER_POSITION}.`,
+        sanitizedCounts: {},
+        sanitizedName: formationName.trim(),
+      };
+    }
+  }
+
+  let totalSlots = 0;
+  for (const cat of categories) {
+    const count = Math.max(0, Math.trunc(Number(positionCounts[cat.key]) || 0));
+    sanitizedCounts[cat.key] = count;
+    totalSlots += count;
+  }
+
+  if (totalSlots < 1) {
+    return {
+      valid: false,
+      totalSlots,
+      error: 'La formación debe incluir al menos 1 puesto titular.',
+      sanitizedCounts,
+      sanitizedName: formationName.trim(),
+    };
+  }
+
+  if (totalSlots > TOTY_MAX_SLOTS) {
+    return {
+      valid: false,
+      totalSlots,
+      error: `La formación no puede superar ${TOTY_MAX_SLOTS} puestos totales.`,
+      sanitizedCounts,
+      sanitizedName: formationName.trim(),
+    };
+  }
+
+  const trimmedName = formationName.trim().slice(0, 80);
+  const sanitizedName =
+    trimmedName.length >= 2 ? trimmedName : suggestTotyFormationName(sportType, sanitizedCounts);
+
+  return {
+    valid: true,
+    totalSlots,
+    sanitizedCounts,
+    sanitizedName,
+  };
+}
+
+function countsMatchDefault(
+  sportType: SportType,
+  counts: Record<string, number>
+): boolean {
+  const defaults = getDefaultPositionCountsForSport(sportType);
+  return Object.keys(defaults).every(
+    (k) => (Math.trunc(Number(counts[k]) || 0) === defaults[k])
+  );
+}
+
+/**
+ * Builds the effective TOTY formation for a discipline, honoring an Admin's saved
+ * `DisciplineTotyConfig` when present and falling back to the official sport default.
+ */
+export function buildTotyFormationConfig(
+  sportType: SportType,
+  customConfig?: DisciplineTotyConfig | null
+): TotyFormationConfig {
+  const defaultFormation = TOTY_FORMATIONS[sportType] ?? TOTY_FORMATIONS.futbol7;
+  if (!customConfig || !customConfig.positionCounts) {
+    return defaultFormation;
+  }
+
+  const validation = validateDisciplineTotyConfig(
+    sportType,
+    customConfig.positionCounts,
+    customConfig.formationName || defaultFormation.formationName
+  );
+  if (!validation.valid) {
+    return defaultFormation;
+  }
+
+  // If the admin's counts match the official sport default, preserve canonical tactical rows
+  if (countsMatchDefault(sportType, validation.sanitizedCounts)) {
+    return {
+      ...defaultFormation,
+      formationName: validation.sanitizedName || defaultFormation.formationName,
+    };
+  }
+
+  const categories = getPositionsForSport(sportType);
+  const rawSlots: Omit<TotyFormationSlot, 'rowLabel'>[] = [];
+
+  for (const cat of categories) {
+    const count = validation.sanitizedCounts[cat.key] ?? 0;
+    if (count <= 0) continue;
+    const singular = POSITION_PLURAL_LABELS[cat.key]?.singular ?? cat.label;
+    for (let i = 1; i <= count; i++) {
+      const isSingle = count === 1;
+      let row = cat.totyRow;
+      if (sportType === 'voleibol') {
+        if (cat.key === 'libero') {
+          row = 0;
+        } else if (cat.key === 'armador') {
+          row = 1;
+        } else if (cat.key === 'opuesto') {
+          row = 2;
+        } else {
+          // Alternate multi-slot puntas/centrales between front net (2) and back line (1)
+          row = i % 2 === 1 ? 2 : 1;
+        }
+      } else if (sportType === 'basquetbol3x3') {
+        row = cat.key === 'base' ? 0 : 1;
+      }
+
+      rawSlots.push({
+        slotKey: isSingle ? cat.key : `${cat.key}_${i}`,
+        positionKey: cat.key,
+        label: isSingle ? cat.label : `${singular} ${i}`,
+        shortCode: isSingle ? cat.shortCode : `${cat.shortCode} ${i}`,
+        row,
+        isLibero: cat.key === 'libero',
+      });
+    }
+  }
+
+  const rowCounts = new Map<number, number>();
+  for (const s of rawSlots) {
+    rowCounts.set(s.row, (rowCounts.get(s.row) ?? 0) + 1);
+  }
+
+  const rowLabels = ROW_BASE_LABELS[sportType] ?? ROW_BASE_LABELS.futbol7;
+  const slots: TotyFormationSlot[] = rawSlots.map((s) => {
+    const baseLabel = rowLabels[s.row] ?? `Línea ${s.row + 1}`;
+    const cnt = rowCounts.get(s.row) ?? 1;
+    return {
+      ...s,
+      rowLabel: s.isLibero ? `${baseLabel} (+${cnt})` : `${baseLabel} (${cnt})`,
+    };
+  });
+
+  return {
+    sportType,
+    formationName: validation.sanitizedName,
+    summaryText: formatTotyFormationSummary(sportType, validation.sanitizedCounts),
+    slots,
+  };
+}
+
+export function getTotyFormationForSport(
+  sportType: SportType,
+  customConfig?: DisciplineTotyConfig | null
+): TotyFormationConfig {
+  return buildTotyFormationConfig(sportType, customConfig);
 }
 
 /**
  * Normalizes a saved TOTY ballot into the current formation's `slotKey -> playerId` shape:
  * - Preserves direct matches for current `slotKey`s.
- * - Migrates legacy single-position keys (e.g. `defensa` -> `defensa_1`, `punta` -> `punta_1`).
+ * - Migrates legacy single-position keys (e.g. `defensa` -> `defensa_1`) AND contracted multi-slot keys (`defensa_1` -> `defensa`).
  * - Guarantees no duplicate playerId occupies two slots in the same ballot.
  */
 export function normalizeTotyBallotSelections(
   rawSelections: Record<string, string> | undefined,
-  sportType: SportType
+  sportType: SportType,
+  customConfig?: DisciplineTotyConfig | null
 ): Record<string, string> {
   if (!rawSelections) return {};
-  const formation = getTotyFormationForSport(sportType);
+  const formation = getTotyFormationForSport(sportType, customConfig);
   const normalized: Record<string, string> = {};
   const usedPlayerIds = new Set<string>();
 
@@ -425,17 +799,27 @@ export function normalizeTotyBallotSelections(
     }
   }
 
-  // 2. Fallback migration from legacy positionKey (e.g., 'defensa' -> first empty defensa slot)
+  // 2. Fallback migration from legacy/alternate keys of the same positionKey
+  // (e.g., 'defensa' -> 'defensa_1' when expanded, or 'defensa_1' -> 'defensa' when contracted)
   for (const slot of formation.slots) {
     if (normalized[slot.slotKey]) continue;
-    const legacyPid = rawSelections[slot.positionKey];
-    if (
-      typeof legacyPid === 'string' &&
-      legacyPid.trim() &&
-      !usedPlayerIds.has(legacyPid.trim())
-    ) {
-      normalized[slot.slotKey] = legacyPid.trim();
-      usedPlayerIds.add(legacyPid.trim());
+
+    const candidateKeys: string[] = [slot.positionKey];
+    for (let i = 1; i <= TOTY_MAX_PER_POSITION; i++) {
+      candidateKeys.push(`${slot.positionKey}_${i}`);
+    }
+
+    for (const key of candidateKeys) {
+      const legacyPid = rawSelections[key];
+      if (
+        typeof legacyPid === 'string' &&
+        legacyPid.trim() &&
+        !usedPlayerIds.has(legacyPid.trim())
+      ) {
+        normalized[slot.slotKey] = legacyPid.trim();
+        usedPlayerIds.add(legacyPid.trim());
+        break;
+      }
     }
   }
 
@@ -646,6 +1030,16 @@ export interface TotySlotResult {
   totalVotesForSlot: number;
   winner: RankedVoteCandidate | null;
   runnerUps: RankedVoteCandidate[];
+  isTiedWithRunnerUp: boolean;
+}
+
+export interface TotyPositionBreakdown {
+  position: PositionCategoryMeta;
+  slotsAllocated: number;
+  ballotsContributing: number;
+  winnerIds: string[];
+  hasCutoffTie: boolean;
+  candidates: RankedVoteCandidate[];
 }
 
 export interface CommunityTotyResult {
@@ -653,14 +1047,13 @@ export interface CommunityTotyResult {
   formation: TotyFormationConfig;
   totalBallots: number;
   slots: TotySlotResult[];
+  positionBreakdowns: TotyPositionBreakdown[];
 }
 
 /**
- * Computes the full-formation Community Team of the Year (TOTY) for a discipline:
- * - Fútbol 7: 1 Portero + 2 Defensas + 2 Mediocampistas + 2 Delanteros (7)
- * - Básquetbol 5x5: Quinteto completo PG, SG, SF, PF, C (5)
- * - Básquetbol 3x3: Trío completo PER, ALE, PIV (3)
- * - Voleibol: Sexteto titular (Armador, 2 Puntas, 2 Centrales, Opuesto) + Líbero (7)
+ * Computes the full-formation Community Team of the Year (TOTY) for a discipline,
+ * honoring any Admin-configured formation for that discipline (`customConfig`) or
+ * falling back to the official sport default.
  *
  * For multi-slot positions (e.g. 2 defensas, 2 delanteros, 2 puntas, 2 centrales), votes
  * across all slots of that position are pooled so candidates don't split votes between
@@ -671,9 +1064,10 @@ export function computeCommunityToty(
   sportType: SportType,
   ballots: TotyBallotRecord[],
   players: Player[],
-  teams: Team[]
+  teams: Team[],
+  customConfig?: DisciplineTotyConfig | null
 ): CommunityTotyResult {
-  const formation = getTotyFormationForSport(sportType);
+  const formation = getTotyFormationForSport(sportType, customConfig);
   const categories = getPositionsForSport(sportType);
   const categoryMap = new Map(categories.map((c) => [c.key, c]));
   const playerMap = new Map(players.map((p) => [p.id, p]));
@@ -689,22 +1083,25 @@ export function computeCommunityToty(
   }
 
   // Aggregate unique votes per position pool across all ballots
+  // Even if the admin reconfigured slot counts (e.g. 2 -> 3 or 2 -> 1), read all raw keys matching posKey
   const poolStats = new Map<
     string,
     { ballotsContributing: number; ranked: RankedVoteCandidate[] }
   >();
 
-  for (const [posKey, groupSlots] of slotsByPosition.entries()) {
+  for (const [posKey] of slotsByPosition.entries()) {
     const posMeta = categoryMap.get(posKey) ?? categories[0];
     const counts = new Map<string, number>();
     let ballotsContributing = 0;
 
     for (const ballot of discBallots) {
-      const normalized = normalizeTotyBallotSelections(ballot.selections, sportType);
       const uniquePicksInGroup = new Set<string>();
-      for (const s of groupSlots) {
-        const pid = normalized[s.slotKey];
-        if (pid) uniquePicksInGroup.add(pid);
+      const rawSel = ballot.selections ?? {};
+      for (const [k, v] of Object.entries(rawSel)) {
+        if (typeof v !== 'string' || !v.trim()) continue;
+        if (k === posKey || k.startsWith(`${posKey}_`)) {
+          uniquePicksInGroup.add(v.trim());
+        }
       }
       if (uniquePicksInGroup.size === 0) continue;
       ballotsContributing += 1;
@@ -743,6 +1140,7 @@ export function computeCommunityToty(
   // Assign distinct winners across the full formation so no player appears twice on the pitch/court
   const globallyAssignedIds = new Set<string>();
   const slotResultMap = new Map<string, TotySlotResult>();
+  const positionBreakdowns: TotyPositionBreakdown[] = [];
 
   for (const [posKey, groupSlots] of slotsByPosition.entries()) {
     const posMeta = categoryMap.get(posKey) ?? categories[0];
@@ -750,15 +1148,32 @@ export function computeCommunityToty(
     const available = pool.ranked.filter((c) => !globallyAssignedIds.has(c.playerId));
     const chosenForGroup = available.slice(0, groupSlots.length);
     chosenForGroup.forEach((c) => globallyAssignedIds.add(c.playerId));
-    const remainingRunnerUps = available.slice(groupSlots.length, groupSlots.length + 3);
+    const remainingRunnerUps = available.slice(groupSlots.length, groupSlots.length + 5);
+    const lastChosen = chosenForGroup[chosenForGroup.length - 1];
+    const firstRunnerUp = remainingRunnerUps[0];
+    const hasCutoffTie = Boolean(
+      lastChosen && firstRunnerUp && lastChosen.votes > 0 && lastChosen.votes === firstRunnerUp.votes
+    );
+
+    positionBreakdowns.push({
+      position: posMeta,
+      slotsAllocated: groupSlots.length,
+      ballotsContributing: pool.ballotsContributing,
+      winnerIds: chosenForGroup.map((c) => c.playerId),
+      hasCutoffTie,
+      candidates: pool.ranked,
+    });
 
     groupSlots.forEach((slot, idx) => {
+      const winner = chosenForGroup[idx] ?? null;
+      const isLastSlotInGroup = idx === groupSlots.length - 1;
       slotResultMap.set(slot.slotKey, {
         slot,
         position: posMeta,
         totalVotesForSlot: pool.ballotsContributing,
-        winner: chosenForGroup[idx] ?? null,
+        winner,
         runnerUps: idx === 0 ? remainingRunnerUps : [],
+        isTiedWithRunnerUp: isLastSlotInGroup && hasCutoffTie,
       });
     });
   }
@@ -771,6 +1186,7 @@ export function computeCommunityToty(
         totalVotesForSlot: 0,
         winner: null,
         runnerUps: [],
+        isTiedWithRunnerUp: false,
       }
   );
 
@@ -779,5 +1195,6 @@ export function computeCommunityToty(
     formation,
     totalBallots: discBallots.length,
     slots,
+    positionBreakdowns,
   };
 }

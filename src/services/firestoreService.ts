@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -13,6 +14,7 @@ import {
   writeBatch,
   type QueryDocumentSnapshot,
   type Timestamp,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { DEFAULT_MASTER_SHEETS, INITIAL_CONFIGS } from '../data/ufroSeed';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
@@ -22,6 +24,7 @@ import type {
   ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
+  DisciplineTotyConfig,
   LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
@@ -113,6 +116,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     champMvpRes,
     posAwardsRes,
     totyRes,
+    totyConfigsRes,
     leyendasRes,
   ] = await Promise.allSettled([
     getDoc(doc(db, 'settings', 'tournament')),
@@ -128,6 +132,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'championship_mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'position_award_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'toty_configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'leyendas_leaderboard'), where('sportKey', 'in', ['futbol', 'basquet', 'voley']))),
   ]);
 
@@ -401,24 +406,18 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
   }
 
   if (totyRes.status === 'fulfilled') {
-    result.totyBallots = totyRes.value.docs.map((d) => {
-      const data = d.data();
-      const rawSel = data.selections && typeof data.selections === 'object' ? data.selections : {};
-      const selections: Record<string, string> = {};
-      Object.entries(rawSel as Record<string, unknown>).forEach(([k, v]) => {
-        if (typeof v === 'string' && v.trim()) {
-          selections[k] = v.trim();
-        }
-      });
-      return {
-        id: d.id,
-        disciplineId: data.disciplineId as DisciplineId,
-        temporada: String(data.temporada || '2026'),
-        voterUid: String(data.voterUid || ''),
-        selections,
-        updatedAt: toIso(data.updatedAt),
-      };
+    result.totyBallots = totyRes.value.docs.map((d) => mapTotyBallotDoc(d.id, d.data()));
+  }
+
+  if (totyConfigsRes.status === 'fulfilled') {
+    const configMap: Partial<Record<DisciplineId, DisciplineTotyConfig>> = {};
+    totyConfigsRes.value.docs.forEach((d) => {
+      const mapped = mapTotyConfigDoc(d.id, d.data());
+      if (mapped) {
+        configMap[mapped.disciplineId] = mapped;
+      }
     });
+    result.totyConfigs = configMap;
   }
 
   if (leyendasRes.status === 'fulfilled') {
@@ -1718,6 +1717,138 @@ export async function saveFirestoreTotyBallot(ballot: TotyBallotRecord): Promise
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
+}
+
+function mapTotyBallotDoc(docId: string, data: Record<string, unknown>): TotyBallotRecord {
+  const rawSel = data.selections && typeof data.selections === 'object' ? data.selections : {};
+  const selections: Record<string, string> = {};
+  Object.entries(rawSel as Record<string, unknown>).forEach(([k, v]) => {
+    if (typeof v === 'string' && v.trim()) {
+      selections[k] = v.trim();
+    }
+  });
+  return {
+    id: docId,
+    disciplineId: data.disciplineId as DisciplineId,
+    temporada: String(data.temporada || '2026'),
+    voterUid: String(data.voterUid || ''),
+    selections,
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+function mapTotyConfigDoc(
+  docId: string,
+  data: Record<string, unknown>
+): DisciplineTotyConfig | null {
+  const discId = (data.disciplineId || docId) as DisciplineId;
+  if (!ALL_DISCIPLINE_IDS.includes(discId)) return null;
+  const rawCounts =
+    data.positionCounts && typeof data.positionCounts === 'object'
+      ? (data.positionCounts as Record<string, unknown>)
+      : {};
+  const positionCounts: Record<string, number> = {};
+  Object.entries(rawCounts).forEach(([key, val]) => {
+    const num = Math.trunc(Number(val));
+    if (key.trim() && Number.isFinite(num) && num >= 0 && num <= 6) {
+      positionCounts[key.trim().slice(0, 32)] = num;
+    }
+  });
+  if (Object.keys(positionCounts).length === 0) return null;
+  return {
+    disciplineId: discId,
+    temporada: String(data.temporada || '2026'),
+    formationName: String(data.formationName || '').trim().slice(0, 80),
+    positionCounts,
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+export async function saveFirestoreTotyConfig(config: DisciplineTotyConfig): Promise<void> {
+  const path = `toty_configs/${config.disciplineId}`;
+  try {
+    const ref = doc(db, 'toty_configs', config.disciplineId);
+    const cleanCounts: Record<string, number> = {};
+    Object.entries(config.positionCounts)
+      .slice(0, 8)
+      .forEach(([posKey, count]) => {
+        const key = posKey.trim().slice(0, 32);
+        const val = Math.max(0, Math.min(6, Math.trunc(Number(count) || 0)));
+        if (key) cleanCounts[key] = val;
+      });
+    const safeName = (config.formationName || '').trim().slice(0, 80);
+    const formationName = safeName.length >= 2 ? safeName : 'Formación TOTY';
+    const temporada = (config.temporada || '2026').trim().slice(0, 16) || '2026';
+
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        temporada,
+        formationName,
+        positionCounts: cleanCounts,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        disciplineId: config.disciplineId,
+        temporada,
+        formationName,
+        positionCounts: cleanCounts,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteFirestoreTotyConfig(disciplineId: DisciplineId): Promise<void> {
+  const path = `toty_configs/${disciplineId}`;
+  try {
+    await deleteDoc(doc(db, 'toty_configs', disciplineId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeToTotyBallots(
+  onUpdate: (ballots: TotyBallotRecord[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const ballots = snapshot.docs.map((d) => mapTotyBallotDoc(d.id, d.data()));
+      onUpdate(ballots);
+    },
+    (error) => {
+      if (onError) onError(error);
+    }
+  );
+}
+
+export function subscribeToTotyConfigs(
+  onUpdate: (configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, 'toty_configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const configMap: Partial<Record<DisciplineId, DisciplineTotyConfig>> = {};
+      snapshot.docs.forEach((d) => {
+        const mapped = mapTotyConfigDoc(d.id, d.data());
+        if (mapped) {
+          configMap[mapped.disciplineId] = mapped;
+        }
+      });
+      onUpdate(configMap);
+    },
+    (error) => {
+      if (onError) onError(error);
+    }
+  );
 }
 
 export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry): Promise<void> {

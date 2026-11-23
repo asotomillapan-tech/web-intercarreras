@@ -43,6 +43,7 @@ import type {
   AppUserProfile,
   DisciplineFormatConfig,
   DisciplineId,
+  DisciplineTotyConfig,
   MasterSheetKey,
   MasterSheetsConfig,
   Match,
@@ -60,6 +61,7 @@ import { AdminMatchEditor } from './AdminMatchEditor';
 import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
 import { AdminTeamsManager } from './AdminTeamsManager';
+import { AdminTotyManager } from './AdminTotyManager';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 import { MatchFilterBar } from './MatchFilterBar';
 
@@ -70,6 +72,7 @@ export type PanelSubTab =
   | 'equipos'
   | 'jugadores'
   | 'votaciones'
+  | 'toty'
   | 'usuarios'
   | 'formato'
   | 'sheets';
@@ -112,6 +115,10 @@ interface AdminRefereeViewProps {
     linkedPlayerId?: string
   ) => Promise<void> | void;
   onSaveAwardNominees: (disciplineId: DisciplineId, nomineeIds: string[]) => Promise<void> | void;
+  totyLastSyncAt: string | null;
+  totyRealtimeActive: boolean;
+  onSaveTotyConfig: (config: DisciplineTotyConfig) => Promise<void>;
+  onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
   onRefreshUsers?: () => Promise<void> | void;
   onOpenAuth: () => void;
 }
@@ -230,6 +237,10 @@ export function AdminRefereeView({
   onMarkSynced,
   onAdminChangeUserRole,
   onSaveAwardNominees,
+  totyLastSyncAt,
+  totyRealtimeActive,
+  onSaveTotyConfig,
+  onResetTotyConfig,
   onRefreshUsers,
   onOpenAuth,
 }: AdminRefereeViewProps) {
@@ -874,6 +885,17 @@ export function AdminRefereeView({
                     }`}
                   >
                     Votaciones / MVP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('toty')}
+                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                      effectiveSubTab === 'toty'
+                        ? 'bg-[#707ef9] text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    Configuración TOTY
                   </button>
                   <button
                     type="button"
@@ -2444,6 +2466,17 @@ export function AdminRefereeView({
         {/* TAB 6: NOMINADOS MVP DEL CAMPEONATO (SOLO ADMIN) */}
         {effectiveSubTab === 'votaciones' && isAdmin && (
           <AdminAwardsManager state={state} onSaveAwardNominees={onSaveAwardNominees} />
+        )}
+
+        {/* TAB 7: CONFIGURACIÓN TOTY POR DISCIPLINA Y CONTEO EN TIEMPO REAL (SOLO ADMIN) */}
+        {effectiveSubTab === 'toty' && isAdmin && (
+          <AdminTotyManager
+            state={state}
+            totyLastSyncAt={totyLastSyncAt}
+            totyRealtimeActive={totyRealtimeActive}
+            onSaveTotyConfig={onSaveTotyConfig}
+            onResetTotyConfig={onResetTotyConfig}
+          />
         )}
       </div>
     </div>

@@ -29,6 +29,7 @@ import {
   deleteFirestorePhoto,
   deleteFirestorePlayer,
   deleteFirestoreTeam,
+  deleteFirestoreTotyConfig,
   ensureAllConfigsInFirestore,
   listAllFirestoreNews,
   listAllFirestoreTransfers,
@@ -50,6 +51,9 @@ import {
   saveFirestoreSettings,
   saveFirestoreTeam,
   saveFirestoreTotyBallot,
+  saveFirestoreTotyConfig,
+  subscribeToTotyBallots,
+  subscribeToTotyConfigs,
   syncGoogleUserToFirestore,
   updateFirestorePlayerStats,
   updateFirestoreUserPreferences,
@@ -83,6 +87,7 @@ import type {
   ChampionshipMvpVoteRecord,
   DisciplineFormatConfig,
   DisciplineId,
+  DisciplineTotyConfig,
   LeyendasLeaderboardEntry,
   MasterSheetKey,
   MasterSheetsConfig,
@@ -132,6 +137,8 @@ function AppContent() {
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [totyLastSyncAt, setTotyLastSyncAt] = useState<string | null>(null);
+  const [totyRealtimeActive, setTotyRealtimeActive] = useState(false);
 
   // Master Google Sheets Auto-Sync Engine (requires explicit session confirmation via ConfirmDialog)
   const [autoSyncSessionApproved, setAutoSyncSessionApproved] = useState(false);
@@ -194,6 +201,7 @@ function AppContent() {
           championshipMvpVotes: cloud.championshipMvpVotes ?? prev.championshipMvpVotes,
           positionAwardVotes: cloud.positionAwardVotes ?? prev.positionAwardVotes,
           totyBallots: cloud.totyBallots ?? prev.totyBallots,
+          totyConfigs: cloud.totyConfigs ?? prev.totyConfigs,
           photos: cloud.photos ?? prev.photos,
           news: cloud.news ?? prev.news,
           leyendasLeaderboard: cloud.leyendasLeaderboard ?? prev.leyendasLeaderboard,
@@ -339,6 +347,7 @@ function AppContent() {
               championshipMvpVotes: freshPublic.championshipMvpVotes ?? prev.championshipMvpVotes,
               positionAwardVotes: freshPublic.positionAwardVotes ?? prev.positionAwardVotes,
               totyBallots: freshPublic.totyBallots ?? prev.totyBallots,
+              totyConfigs: freshPublic.totyConfigs ?? prev.totyConfigs,
               photos: freshPublic.photos ?? prev.photos,
               news: freshPublic.news ?? prev.news,
               leyendasLeaderboard: freshPublic.leyendasLeaderboard ?? prev.leyendasLeaderboard,
@@ -370,6 +379,40 @@ function AppContent() {
     );
     return () => unsub();
   }, [hydrateForAuthenticatedProfile, reportCloudError]);
+
+  // 2B. Real-time Firestore listeners for TOTY ballots & discipline formation configs
+  useEffect(() => {
+    if (activeSection !== 'panel' && activeSection !== 'votaciones') {
+      setTotyRealtimeActive(false);
+      return;
+    }
+    const unsubBallots = subscribeToTotyBallots(
+      (ballots) => {
+        setState((prev) => ({ ...prev, totyBallots: ballots }));
+        setTotyLastSyncAt(new Date().toISOString());
+        setTotyRealtimeActive(true);
+      },
+      (err) => {
+        console.warn('Error en suscripción en vivo de papeletas TOTY:', err);
+        setTotyRealtimeActive(false);
+      }
+    );
+    const unsubConfigs = subscribeToTotyConfigs(
+      (totyConfigs) => {
+        setState((prev) => ({ ...prev, totyConfigs }));
+        setTotyLastSyncAt(new Date().toISOString());
+        setTotyRealtimeActive(true);
+      },
+      (err) => {
+        console.warn('Error en suscripción en vivo de configuración TOTY:', err);
+      }
+    );
+    return () => {
+      unsubBallots();
+      unsubConfigs();
+      setTotyRealtimeActive(false);
+    };
+  }, [activeSection]);
 
   const currentUser: AppUserProfile | null = useMemo(() => {
     if (!currentUserUid) return null;
@@ -726,23 +769,56 @@ function AppContent() {
   const handleSaveAwardNominees = async (disciplineId: DisciplineId, nomineeIds: string[]) => {
     if (!currentUser || currentUser.role !== 'admin') return;
     const cleaned = Array.from(new Set(nomineeIds.map((id) => id.trim()).filter(Boolean))).slice(0, 5);
-    const updatedAt = new Date().toISOString();
     setState((prev) => ({
       ...prev,
       awardNominees: {
         ...prev.awardNominees,
-        [disciplineId]: {
-          disciplineId,
-          temporada: prev.temporada,
-          mvpNomineeIds: cleaned,
-          updatedAt,
-        },
+        [disciplineId]: cleaned,
       },
     }));
     try {
       await saveFirestoreAwardNominees(disciplineId, stateRef.current.temporada, cleaned);
     } catch (err) {
       reportCloudError('Error guardando nominados al MVP del Campeonato', err);
+      throw err;
+    }
+  };
+
+  const handleSaveTotyConfig = async (config: DisciplineTotyConfig) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const normalized: DisciplineTotyConfig = {
+      ...config,
+      temporada: config.temporada || stateRef.current.temporada,
+      updatedAt: new Date().toISOString(),
+    };
+    setState((prev) => ({
+      ...prev,
+      totyConfigs: {
+        ...prev.totyConfigs,
+        [normalized.disciplineId]: normalized,
+      },
+    }));
+    try {
+      await saveFirestoreTotyConfig(normalized);
+      setTotyLastSyncAt(new Date().toISOString());
+    } catch (err) {
+      reportCloudError('Error guardando configuración TOTY por disciplina', err);
+      throw err;
+    }
+  };
+
+  const handleResetTotyConfig = async (disciplineId: DisciplineId) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    setState((prev) => {
+      const nextConfigs = { ...prev.totyConfigs };
+      delete nextConfigs[disciplineId];
+      return { ...prev, totyConfigs: nextConfigs };
+    });
+    try {
+      await deleteFirestoreTotyConfig(disciplineId);
+      setTotyLastSyncAt(new Date().toISOString());
+    } catch (err) {
+      reportCloudError('Error restaurando formación TOTY estándar', err);
       throw err;
     }
   };
@@ -1552,6 +1628,10 @@ function AppContent() {
             onMarkSynced={handleMarkSynced}
             onAdminChangeUserRole={handleAdminChangeUserRole}
             onSaveAwardNominees={handleSaveAwardNominees}
+            totyLastSyncAt={totyLastSyncAt}
+            totyRealtimeActive={totyRealtimeActive}
+            onSaveTotyConfig={handleSaveTotyConfig}
+            onResetTotyConfig={handleResetTotyConfig}
             onRefreshUsers={handleRefreshUsers}
             onOpenAuth={() => setAuthModalOpen(true)}
           />

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
   ChampionshipMvpVoteRecord,
+  DisciplineTotyConfig,
   Player,
   PositionAwardVoteRecord,
   Team,
@@ -10,11 +11,13 @@ import type {
 import {
   aggregateChampionshipMvpVotes,
   aggregatePositionAwardVotes,
+  buildTotyFormationConfig,
   computeCommunityToty,
   getPositionsForSport,
   getTotyFormationForSport,
   matchPlayerToPositionKey,
   normalizeTotyBallotSelections,
+  validateDisciplineTotyConfig,
 } from './awardsEngine.ts';
 
 const sampleTeams: Team[] = [
@@ -298,4 +301,155 @@ test('computeCommunityToty pools multi-slot positions in F7 1-2-2-2 and picks to
   // All 7 starters must be distinct players
   const winnerIds = toty.slots.map((s) => s.winner?.playerId).filter(Boolean);
   assert.equal(new Set(winnerIds).size, 7);
+});
+
+test('validateDisciplineTotyConfig enforces valid ranges, unknown positions, and total slot cap (1..10)', () => {
+  const ok = validateDisciplineTotyConfig(
+    'futbol7',
+    { arquero: 1, defensa: 3, mediocampista: 2, delantero: 1 },
+    'Formación 1-3-2-1'
+  );
+  assert.equal(ok.valid, true);
+  assert.equal(ok.totalSlots, 7);
+  assert.equal(ok.sanitizedName, 'Formación 1-3-2-1');
+
+  const empty = validateDisciplineTotyConfig(
+    'futbol7',
+    { arquero: 0, defensa: 0, mediocampista: 0, delantero: 0 },
+    'Vacía'
+  );
+  assert.equal(empty.valid, false);
+
+  const tooMany = validateDisciplineTotyConfig(
+    'futbol7',
+    { arquero: 2, defensa: 4, mediocampista: 3, delantero: 2 },
+    'Once'
+  );
+  assert.equal(tooMany.valid, false);
+
+  const wrongPos = validateDisciplineTotyConfig(
+    'futbol7',
+    { arquero: 1, libero: 1 },
+    'Inválida'
+  );
+  assert.equal(wrongPos.valid, false);
+});
+
+test('buildTotyFormationConfig builds custom formations for F7, Basketball Small Ball, and Volleyball without libero', () => {
+  const f7Custom: DisciplineTotyConfig = {
+    disciplineId: 'f7-h-1',
+    temporada: '2026',
+    formationName: 'Formación 1-3-2-1',
+    positionCounts: { arquero: 1, defensa: 3, mediocampista: 2, delantero: 1 },
+  };
+  const f7Formation = buildTotyFormationConfig('futbol7', f7Custom);
+  assert.equal(f7Formation.slots.length, 7);
+  assert.deepEqual(
+    f7Formation.slots.map((s) => s.slotKey),
+    ['arquero', 'defensa_1', 'defensa_2', 'defensa_3', 'mediocampista_1', 'mediocampista_2', 'delantero']
+  );
+
+  const basketSmallBall: DisciplineTotyConfig = {
+    disciplineId: 'basquet-h',
+    temporada: '2026',
+    formationName: 'Quinteto Small Ball',
+    positionCounts: { base: 2, escolta: 1, alero: 1, ala_pivot: 1, pivot: 0 },
+  };
+  const bkFormation = buildTotyFormationConfig('basquetbol', basketSmallBall);
+  assert.equal(bkFormation.slots.length, 5);
+  assert.equal(bkFormation.slots.filter((s) => s.positionKey === 'base').length, 2);
+  assert.equal(bkFormation.slots.filter((s) => s.positionKey === 'pivot').length, 0);
+
+  const volleyNoLibero: DisciplineTotyConfig = {
+    disciplineId: 'voley-m',
+    temporada: '2026',
+    formationName: 'Sexteto Titular 6',
+    positionCounts: { armador: 1, punta: 2, central: 2, opuesto: 1, libero: 0 },
+  };
+  const vlFormation = buildTotyFormationConfig('voleibol', volleyNoLibero);
+  assert.equal(vlFormation.slots.length, 6);
+  assert.equal(vlFormation.slots.some((s) => s.positionKey === 'libero'), false);
+});
+
+test('normalizeTotyBallotSelections migrates contracted multi-slot keys back to single slot keys cleanly', () => {
+  const custom1321: DisciplineTotyConfig = {
+    disciplineId: 'f7-h-1',
+    temporada: '2026',
+    formationName: 'Formación 1-3-2-1',
+    positionCounts: { arquero: 1, defensa: 3, mediocampista: 2, delantero: 1 },
+  };
+  const migrated = normalizeTotyBallotSelections(
+    {
+      arquero: 'p-gk',
+      defensa_1: 'p-def-1',
+      defensa_2: 'p-def-2',
+      delantero_1: 'p-fw-a',
+      delantero_2: 'p-fw-b',
+    },
+    'futbol7',
+    custom1321
+  );
+  assert.equal(migrated.arquero, 'p-gk');
+  assert.equal(migrated.defensa_1, 'p-def-1');
+  assert.equal(migrated.defensa_2, 'p-def-2');
+  assert.equal(migrated.delantero, 'p-fw-a');
+});
+
+test('computeCommunityToty honors custom formation, pools legacy/reconfigured keys, and flags cutoff ties', () => {
+  const custom1321: DisciplineTotyConfig = {
+    disciplineId: 'f7-h-1',
+    temporada: '2026',
+    formationName: 'Formación 1-3-2-1',
+    positionCounts: { arquero: 1, defensa: 3, mediocampista: 2, delantero: 1 },
+  };
+  // Two ballots: p-fw-a gets 1 vote (via legacy delantero_1), p-fw-b gets 1 vote (via delantero) -> cutoff tie at 1 striker slot!
+  const ballots: TotyBallotRecord[] = [
+    {
+      id: 'f7-h-1_u1',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u1',
+      selections: {
+        arquero: 'p-gk',
+        defensa_1: 'p-def-1',
+        delantero_1: 'p-fw-a',
+      },
+      updatedAt: '2026-05-03T10:00:00Z',
+    },
+    {
+      id: 'f7-h-1_u2',
+      disciplineId: 'f7-h-1',
+      temporada: '2026',
+      voterUid: 'u2',
+      selections: {
+        arquero: 'p-gk',
+        defensa_1: 'p-def-2',
+        delantero: 'p-fw-b',
+      },
+      updatedAt: '2026-05-03T10:05:00Z',
+    },
+  ];
+
+  const toty = computeCommunityToty(
+    'f7-h-1',
+    'futbol7',
+    ballots,
+    samplePlayers,
+    sampleTeams,
+    custom1321
+  );
+  assert.equal(toty.formation.formationName, 'Formación 1-3-2-1');
+  assert.equal(toty.slots.length, 7);
+
+  const strikerSlot = toty.slots.find((s) => s.slot.slotKey === 'delantero');
+  assert.ok(strikerSlot);
+  assert.equal(strikerSlot.isTiedWithRunnerUp, true);
+  assert.equal(strikerSlot.winner?.votes, 1);
+
+  const fwBreakdown = toty.positionBreakdowns.find((b) => b.position.key === 'delantero');
+  assert.ok(fwBreakdown);
+  assert.equal(fwBreakdown.slotsAllocated, 1);
+  assert.equal(fwBreakdown.ballotsContributing, 2);
+  assert.equal(fwBreakdown.hasCutoffTie, true);
+  assert.equal(fwBreakdown.candidates.length, 2);
 });
