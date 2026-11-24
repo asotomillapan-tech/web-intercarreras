@@ -19,7 +19,6 @@ import {
   advanceMatchPeriod,
   applyMatchLiveEvent,
   applyPlayerSubstitution,
-  autoSelectStartingLineup,
   computePlayerMatchCounters,
   formatMatchClock,
   getNormalizedLiveState,
@@ -28,7 +27,12 @@ import {
   type PlayerMatchCounter,
   type PlayerStatDelta,
 } from '../domain/liveMatchEngine';
+import {
+  getNormalizedMatchAttendance,
+  selectStartersWithAttendance,
+} from '../domain/attendanceEngine';
 import type { Match, MatchEvent, Player, SportType, Team } from '../types/tournament';
+import { MatchAttendancePanel } from './MatchAttendancePanel';
 import { SportScoreboard } from './SportScoreboard';
 
 interface LiveScoreboardPanelProps {
@@ -38,6 +42,8 @@ interface LiveScoreboardPanelProps {
   homeTeam?: Team;
   awayTeam?: Team;
   matchPlayers: Player[];
+  recorderName?: string;
+  canEditAttendance?: boolean;
   onUpdateMatch: (match: Match, scorerPlayerId?: string, statDelta?: PlayerStatDelta) => void;
 }
 
@@ -113,6 +119,8 @@ export function LiveScoreboardPanel({
   homeTeam,
   awayTeam,
   matchPlayers,
+  recorderName,
+  canEditAttendance = true,
   onUpdateMatch,
 }: LiveScoreboardPanelProps) {
   const rules = SPORT_LIVE_RULES[sportType];
@@ -288,11 +296,18 @@ export function LiveScoreboardPanel({
 
   const handleAutoSelectStarters = (side: 'home' | 'away') => {
     const roster = side === 'home' ? homeRoster : awayRoster;
-    const starters = autoSelectStartingLineup(
+    const att = getNormalizedMatchAttendance(match);
+    const presentCount =
+      att.status === 'REGISTRADA'
+        ? (side === 'home' ? att.homePresentIds : att.awayPresentIds).length
+        : 0;
+    const starters = selectStartersWithAttendance({
       roster,
+      match,
+      side,
       sportType,
-      liveState.excludedPlayerIds[side]
-    );
+      excludedIds: liveState.excludedPlayerIds[side],
+    });
     const updated = setTeamOnCourtPlayers(match, sportType, side, starters);
     onUpdateMatch(updated);
     setSubOutId('');
@@ -301,7 +316,7 @@ export function LiveScoreboardPanel({
       tone: 'info',
       text: `Titulares asignados automáticamente (${starters.length}/${rules.onCourtCount}) para ${
         side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita'
-      }.`,
+      }${presentCount > 0 ? ' desde la lista de presentes' : ''}.`,
     });
   };
 
@@ -1070,7 +1085,23 @@ export function LiveScoreboardPanel({
         )}
       </div>
 
-      {/* 3. ALINEACIÓN EN CANCHA Y CAMBIOS DE JUGADORES */}
+      {/* 3. REGISTRO DE ASISTENCIA DE JUGADORES (OPCIONAL) */}
+      <MatchAttendancePanel
+        match={match}
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        homeRoster={homeRoster}
+        awayRoster={awayRoster}
+        recorderName={recorderName}
+        canEdit={canEditAttendance}
+        onUpdateMatch={(updatedMatch) => onUpdateMatch(updatedMatch)}
+        onUsePresentForLineup={(side) => {
+          setLineupSide(side);
+          handleAutoSelectStarters(side);
+        }}
+      />
+
+      {/* 4. ALINEACIÓN EN CANCHA Y CAMBIOS DE JUGADORES */}
       <div
         ref={substitutionSectionRef}
         data-testid="live-substitutions-panel"

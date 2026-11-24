@@ -501,6 +501,10 @@
           "type": "object",
           "description": "Estado en vivo específico por deporte: titulares en cancha, jugadores expulsados, faltas del período, saque/posesión, conteo de cambios y cronómetro."
         },
+        "attendance": {
+          "type": "object",
+          "description": "Registro opcional de asistencia de jugadores presentes en el partido gestionado desde el panel arbitral (status: NO_REGISTRADA | REGISTRADA | OMITIDA, homePresentIds y awayPresentIds hasta 40 IDs por equipo, recordedAt <= 64, recordedByName <= 120, notes <= 240)."
+        },
         "refereeId": {
           "type": "string",
           "maxLength": 128

@@ -177,6 +177,17 @@ export interface ScoresheetValidationRecord {
   finalAwayScore: number;
 }
 
+export type MatchAttendanceStatus = 'NO_REGISTRADA' | 'REGISTRADA' | 'OMITIDA';
+
+export interface MatchAttendanceRecord {
+  status: MatchAttendanceStatus;
+  homePresentIds: string[];
+  awayPresentIds: string[];
+  recordedAt?: string;
+  recordedByName?: string;
+  notes?: string;
+}
+
 export interface Match {
   id: string;
   disciplineId: DisciplineId;
@@ -199,6 +210,7 @@ export interface Match {
   timeouts: { home: number; away: number };
   events: MatchEvent[];
   liveState?: MatchLiveState;
+  attendance?: MatchAttendanceRecord;
   refereeId: string;
   scoresheetValidation?: ScoresheetValidationRecord;
 }

@@ -348,6 +348,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
             : { home: 0, away: 0 },
         events: Array.isArray(data.events) ? data.events : [],
         liveState: sanitizeMatchLiveState(data.liveState),
+        attendance: sanitizeMatchAttendance(data.attendance),
         refereeId: String(data.refereeId || ''),
         scoresheetValidation:
           data.scoresheetValidation && typeof data.scoresheetValidation === 'object'
@@ -1276,11 +1277,50 @@ function sanitizeMatchLiveState(raw: unknown): Match['liveState'] | undefined {
   return out;
 }
 
+function sanitizeMatchAttendance(raw: unknown): Match['attendance'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const status =
+    obj.status === 'REGISTRADA' || obj.status === 'OMITIDA' || obj.status === 'NO_REGISTRADA'
+      ? obj.status
+      : 'NO_REGISTRADA';
+
+  const sanitizeAttendanceList = (val: unknown): string[] =>
+    Array.isArray(val)
+      ? Array.from(
+          new Set(
+            val
+              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+              .map((item) => item.trim().slice(0, 128))
+          )
+        ).slice(0, 40)
+      : [];
+
+  const out: NonNullable<Match['attendance']> = {
+    status,
+    homePresentIds: status === 'OMITIDA' ? [] : sanitizeAttendanceList(obj.homePresentIds),
+    awayPresentIds: status === 'OMITIDA' ? [] : sanitizeAttendanceList(obj.awayPresentIds),
+  };
+
+  if (typeof obj.recordedAt === 'string' && obj.recordedAt.trim().length > 0) {
+    out.recordedAt = obj.recordedAt.trim().slice(0, 64);
+  }
+  if (typeof obj.recordedByName === 'string' && obj.recordedByName.trim().length > 0) {
+    out.recordedByName = obj.recordedByName.trim().slice(0, 120);
+  }
+  if (typeof obj.notes === 'string' && obj.notes.trim().length > 0) {
+    out.notes = obj.notes.trim().slice(0, 240);
+  }
+
+  return out;
+}
+
 export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole: UserRole): Promise<void> {
   const path = `matches/${match.id}`;
   try {
     const ref = doc(db, 'matches', match.id);
     const sanitizedLiveState = sanitizeMatchLiveState(match.liveState);
+    const sanitizedAttendance = sanitizeMatchAttendance(match.attendance);
     if (isNew) {
       const payload: Record<string, unknown> = {
         id: match.id,
@@ -1309,6 +1349,9 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
       if (sanitizedLiveState) {
         payload.liveState = sanitizedLiveState;
       }
+      if (sanitizedAttendance) {
+        payload.attendance = sanitizedAttendance;
+      }
       if (
         match.playoffLeg === 'IDA' ||
         match.playoffLeg === 'VUELTA' ||
@@ -1335,6 +1378,9 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
       };
       if (sanitizedLiveState) {
         updatePayload.liveState = sanitizedLiveState;
+      }
+      if (sanitizedAttendance) {
+        updatePayload.attendance = sanitizedAttendance;
       }
       if (match.scoresheetValidation) {
         updatePayload.scoresheetValidation = match.scoresheetValidation;

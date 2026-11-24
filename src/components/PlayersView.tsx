@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Award, CheckCircle2, Edit3, Layers, Search, X } from 'lucide-react';
+import { Award, CheckCircle2, ClipboardCheck, Edit3, Layers, Search, X } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
+import { computePlayerAttendanceSummary } from '../domain/attendanceEngine';
 import {
   buildUnifiedPlayers,
   findPlayerParticipations,
@@ -942,6 +943,39 @@ export function PlayersView({
                     </>
                   )}
                 </div>
+                {(() => {
+                  const attSummary = computePlayerAttendanceSummary(
+                    state.matches,
+                    activeParticipationRecord.id,
+                    activeParticipationRecord.teamId
+                  );
+                  if (attSummary.registeredTeamMatches === 0 && attSummary.omittedTeamMatches === 0) {
+                    return null;
+                  }
+                  return (
+                    <div className="mt-3 bg-white border border-neutral-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-2 text-[#0d0d0d] font-medium">
+                        <ClipboardCheck className="w-4 h-4 text-[#707ef9] shrink-0" />
+                        <span>
+                          Asistencia arbitral verificada:{' '}
+                          <strong className="tabular-nums">
+                            {attSummary.attendedMatches} de {attSummary.registeredTeamMatches}
+                          </strong>{' '}
+                          partido(s) con registro
+                          {attSummary.attendanceRate !== null
+                            ? ` (${attSummary.attendanceRate}%)`
+                            : ''}
+                        </span>
+                      </span>
+                      {attSummary.omittedTeamMatches > 0 && (
+                        <span className="text-[11px] text-neutral-500 tabular-nums">
+                          {attSummary.omittedTeamMatches} partido(s) con asistencia omitida (no
+                          afectan el porcentaje)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

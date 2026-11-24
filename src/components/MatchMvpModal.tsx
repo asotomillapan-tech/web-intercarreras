@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Award, CheckCircle2, Clock, Lock, MapPin, Repeat2, Search, ShieldCheck, Star, Trophy, X } from 'lucide-react';
+import { Award, CheckCircle2, ClipboardCheck, Clock, Lock, MapPin, Repeat2, Search, ShieldCheck, Star, Trophy, X } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
+import { getNormalizedMatchAttendance } from '../domain/attendanceEngine';
 import {
   canRefereeMatches,
   canVoteMatchMvp,
@@ -465,6 +466,93 @@ export function MatchMvpModal({
                   </ul>
                 </div>
               )}
+
+              {/* Official Attendance Record (when registered or explicitly omitted) */}
+              {(() => {
+                const attendance = getNormalizedMatchAttendance(match);
+                if (attendance.status === 'NO_REGISTRADA') return null;
+
+                if (attendance.status === 'OMITIDA') {
+                  return (
+                    <div className="border border-neutral-200 bg-[#f5f6f8] px-4 py-3 text-xs text-neutral-600 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <ClipboardCheck className="w-4 h-4 text-neutral-500 shrink-0" />
+                        <span>
+                          <strong>Registro de asistencia:</strong> Omitido en este encuentro
+                          {attendance.notes ? ` (${attendance.notes})` : ''}.
+                        </span>
+                      </span>
+                    </div>
+                  );
+                }
+
+                const homePresentSet = new Set(attendance.homePresentIds);
+                const awayPresentSet = new Set(attendance.awayPresentIds);
+                const homePresentPlayers = players
+                  .filter((p) => p.teamId === match.homeTeamId && homePresentSet.has(p.id))
+                  .sort((a, b) => a.dorsal - b.dorsal);
+                const awayPresentPlayers = players
+                  .filter((p) => p.teamId === match.awayTeamId && awayPresentSet.has(p.id))
+                  .sort((a, b) => a.dorsal - b.dorsal);
+
+                if (homePresentPlayers.length === 0 && awayPresentPlayers.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <div className="border border-neutral-200 bg-white">
+                    <div className="px-4 py-2.5 bg-[#f5f6f8] border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-display text-sm font-bold uppercase tracking-widest text-[#0d0d0d] flex items-center gap-1.5">
+                        <ClipboardCheck className="w-4 h-4 text-[#707ef9]" />
+                        <span>Registro Oficial de Asistencia</span>
+                      </h3>
+                      <span className="text-[11px] text-neutral-600 tabular-nums">
+                        {homePresentPlayers.length + awayPresentPlayers.length} jugador(es) presente(s)
+                        {attendance.recordedByName ? ` · Mesa: ${attendance.recordedByName}` : ''}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-neutral-200">
+                      {[
+                        {
+                          label: homeTeam?.nombre ?? 'Local',
+                          list: homePresentPlayers,
+                        },
+                        {
+                          label: awayTeam?.nombre ?? 'Visita',
+                          list: awayPresentPlayers,
+                        },
+                      ].map(({ label, list }) => (
+                        <div key={label} className="p-4 space-y-2">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="font-display font-bold uppercase tracking-wide text-[#0d0d0d] truncate">
+                              {label}
+                            </span>
+                            <span className="text-[11px] text-neutral-500 tabular-nums shrink-0">
+                              {list.length} presente(s)
+                            </span>
+                          </div>
+                          {list.length === 0 ? (
+                            <p className="text-xs text-neutral-500">Sin jugadores marcados.</p>
+                          ) : (
+                            <ul className="space-y-1 text-xs text-neutral-700">
+                              {list.map((p) => (
+                                <li key={p.id} className="flex items-center gap-2">
+                                  <span className="font-mono text-[#707ef9] font-bold w-7 shrink-0">
+                                    #{p.dorsal}
+                                  </span>
+                                  <span className="truncate">
+                                    {p.nombre} {p.apellidoPaterno}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* MVP Winner Banner */}
               <div className="border border-neutral-200 p-5 bg-[#f5f6f8] space-y-3">

@@ -482,6 +482,31 @@ service cloud.firestore {
         && (!('stoppageMinutes' in ls) || (ls.stoppageMinutes is int && ls.stoppageMinutes >= 0 && ls.stoppageMinutes <= 30));
     }
 
+    function isValidAttendanceIdList(lst) {
+      return lst is list
+        && lst.size() <= 40
+        && (lst.size() == 0 || (lst[0] is string && lst[0].size() >= 1 && lst[0].size() <= 128));
+    }
+
+    function isValidMatchAttendance(att) {
+      return att is map
+        && att.keys().hasAll(['status', 'homePresentIds', 'awayPresentIds'])
+        && att.keys().hasOnly([
+          'status',
+          'homePresentIds',
+          'awayPresentIds',
+          'recordedAt',
+          'recordedByName',
+          'notes'
+        ])
+        && att.status in ['NO_REGISTRADA', 'REGISTRADA', 'OMITIDA']
+        && isValidAttendanceIdList(att.homePresentIds)
+        && isValidAttendanceIdList(att.awayPresentIds)
+        && (!('recordedAt' in att) || (att.recordedAt is string && att.recordedAt.size() <= 64))
+        && (!('recordedByName' in att) || (att.recordedByName is string && att.recordedByName.size() <= 120))
+        && (!('notes' in att) || (att.notes is string && att.notes.size() <= 240));
+    }
+
     function isValidMatch(data) {
       return data.keys().hasAll([
           'id',
@@ -529,6 +554,7 @@ service cloud.firestore {
           'timeouts',
           'events',
           'liveState',
+          'attendance',
           'refereeId',
           'scoresheetValidation',
           'createdAt',
@@ -556,6 +582,7 @@ service cloud.firestore {
         && data.timeouts is map && data.timeouts.keys().hasOnly(['home', 'away'])
         && data.events is list && data.events.size() <= 200
         && (!('liveState' in data) || isValidMatchLiveState(data.liveState))
+        && (!('attendance' in data) || isValidMatchAttendance(data.attendance))
         && data.refereeId is string && data.refereeId.size() <= 128
         && (!('scoresheetValidation' in data) || data.scoresheetValidation is map)
         && data.createdAt is timestamp
@@ -1429,6 +1456,7 @@ service cloud.firestore {
               'timeouts',
               'events',
               'liveState',
+              'attendance',
               'refereeId',
               'scoresheetValidation',
               'updatedAt'
@@ -1449,6 +1477,7 @@ service cloud.firestore {
               'timeouts',
               'events',
               'liveState',
+              'attendance',
               'scoresheetValidation',
               'updatedAt'
             ])

@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Camera,
   CheckCircle2,
+  ClipboardCheck,
   Lock,
   Power,
   RefreshCw,
@@ -14,6 +15,11 @@ import {
   UserCog,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
+import {
+  computeMatchesAttendanceOverview,
+  getNormalizedMatchAttendance,
+  markMatchAttendanceOmitted,
+} from '../domain/attendanceEngine';
 import {
   filterMatchesByOrg,
   sortMatchesChronologically,
@@ -928,8 +934,7 @@ export function AdminRefereeView({
                     compact
                   />
 
-                  <div className="bg-[#f5f6f8] border border-neutral-200 p-3.5">
-
+                  <div className="bg-[#f5f6f8] border border-neutral-200 p-3.5 space-y-2.5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <label
                       htmlFor="ref-match-select"
@@ -954,20 +959,50 @@ export function AdminRefereeView({
                           Sin encuentros con estos filtros (manteniendo actual)
                         </option>
                       ) : (
-                        refereeMatches.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            [{m.status === 'EN_VIVO' ? 'EN VIVO' : m.status === 'FINALIZADO' ? 'FINAL' : 'PROG'}]{' '}
-                            {DISCIPLINE_MAP[m.disciplineId].nombreCorto} · {m.fase} ({m.groupName}) ·{' '}
-                            {teamMap.get(m.homeTeamId)?.nombre} vs {teamMap.get(m.awayTeamId)?.nombre}
-                          </option>
-                        ))
+                        refereeMatches.map((m) => {
+                          const att = getNormalizedMatchAttendance(m);
+                          const attTotal = att.homePresentIds.length + att.awayPresentIds.length;
+                          const attTag =
+                            att.status === 'REGISTRADA'
+                              ? ` · Asist: ${attTotal}`
+                              : att.status === 'OMITIDA'
+                              ? ' · Asist: Omitida'
+                              : '';
+                          return (
+                            <option key={m.id} value={m.id}>
+                              [{m.status === 'EN_VIVO' ? 'EN VIVO' : m.status === 'FINALIZADO' ? 'FINAL' : 'PROG'}]{' '}
+                              {DISCIPLINE_MAP[m.disciplineId].nombreCorto} · {m.fase} ({m.groupName}) ·{' '}
+                              {teamMap.get(m.homeTeamId)?.nombre} vs {teamMap.get(m.awayTeamId)?.nombre}
+                              {attTag}
+                            </option>
+                          );
+                        })
                       )}
                     </select>
                   </div>
+
+                  {(() => {
+                    const overview = computeMatchesAttendanceOverview(refereeMatches);
+                    if (overview.totalMatches === 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-200 text-[11px] text-neutral-600 tabular-nums">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ClipboardCheck className="w-3.5 h-3.5 text-[#707ef9]" />
+                          <span>
+                            Control de asistencia en esta vista:{' '}
+                            <strong className="text-[#0d0d0d]">{overview.registeredCount}</strong>{' '}
+                            registrado(s) ·{' '}
+                            <strong className="text-neutral-700">{overview.omittedCount}</strong>{' '}
+                            omitido(s) · {overview.unregisteredCount} sin registrar
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })()}
                   </div>
                 </div>
 
-                {/* Upgraded Sport-Specific Live Scoreboard, Substitutions & Action Console */}
+                {/* Upgraded Sport-Specific Live Scoreboard, Attendance, Substitutions & Action Console */}
                 <LiveScoreboardPanel
                   match={activeMatch}
                   sportType={activeMatchMeta.sportType}
@@ -975,6 +1010,10 @@ export function AdminRefereeView({
                   homeTeam={homeTeam}
                   awayTeam={awayTeam}
                   matchPlayers={matchPlayers}
+                  recorderName={activeReferee.nombre}
+                  canEditAttendance={
+                    activeMatch.status !== 'FINALIZADO' || currentUser?.role === 'admin'
+                  }
                   onUpdateMatch={onUpdateMatch}
                 />
               </div>
@@ -994,6 +1033,61 @@ export function AdminRefereeView({
                     errores frente al marcador en vivo; siempre podrás aplicar validación manual.
                   </p>
                 </div>
+
+                {/* Non-blocking Attendance Status Summary */}
+                {(() => {
+                  const att = getNormalizedMatchAttendance(activeMatch);
+                  const totalPresent = att.homePresentIds.length + att.awayPresentIds.length;
+                  const canEditAtt =
+                    activeMatch.status !== 'FINALIZADO' || currentUser?.role === 'admin';
+                  return (
+                    <div className="bg-white border border-neutral-200 px-3.5 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <ClipboardCheck
+                          className={`w-4 h-4 shrink-0 mt-0.5 ${
+                            att.status === 'REGISTRADA'
+                              ? 'text-emerald-700'
+                              : att.status === 'OMITIDA'
+                              ? 'text-amber-700'
+                              : 'text-[#707ef9]'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#0d0d0d]">
+                            {att.status === 'REGISTRADA'
+                              ? `Asistencia guardada (${totalPresent} presentes)`
+                              : att.status === 'OMITIDA'
+                              ? 'Asistencia omitida'
+                              : 'Asistencia sin registrar (opcional)'}
+                          </p>
+                          <p className="text-[11px] text-neutral-500">
+                            {att.status === 'REGISTRADA'
+                              ? `${homeTeam?.sigla ?? 'LOC'}: ${att.homePresentIds.length} · ${
+                                  awayTeam?.sigla ?? 'VIS'
+                                }: ${att.awayPresentIds.length}`
+                              : 'No bloquea el cierre oficial del partido.'}
+                          </p>
+                        </div>
+                      </div>
+                      {att.status === 'NO_REGISTRADA' && canEditAtt && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateMatch(
+                              markMatchAttendanceOmitted({
+                                match: activeMatch,
+                                recorderName: activeReferee.nombre,
+                              })
+                            )
+                          }
+                          className="px-2.5 py-1 bg-[#f5f6f8] hover:bg-neutral-200 border border-neutral-300 text-[11px] font-medium text-neutral-700 shrink-0 cursor-pointer"
+                        >
+                          Omitir
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {validationBanner && (
                   <div role="status" className="bg-emerald-50 border border-emerald-300 p-4 text-xs text-emerald-950 flex items-start gap-2.5">
