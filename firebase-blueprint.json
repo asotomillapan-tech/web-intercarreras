@@ -497,6 +497,10 @@
         "events": {
           "type": "array"
         },
+        "liveState": {
+          "type": "object",
+          "description": "Estado en vivo específico por deporte: titulares en cancha, jugadores expulsados, faltas del período, saque/posesión, conteo de cambios y cronómetro."
+        },
         "refereeId": {
           "type": "string",
           "maxLength": 128

@@ -116,19 +116,24 @@ export interface MatchEvent {
   teamId: string;
   playerId?: string;
   playerName?: string;
+  playerOutId?: string;
+  playerOutName?: string;
   type:
     | 'GOL'
+    | 'ASISTENCIA'
     | 'AMARILLA'
     | 'ROJA'
     | 'PUNTO_1'
     | 'PUNTO_2'
     | 'PUNTO_3'
+    | 'REBOTE'
     | 'FALTA'
     | 'TIEMPO_MUERTO'
     | 'PUNTO_VOLEY'
     | 'ACE'
     | 'BLOQUEO'
-    | 'SET_GANADO';
+    | 'SET_GANADO'
+    | 'CAMBIO';
   detail: string;
   pointsDelta?: number;
   periodIndex?: number;
@@ -138,6 +143,16 @@ export interface MatchEvent {
 export interface PeriodScore {
   home: number;
   away: number;
+}
+
+export interface MatchLiveState {
+  onCourt: { home: string[]; away: string[] };
+  excludedPlayerIds?: { home: string[]; away: string[] };
+  periodFouls?: { home: number; away: number };
+  servingSide?: 'home' | 'away';
+  substitutionsCount?: { home: number; away: number };
+  clockSeconds?: number;
+  stoppageMinutes?: number;
 }
 
 export interface AiScoresheetResult {
@@ -183,6 +198,7 @@ export interface Match {
   fouls: { home: number; away: number };
   timeouts: { home: number; away: number };
   events: MatchEvent[];
+  liveState?: MatchLiveState;
   refereeId: string;
   scoresheetValidation?: ScoresheetValidationRecord;
 }

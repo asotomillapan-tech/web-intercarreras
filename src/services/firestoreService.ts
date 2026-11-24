@@ -347,6 +347,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
             ? { home: Number(data.timeouts.home) || 0, away: Number(data.timeouts.away) || 0 }
             : { home: 0, away: 0 },
         events: Array.isArray(data.events) ? data.events : [],
+        liveState: sanitizeMatchLiveState(data.liveState),
         refereeId: String(data.refereeId || ''),
         scoresheetValidation:
           data.scoresheetValidation && typeof data.scoresheetValidation === 'object'
@@ -1218,10 +1219,68 @@ export async function deleteFirestoreTeam(
   }
 }
 
+function sanitizeMatchLiveState(raw: unknown): Match['liveState'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const rawOnCourt = (obj.onCourt && typeof obj.onCourt === 'object' ? obj.onCourt : {}) as Record<
+    string,
+    unknown
+  >;
+  const sanitizeIdArr = (val: unknown): string[] =>
+    Array.isArray(val)
+      ? Array.from(
+          new Set(
+            val
+              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+              .map((item) => item.trim().slice(0, 128))
+          )
+        ).slice(0, 15)
+      : [];
+  const sanitizeCountMap = (val: unknown): { home: number; away: number } | undefined => {
+    if (!val || typeof val !== 'object') return undefined;
+    const m = val as Record<string, unknown>;
+    return {
+      home: Math.max(0, Math.min(200, Math.trunc(Number(m.home) || 0))),
+      away: Math.max(0, Math.min(200, Math.trunc(Number(m.away) || 0))),
+    };
+  };
+
+  const out: NonNullable<Match['liveState']> = {
+    onCourt: {
+      home: sanitizeIdArr(rawOnCourt.home),
+      away: sanitizeIdArr(rawOnCourt.away),
+    },
+  };
+
+  if (obj.excludedPlayerIds && typeof obj.excludedPlayerIds === 'object') {
+    const rawEx = obj.excludedPlayerIds as Record<string, unknown>;
+    out.excludedPlayerIds = {
+      home: sanitizeIdArr(rawEx.home),
+      away: sanitizeIdArr(rawEx.away),
+    };
+  }
+  const pf = sanitizeCountMap(obj.periodFouls);
+  if (pf) out.periodFouls = pf;
+  if (obj.servingSide === 'home' || obj.servingSide === 'away') {
+    out.servingSide = obj.servingSide;
+  }
+  const sc = sanitizeCountMap(obj.substitutionsCount);
+  if (sc) out.substitutionsCount = sc;
+  if (typeof obj.clockSeconds === 'number' && Number.isFinite(obj.clockSeconds)) {
+    out.clockSeconds = Math.max(0, Math.min(7200, Math.trunc(obj.clockSeconds)));
+  }
+  if (typeof obj.stoppageMinutes === 'number' && Number.isFinite(obj.stoppageMinutes)) {
+    out.stoppageMinutes = Math.max(0, Math.min(30, Math.trunc(obj.stoppageMinutes)));
+  }
+
+  return out;
+}
+
 export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole: UserRole): Promise<void> {
   const path = `matches/${match.id}`;
   try {
     const ref = doc(db, 'matches', match.id);
+    const sanitizedLiveState = sanitizeMatchLiveState(match.liveState);
     if (isNew) {
       const payload: Record<string, unknown> = {
         id: match.id,
@@ -1242,11 +1301,14 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
         periods: match.periods.slice(0, 10),
         fouls: { home: Math.trunc(match.fouls.home), away: Math.trunc(match.fouls.away) },
         timeouts: { home: Math.trunc(match.timeouts.home), away: Math.trunc(match.timeouts.away) },
-        events: match.events.slice(0, 120),
+        events: match.events.slice(0, 200),
         refereeId: (match.refereeId || '').slice(0, 128),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
+      if (sanitizedLiveState) {
+        payload.liveState = sanitizedLiveState;
+      }
       if (
         match.playoffLeg === 'IDA' ||
         match.playoffLeg === 'VUELTA' ||
@@ -1268,9 +1330,12 @@ export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole
         periods: match.periods.slice(0, 10),
         fouls: { home: Math.trunc(match.fouls.home), away: Math.trunc(match.fouls.away) },
         timeouts: { home: Math.trunc(match.timeouts.home), away: Math.trunc(match.timeouts.away) },
-        events: match.events.slice(0, 120),
+        events: match.events.slice(0, 200),
         updatedAt: serverTimestamp(),
       };
+      if (sanitizedLiveState) {
+        updatePayload.liveState = sanitizedLiveState;
+      }
       if (match.scoresheetValidation) {
         updatePayload.scoresheetValidation = match.scoresheetValidation;
       }

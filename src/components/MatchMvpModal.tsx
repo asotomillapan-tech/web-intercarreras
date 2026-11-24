@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Award, CheckCircle2, Clock, Lock, MapPin, Search, ShieldCheck, Star, Trophy, X } from 'lucide-react';
+import { Award, CheckCircle2, Clock, Lock, MapPin, Repeat2, Search, ShieldCheck, Star, Trophy, X } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   canRefereeMatches,
@@ -14,6 +14,7 @@ import type {
   Player,
   Team,
 } from '../types/tournament';
+import { SportScoreboard } from './SportScoreboard';
 
 interface MatchMvpModalProps {
   match: Match | null;
@@ -119,80 +120,115 @@ export function MatchMvpModal({
             </button>
           </div>
 
-          {/* Teams & Scoreboard (Respecting Public Visibility Rule) */}
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5 border-t border-white/10 pt-5">
-            <div className="min-w-0 space-y-1">
-              <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
-                {homeTeam?.nombre ?? match.homeTeamId}
-              </p>
-              <p className="text-xs text-neutral-400 truncate">{homeTeam?.carrera}</p>
-              {onToggleFavoriteTeam && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    currentUser ? onToggleFavoriteTeam(match.homeTeamId) : onOpenAuth()
-                  }
-                  className={`inline-flex items-center gap-1 text-[11px] mt-1 cursor-pointer ${
-                    isHomeFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <Star className={`w-3.5 h-3.5 ${isHomeFav ? 'fill-[#707ef9]' : ''}`} />
-                  <span>{isHomeFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
-                </button>
-              )}
-            </div>
+          {/* Teams & Scoreboard (Respecting Public Visibility Rule — Unified Sport Scoreboard when Finalized) */}
+          {revealData ? (
+            <SportScoreboard
+              match={match}
+              sportType={disc.sportType}
+              disciplineName={disc.nombre}
+              homeTeam={homeTeam}
+              awayTeam={awayTeam}
+              mode="final"
+              embedded
+              homeAction={
+                onToggleFavoriteTeam ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      currentUser ? onToggleFavoriteTeam(match.homeTeamId) : onOpenAuth()
+                    }
+                    className={`inline-flex items-center gap-1 text-[11px] mt-1 cursor-pointer ${
+                      isHomeFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isHomeFav ? 'fill-[#707ef9]' : ''}`} />
+                    <span>{isHomeFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
+                  </button>
+                ) : undefined
+              }
+              awayAction={
+                onToggleFavoriteTeam ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      currentUser ? onToggleFavoriteTeam(match.awayTeamId) : onOpenAuth()
+                    }
+                    className={`inline-flex items-center justify-end gap-1 text-[11px] mt-1 cursor-pointer ml-auto ${
+                      isAwayFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isAwayFav ? 'fill-[#707ef9]' : ''}`} />
+                    <span>{isAwayFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5 border-t border-white/10 pt-5">
+              <div className="min-w-0 space-y-1">
+                <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
+                  {homeTeam?.nombre ?? match.homeTeamId}
+                </p>
+                <p className="text-xs text-neutral-400 truncate">{homeTeam?.carrera}</p>
+                {onToggleFavoriteTeam && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      currentUser ? onToggleFavoriteTeam(match.homeTeamId) : onOpenAuth()
+                    }
+                    className={`inline-flex items-center gap-1 text-[11px] mt-1 cursor-pointer ${
+                      isHomeFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isHomeFav ? 'fill-[#707ef9]' : ''}`} />
+                    <span>{isHomeFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
+                  </button>
+                )}
+              </div>
 
-            <div className="px-4 py-3 bg-[#18181f] border border-white/15 text-center shrink-0">
-              {revealData ? (
-                <>
-                  <span className="font-display text-3xl sm:text-4xl font-bold tabular-nums whitespace-nowrap">
-                    {match.homeScore} — {match.awayScore}
-                  </span>
-                  <p className="text-[11px] text-emerald-400 uppercase tracking-wider mt-1">
-                    Resultado Oficial
-                  </p>
-                </>
-              ) : votingOpen ? (
-                <>
-                  <span className="font-display text-lg sm:text-xl font-bold uppercase tracking-wider text-[#707ef9] block whitespace-nowrap">
-                    En Juego
-                  </span>
-                  <p className="text-[11px] text-neutral-300 mt-1 flex items-center justify-center gap-1 whitespace-nowrap">
-                    <Lock className="w-3 h-3" />
-                    <span>Datos al finalizar</span>
-                  </p>
-                </>
-              ) : (
-                <>
-                  <span className="font-display text-2xl font-bold uppercase text-neutral-300">
-                    vs
-                  </span>
-                  <p className="text-[11px] text-neutral-400 tabular-nums mt-0.5">{match.hora}</p>
-                </>
-              )}
-            </div>
+              <div className="px-4 py-3 bg-[#18181f] border border-white/15 text-center shrink-0">
+                {votingOpen ? (
+                  <>
+                    <span className="font-display text-lg sm:text-xl font-bold uppercase tracking-wider text-[#707ef9] block whitespace-nowrap">
+                      En Juego
+                    </span>
+                    <p className="text-[11px] text-neutral-300 mt-1 flex items-center justify-center gap-1 whitespace-nowrap">
+                      <Lock className="w-3 h-3" />
+                      <span>Datos al finalizar</span>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-display text-2xl font-bold uppercase text-neutral-300">
+                      vs
+                    </span>
+                    <p className="text-[11px] text-neutral-400 tabular-nums mt-0.5">{match.hora}</p>
+                  </>
+                )}
+              </div>
 
-            <div className="text-right min-w-0 space-y-1">
-              <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
-                {awayTeam?.nombre ?? match.awayTeamId}
-              </p>
-              <p className="text-xs text-neutral-400 truncate">{awayTeam?.carrera}</p>
-              {onToggleFavoriteTeam && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    currentUser ? onToggleFavoriteTeam(match.awayTeamId) : onOpenAuth()
-                  }
-                  className={`inline-flex items-center justify-end gap-1 text-[11px] mt-1 cursor-pointer ml-auto ${
-                    isAwayFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <Star className={`w-3.5 h-3.5 ${isAwayFav ? 'fill-[#707ef9]' : ''}`} />
-                  <span>{isAwayFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
-                </button>
-              )}
+              <div className="text-right min-w-0 space-y-1">
+                <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
+                  {awayTeam?.nombre ?? match.awayTeamId}
+                </p>
+                <p className="text-xs text-neutral-400 truncate">{awayTeam?.carrera}</p>
+                {onToggleFavoriteTeam && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      currentUser ? onToggleFavoriteTeam(match.awayTeamId) : onOpenAuth()
+                    }
+                    className={`inline-flex items-center justify-end gap-1 text-[11px] mt-1 cursor-pointer ml-auto ${
+                      isAwayFav ? 'text-[#707ef9] font-bold' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isAwayFav ? 'fill-[#707ef9]' : ''}`} />
+                    <span>{isAwayFav ? 'Equipo favorito' : 'Seguir equipo'}</span>
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400 border-t border-white/10 pt-3">
             <span className="flex items-center gap-1.5">
@@ -221,7 +257,7 @@ export function MatchMvpModal({
           {/* CASE 1: SCHEDULED MATCH HOUR (EN_VIVO) — Scores Hidden, MVP Voting Open for ALL roles */}
           {votingOpen && (
             <>
-              <div className="bg-[#f5f6f8] border-l-4 border-[#707ef9] p-4 flex items-start gap-3">
+              <div className="bg-[#f5f6f8] border border-[#707ef9]/35 p-4 flex items-start gap-3">
                 <Clock className="w-5 h-5 text-[#707ef9] shrink-0 mt-0.5" />
                 <div className="text-sm text-neutral-700">
                   <p className="font-bold text-[#0d0d0d]">
@@ -375,33 +411,58 @@ export function MatchMvpModal({
             </>
           )}
 
-          {/* CASE 2: FINALIZED MATCH — Reveal Complete Official Results, Stats & MVP Winner */}
+          {/* CASE 2: FINALIZED MATCH — Official Chronology, MVP Winner & Validation */}
           {revealData && (
             <div className="space-y-6">
-              {match.periods.length > 0 && (
-                <div>
-                  <h3 className="font-display text-sm font-bold uppercase tracking-widest text-neutral-500 mb-3">
-                    Parciales Oficiales del Encuentro
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {match.periods.map((p, idx) => (
-                      <div
-                        key={idx}
-                        className="border border-neutral-200 bg-[#f5f6f8] p-3 text-center"
-                      >
-                        <p className="text-[11px] text-neutral-500 uppercase">
-                          {disc.sportType === 'voleibol'
-                            ? `Set ${idx + 1}`
-                            : disc.sportType === 'futbol7'
-                            ? `${idx + 1}° Tiempo`
-                            : `${idx + 1}° Cuarto`}
-                        </p>
-                        <p className="font-display text-xl font-bold tabular-nums text-[#0d0d0d] mt-0.5">
-                          {p.home} — {p.away}
-                        </p>
-                      </div>
-                    ))}
+              {/* Official Chronology (Goals, Points, Cards, Substitutions) */}
+              {match.events.length > 0 && (
+                <div className="border border-neutral-200 bg-white">
+                  <div className="px-4 py-2.5 bg-[#f5f6f8] border-b border-neutral-200 flex items-center justify-between gap-2">
+                    <h3 className="font-display text-sm font-bold uppercase tracking-widest text-[#0d0d0d]">
+                      Cronología Oficial ({match.events.length})
+                    </h3>
+                    {match.events.some((e) => e.type === 'CAMBIO') && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#707ef9]">
+                        <Repeat2 className="w-3.5 h-3.5" />
+                        <span>Incluye cambios de jugadores</span>
+                      </span>
+                    )}
                   </div>
+                  <ul className="divide-y divide-neutral-100 max-h-60 overflow-y-auto text-xs">
+                    {match.events.slice(0, 25).map((ev) => (
+                      <li
+                        key={ev.id}
+                        className="px-4 py-2.5 flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                              ev.type === 'CAMBIO'
+                                ? 'bg-[#707ef9]/15 text-[#4351d8]'
+                                : ev.type === 'AMARILLA'
+                                ? 'bg-amber-100 text-amber-900'
+                                : ev.type === 'ROJA'
+                                ? 'bg-red-100 text-red-900'
+                                : ev.type === 'GOL' ||
+                                  ev.type === 'PUNTO_1' ||
+                                  ev.type === 'PUNTO_2' ||
+                                  ev.type === 'PUNTO_3' ||
+                                  ev.type === 'PUNTO_VOLEY' ||
+                                  ev.type === 'ACE'
+                                ? 'bg-emerald-100 text-emerald-900'
+                                : 'bg-neutral-100 text-neutral-700'
+                            }`}
+                          >
+                            {ev.type.replace('_', ' ')}
+                          </span>
+                          <span className="text-[#0d0d0d] font-medium truncate">{ev.detail}</span>
+                        </div>
+                        <span className="text-[11px] text-neutral-400 tabular-nums shrink-0">
+                          {ev.minuteOrPeriod}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -438,43 +499,25 @@ export function MatchMvpModal({
                 )}
               </div>
 
-              {/* Official Events & Validation */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="border border-neutral-200 p-4 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                    Resumen Disciplinario y Tiempos
+              {/* Validation Status */}
+              <div className="border border-neutral-200 p-4 space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-[#707ef9]" />
+                  <span>Validación de Planilla</span>
+                </p>
+                {match.scoresheetValidation ? (
+                  <p className="text-xs text-neutral-700">
+                    Cerrado por <strong>{match.scoresheetValidation.refereeName}</strong> (
+                    {match.scoresheetValidation.method === 'IA_AUTOMATICA'
+                      ? 'Validación IA'
+                      : 'Validación Manual'}
+                    ).
                   </p>
-                  <p className="text-sm text-[#0d0d0d] tabular-nums">
-                    Faltas: <strong>{match.fouls.home}</strong> ({homeTeam?.sigla}) —{' '}
-                    <strong>{match.fouls.away}</strong> ({awayTeam?.sigla})
+                ) : (
+                  <p className="text-xs text-neutral-600">
+                    Resultado oficial consolidado en tabla de posiciones UFRO.
                   </p>
-                  {disc.sportType !== 'futbol7' && (
-                    <p className="text-sm text-[#0d0d0d] tabular-nums">
-                      Tiempos muertos: <strong>{match.timeouts.home}</strong> —{' '}
-                      <strong>{match.timeouts.away}</strong>
-                    </p>
-                  )}
-                </div>
-
-                <div className="border border-neutral-200 p-4 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-[#707ef9]" />
-                    <span>Validación de Planilla</span>
-                  </p>
-                  {match.scoresheetValidation ? (
-                    <p className="text-xs text-neutral-700">
-                      Cerrado por <strong>{match.scoresheetValidation.refereeName}</strong> (
-                      {match.scoresheetValidation.method === 'IA_AUTOMATICA'
-                        ? 'Validación IA'
-                        : 'Validación Manual'}
-                      ).
-                    </p>
-                  ) : (
-                    <p className="text-xs text-neutral-600">
-                      Resultado oficial consolidado en tabla de posiciones UFRO.
-                    </p>
-                  )}
-                </div>
+                )}
               </div>
             </div>
           )}

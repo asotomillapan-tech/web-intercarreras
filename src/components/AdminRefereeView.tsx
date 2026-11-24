@@ -4,18 +4,14 @@ import {
   Camera,
   CheckCircle2,
   Lock,
-  Play,
   Power,
   RefreshCw,
   Search,
   ShieldCheck,
   Sliders,
   Sparkles,
-  Undo2,
   Upload,
-  UserCheck,
   UserCog,
-  X,
 } from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
@@ -23,11 +19,7 @@ import {
   sortMatchesChronologically,
   type MatchSortOrder,
 } from '../domain/matchFilterEngine';
-import {
-  applyMatchLiveEvent,
-  revertMatchLiveEvent,
-  type PlayerStatDelta,
-} from '../domain/liveMatchEngine';
+import type { PlayerStatDelta } from '../domain/liveMatchEngine';
 import {
   ALL_USER_ROLES,
   BOOTSTRAPPED_ADMIN_EMAIL,
@@ -52,7 +44,6 @@ import type {
   MasterSheetKey,
   MasterSheetsConfig,
   Match,
-  MatchEvent,
   MatchPhase,
   NewsArticle,
   Player,
@@ -68,6 +59,7 @@ import { AdminNewsManager } from './AdminNewsManager';
 import { AdminPlayersManager } from './AdminPlayersManager';
 import { AdminTeamsManager } from './AdminTeamsManager';
 import { AdminTotyManager } from './AdminTotyManager';
+import { LiveScoreboardPanel } from './LiveScoreboardPanel';
 import { MasterSheetsPanel, type AutoSyncStatusInfo } from './MasterSheetsPanel';
 import { MatchFilterBar } from './MatchFilterBar';
 
@@ -282,14 +274,6 @@ export function AdminRefereeView({
   const [selectedMatchId, setSelectedMatchId] = useState<string>(
     focusedMatchId ?? state.matches.find((m) => m.status === 'EN_VIVO')?.id ?? state.matches[0]?.id ?? ''
   );
-  const [pendingAction, setPendingAction] = useState<{
-    side: 'home' | 'away';
-    actionType: MatchEvent['type'];
-    pointsDelta: number;
-    label: string;
-  } | null>(null);
-  const [pendingPlayerId, setPendingPlayerId] = useState<string>('');
-  const [liveActionNotice, setLiveActionNotice] = useState<string | null>(null);
 
   // Scoresheet AI & Manual Validation State
   const [scoresheetImage, setScoresheetImage] = useState<string | null>(null);
@@ -389,18 +373,12 @@ export function AdminRefereeView({
     );
   }, [state.players, activeMatch]);
 
-  // Sync manual score fields & reset pending live action when active match changes
+  // Sync manual score fields when active match changes
   useEffect(() => {
     if (!activeMatch) return;
     setManualHome(String(activeMatch.homeScore));
     setManualAway(String(activeMatch.awayScore));
   }, [activeMatch?.id, activeMatch?.homeScore, activeMatch?.awayScore]);
-
-  useEffect(() => {
-    setPendingAction(null);
-    setPendingPlayerId('');
-    setLiveActionNotice(null);
-  }, [activeMatch?.id]);
 
   const handleSelectReferee = (refId: string) => {
     setSelectedRefId(refId);
@@ -421,97 +399,6 @@ export function AdminRefereeView({
       setAiError(null);
       setValidationBanner(null);
     }
-  };
-
-  // Step 1: Select Action (Gol, Falta, Amarilla, Roja, etc.) -> opens inline player menu
-  const handleChooseLiveAction = (
-    side: 'home' | 'away',
-    actionType: MatchEvent['type'],
-    label: string,
-    pointsDelta = 0
-  ) => {
-    setPendingAction({ side, actionType, pointsDelta, label });
-    setPendingPlayerId('');
-    setLiveActionNotice(null);
-  };
-
-  // Step 2: Confirm with selected player (or team-level) -> register action
-  const handleConfirmPendingAction = () => {
-    if (!pendingAction || !activeMatch || !activeMatchMeta) return;
-    const teamId =
-      pendingAction.side === 'home' ? activeMatch.homeTeamId : activeMatch.awayTeamId;
-    const teamName =
-      pendingAction.side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
-    const player = pendingPlayerId
-      ? matchPlayers.find((p) => p.id === pendingPlayerId && p.teamId === teamId)
-      : undefined;
-
-    const result = applyMatchLiveEvent({
-      match: activeMatch,
-      sportType: activeMatchMeta.sportType,
-      side: pendingAction.side,
-      actionType: pendingAction.actionType,
-      pointsDelta: pendingAction.pointsDelta,
-      teamName,
-      player,
-    });
-
-    onUpdateMatch(result.updatedMatch, player?.id, result.statDelta);
-    setLiveActionNotice(`Acción registrada: ${result.event.detail}`);
-    setPendingAction(null);
-    setPendingPlayerId('');
-  };
-
-  // Revert any registered event (Gol, Falta, Amarilla, Roja, points, timeouts)
-  const handleRevertLiveEvent = (eventId: string) => {
-    if (!activeMatch || !activeMatchMeta) return;
-    const reverted = revertMatchLiveEvent({
-      match: activeMatch,
-      sportType: activeMatchMeta.sportType,
-      eventId,
-    });
-    if (!reverted) return;
-
-    onUpdateMatch(
-      reverted.updatedMatch,
-      reverted.revertedEvent.playerId,
-      reverted.statDelta
-    );
-    setLiveActionNotice(`Acción revertida: ${reverted.revertedEvent.detail}`);
-  };
-
-  const advancePeriod = () => {
-    if (!activeMatch || !activeMatchMeta) return;
-    const sport = activeMatchMeta.sportType;
-    let nextLabel = activeMatch.periodLabel;
-    let nextClock = activeMatch.clock;
-    const nextPeriods = [...activeMatch.periods];
-
-    if (sport === 'futbol7') {
-      nextLabel = activeMatch.periodLabel.includes('1°') ? '2° Tiempo' : '1° Tiempo';
-      nextClock = nextLabel.includes('2°') ? "26'" : "01'";
-    } else if (sport === 'basquetbol') {
-      const q = Math.min(4, nextPeriods.length + 1);
-      if (nextPeriods.length < 4) nextPeriods.push({ home: 0, away: 0 });
-      nextLabel = `${q}° Cuarto`;
-      nextClock = '10:00';
-    } else if (sport === 'voleibol') {
-      const s = Math.min(3, nextPeriods.length + 1);
-      if (nextPeriods.length < 3) nextPeriods.push({ home: 0, away: 0 });
-      nextLabel = s === 3 ? 'Set 3 (Tiebreak)' : `Set ${s}`;
-      nextClock = `Set ${s}`;
-    } else {
-      nextLabel = 'Tiempo Regular 3x3';
-      nextClock = '10:00';
-    }
-
-    onUpdateMatch({
-      ...activeMatch,
-      status: 'EN_VIVO',
-      periodLabel: nextLabel,
-      clock: nextClock,
-      periods: nextPeriods,
-    });
   };
 
   const handleScoresheetFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1080,490 +967,16 @@ export function AdminRefereeView({
                   </div>
                 </div>
 
-                {/* Live Broadcast Scoreboard */}
-                <div className="bg-[#0d0d0d] text-white p-6 space-y-6">
-                  <div className="flex items-center justify-between text-xs text-neutral-300 border-b border-white/10 pb-3">
-                    <span>
-                      {activeMatchMeta.nombre} · {activeMatch.groupName}
-                    </span>
-                    <span className="font-bold text-[#707ef9] uppercase tracking-wider tabular-nums">
-                      {activeMatch.status === 'EN_VIVO' ? `EN VIVO · ${activeMatch.periodLabel} (${activeMatch.clock})` : activeMatch.periodLabel}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-4">
-                    <div className="min-w-0">
-                      <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
-                        {homeTeam?.nombre}
-                      </p>
-                      <p className="text-xs text-neutral-400 mt-1">
-                        Faltas: <strong className="tabular-nums text-white">{activeMatch.fouls.home}</strong>
-                        {activeMatchMeta.sportType !== 'futbol7' && (
-                          <> · T. Muertos: <strong className="tabular-nums text-white">{activeMatch.timeouts.home}</strong></>
-                        )}
-                      </p>
-                    </div>
-
-                    <div className="px-3 sm:px-5 py-2.5 sm:py-3 bg-[#18181f] border border-white/15 text-center shrink-0">
-                      <span
-                        data-testid="live-scoreboard"
-                        className="font-display text-3xl sm:text-5xl font-bold tabular-nums whitespace-nowrap"
-                      >
-                        {activeMatch.homeScore} — {activeMatch.awayScore}
-                      </span>
-                      {activeMatchMeta.sportType === 'voleibol' && activeMatch.periods.length > 0 && (
-                        <p className="text-xs text-[#707ef9] font-mono mt-1 tabular-nums">
-                          Set actual: {activeMatch.periods[activeMatch.periods.length - 1].home} -{' '}
-                          {activeMatch.periods[activeMatch.periods.length - 1].away}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="text-right min-w-0">
-                      <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
-                        {awayTeam?.nombre}
-                      </p>
-                      <p className="text-xs text-neutral-400 mt-1">
-                        Faltas: <strong className="tabular-nums text-white">{activeMatch.fouls.away}</strong>
-                        {activeMatchMeta.sportType !== 'futbol7' && (
-                          <> · T. Muertos: <strong className="tabular-nums text-white">{activeMatch.timeouts.away}</strong></>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {activeMatch.periods.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-center gap-4 pt-3 border-t border-white/10 text-xs text-neutral-300 tabular-nums">
-                      {activeMatch.periods.map((p, idx) => (
-                        <span key={idx}>
-                          {activeMatchMeta.sportType === 'voleibol' ? `Set ${idx + 1}` : activeMatchMeta.sportType === 'futbol7' ? `T${idx + 1}` : `Q${idx + 1}`}:{' '}
-                          <strong className="text-white">{p.home}-{p.away}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/10">
-                    <button
-                      type="button"
-                      onClick={advancePeriod}
-                      className="inline-flex items-center gap-2 px-3.5 py-2 bg-white/10 hover:bg-white/20 text-xs font-medium text-white cursor-pointer"
-                    >
-                      <Play className="w-3.5 h-3.5 text-[#707ef9]" />
-                      <span>
-                        {activeMatch.status === 'PROGRAMADO'
-                          ? 'Iniciar encuentro'
-                          : activeMatchMeta.sportType === 'futbol7'
-                          ? 'Cambiar tiempo (1° / 2°)'
-                          : activeMatchMeta.sportType === 'voleibol'
-                          ? 'Avanzar Set'
-                          : 'Siguiente Cuarto'}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={activeMatch.events.length === 0}
-                      onClick={() => {
-                        if (activeMatch.events[0]) {
-                          handleRevertLiveEvent(activeMatch.events[0].id);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white/10 hover:bg-red-600/80 text-xs font-medium text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Undo2 className="w-3.5 h-3.5" />
-                      <span>Revertir última acción</span>
-                    </button>
-                  </div>
-                </div>
-
-                {liveActionNotice && (
-                  <div
-                    role="status"
-                    className="bg-[#f5f6f8] border border-neutral-300 px-4 py-2.5 text-xs text-[#0d0d0d] flex items-center justify-between gap-2"
-                  >
-                    <span className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#707ef9] shrink-0" />
-                      <span>{liveActionNotice}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setLiveActionNotice(null)}
-                      aria-label="Cerrar aviso de acción"
-                      className="text-neutral-500 hover:text-[#0d0d0d] cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-
-                {/* Step 1: Select Action per Team (Action-First Workflow) */}
-                <div className="space-y-4">
-                  <p className="text-xs text-neutral-600">
-                    <strong>Paso 1:</strong> Selecciona la acción (Gol, Falta, Tarjeta o Puntos) del
-                    equipo correspondiente. Luego se desplegará el menú para elegir al jugador y
-                    confirmar con <strong>Registrar acción</strong>.
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {(['home', 'away'] as const).map((side) => {
-                      const label =
-                        side === 'home' ? homeTeam?.nombre ?? 'Local' : awayTeam?.nombre ?? 'Visita';
-                      const isActiveBtn = (type: MatchEvent['type']) =>
-                        pendingAction?.side === side && pendingAction.actionType === type;
-
-                      return (
-                        <div key={side} className="border border-neutral-200 p-4 space-y-3 bg-white">
-                          <p className="font-display text-sm font-bold uppercase tracking-wide text-[#0d0d0d] truncate">
-                            {side === 'home' ? 'Local' : 'Visita'}: {label}
-                          </p>
-
-                          {activeMatchMeta.sportType === 'futbol7' && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('GOL')}
-                                onClick={() => handleChooseLiveAction(side, 'GOL', 'Gol (+1)', 1)}
-                                className={`py-2.5 text-xs font-display font-bold uppercase tracking-wider cursor-pointer transition-colors ${
-                                  isActiveBtn('GOL')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
-                                }`}
-                              >
-                                Gol ({side === 'home' ? 'Local' : 'Visita'})
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('FALTA')}
-                                onClick={() => handleChooseLiveAction(side, 'FALTA', 'Falta')}
-                                className={`py-2.5 text-xs font-medium cursor-pointer transition-colors ${
-                                  isActiveBtn('FALTA')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
-                                }`}
-                              >
-                                Falta
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('AMARILLA')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'AMARILLA', 'Tarjeta Amarilla')
-                                }
-                                className={`py-2 text-xs font-medium cursor-pointer transition-colors ${
-                                  isActiveBtn('AMARILLA')
-                                    ? 'bg-amber-400 text-[#0d0d0d] ring-2 ring-[#0d0d0d] font-bold'
-                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-950'
-                                }`}
-                              >
-                                T. Amarilla
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('ROJA')}
-                                onClick={() => handleChooseLiveAction(side, 'ROJA', 'Tarjeta Roja')}
-                                className={`py-2 text-xs font-medium cursor-pointer transition-colors ${
-                                  isActiveBtn('ROJA')
-                                    ? 'bg-red-600 text-white ring-2 ring-[#0d0d0d] font-bold'
-                                    : 'bg-red-100 hover:bg-red-200 text-red-950'
-                                }`}
-                              >
-                                T. Roja
-                              </button>
-                            </div>
-                          )}
-
-                          {(activeMatchMeta.sportType === 'basquetbol' ||
-                            activeMatchMeta.sportType === 'basquetbol3x3') && (
-                            <div className="grid grid-cols-3 gap-2">
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('PUNTO_1')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'PUNTO_1', '+1 Tiro Libre', 1)
-                                }
-                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
-                                  isActiveBtn('PUNTO_1')
-                                    ? 'bg-[#707ef9] text-white ring-2 ring-[#0d0d0d]'
-                                    : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
-                                }`}
-                              >
-                                +1 TL
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('PUNTO_2')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'PUNTO_2', '+2 Doble', 2)
-                                }
-                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
-                                  isActiveBtn('PUNTO_2')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
-                                }`}
-                              >
-                                +2 Doble
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('PUNTO_3')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'PUNTO_3', '+3 Triple', 3)
-                                }
-                                className={`py-2.5 text-xs font-display font-bold cursor-pointer ${
-                                  isActiveBtn('PUNTO_3')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
-                                }`}
-                              >
-                                +3 Triple
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('FALTA')}
-                                onClick={() => handleChooseLiveAction(side, 'FALTA', 'Falta')}
-                                className={`col-span-2 py-2 text-xs font-medium cursor-pointer ${
-                                  isActiveBtn('FALTA')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
-                                }`}
-                              >
-                                +1 Falta
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('TIEMPO_MUERTO')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'TIEMPO_MUERTO', 'Tiempo Muerto')
-                                }
-                                className={`py-2 text-xs font-medium cursor-pointer ${
-                                  isActiveBtn('TIEMPO_MUERTO')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
-                                }`}
-                              >
-                                T. Muerto
-                              </button>
-                            </div>
-                          )}
-
-                          {activeMatchMeta.sportType === 'voleibol' && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('PUNTO_VOLEY')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'PUNTO_VOLEY', '+1 Punto Set', 1)
-                                }
-                                className={`col-span-2 py-2.5 text-xs font-display font-bold uppercase tracking-wider cursor-pointer ${
-                                  isActiveBtn('PUNTO_VOLEY')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#707ef9] hover:bg-[#5766eb] text-white'
-                                }`}
-                              >
-                                +1 Punto Set ({side === 'home' ? 'Local' : 'Visita'})
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('ACE')}
-                                onClick={() => handleChooseLiveAction(side, 'ACE', '+1 Ace', 1)}
-                                className={`py-2 text-xs font-medium cursor-pointer ${
-                                  isActiveBtn('ACE')
-                                    ? 'bg-[#707ef9] text-white ring-2 ring-[#0d0d0d]'
-                                    : 'bg-[#0d0d0d] hover:bg-neutral-800 text-white'
-                                }`}
-                              >
-                                +1 Ace
-                              </button>
-                              <button
-                                type="button"
-                                aria-pressed={isActiveBtn('BLOQUEO')}
-                                onClick={() =>
-                                  handleChooseLiveAction(side, 'BLOQUEO', '+1 Bloqueo', 1)
-                                }
-                                className={`py-2 text-xs font-medium cursor-pointer ${
-                                  isActiveBtn('BLOQUEO')
-                                    ? 'bg-[#0d0d0d] text-white ring-2 ring-[#707ef9]'
-                                    : 'bg-[#f5f6f8] hover:bg-neutral-200 text-[#0d0d0d]'
-                                }`}
-                              >
-                                +1 Bloqueo
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Step 2: Inline Player Selection Menu + Explicit "Registrar acción" CTA */}
-                  {pendingAction && (
-                    <div
-                      data-testid="live-action-player-menu"
-                      className="border-2 border-[#707ef9] bg-[#f5f6f8] p-5 space-y-4"
-                    >
-                      {(() => {
-                        const targetTeamId =
-                          pendingAction.side === 'home'
-                            ? activeMatch.homeTeamId
-                            : activeMatch.awayTeamId;
-                        const targetTeamName =
-                          pendingAction.side === 'home'
-                            ? homeTeam?.nombre ?? 'Local'
-                            : awayTeam?.nombre ?? 'Visita';
-                        const teamRoster = matchPlayers
-                          .filter((p) => p.teamId === targetTeamId)
-                          .sort((a, b) => a.dorsal - b.dorsal);
-
-                        return (
-                          <>
-                            <div className="flex items-start justify-between gap-3 border-b border-neutral-300 pb-3">
-                              <div className="flex items-center gap-2.5">
-                                <UserCheck className="w-5 h-5 text-[#707ef9] shrink-0" />
-                                <div>
-                                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#707ef9]">
-                                    Paso 2 · Seleccionar jugador y confirmar
-                                  </p>
-                                  <p className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                                    {pendingAction.label} — {targetTeamName}
-                                  </p>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPendingAction(null);
-                                  setPendingPlayerId('');
-                                }}
-                                aria-label="Cancelar acción pendiente"
-                                className="p-1 text-neutral-500 hover:text-[#0d0d0d] cursor-pointer"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                            <div className="space-y-3">
-                              <label
-                                htmlFor="pending-action-player"
-                                className="block text-xs font-medium text-neutral-700"
-                              >
-                                Jugador que realiza la acción ({targetTeamName})
-                              </label>
-                              <select
-                                id="pending-action-player"
-                                value={pendingPlayerId}
-                                onChange={(e) => setPendingPlayerId(e.target.value)}
-                                className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                              >
-                                <option value="">
-                                  Sin jugador específico (Asignar a {targetTeamName})
-                                </option>
-                                {teamRoster.map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    #{p.dorsal} · {p.nombre} {p.apellidoPaterno} ({p.posicion})
-                                  </option>
-                                ))}
-                              </select>
-
-                              {teamRoster.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 pt-1">
-                                  {teamRoster.slice(0, 12).map((p) => {
-                                    const selected = pendingPlayerId === p.id;
-                                    return (
-                                      <button
-                                        key={p.id}
-                                        type="button"
-                                        onClick={() =>
-                                          setPendingPlayerId(selected ? '' : p.id)
-                                        }
-                                        className={`px-2.5 py-1 text-xs border transition-colors cursor-pointer ${
-                                          selected
-                                            ? 'bg-[#0d0d0d] text-white border-[#0d0d0d] font-bold'
-                                            : 'bg-white text-[#0d0d0d] border-neutral-300 hover:border-[#707ef9]'
-                                        }`}
-                                      >
-                                        <span className="font-mono text-[#707ef9] mr-1">
-                                          #{p.dorsal}
-                                        </span>
-                                        {p.nombre} {p.apellidoPaterno}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-neutral-300">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPendingAction(null);
-                                  setPendingPlayerId('');
-                                }}
-                                className="px-4 py-2.5 bg-white border border-neutral-300 hover:border-[#0d0d0d] text-xs font-medium text-neutral-700 cursor-pointer"
-                              >
-                                Cancelar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleConfirmPendingAction}
-                                className="px-5 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
-                              >
-                                Registrar acción
-                              </button>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Live Event Feed with Per-Event Revertir */}
-                <div className="border border-neutral-200 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                      Bitácora del encuentro ({activeMatch.events.length} incidencias)
-                    </p>
-                    {activeMatch.events.length > 0 && (
-                      <span className="text-[11px] text-neutral-500">
-                        Puedes revertir cualquier gol, falta o tarjeta registrada
-                      </span>
-                    )}
-                  </div>
-                  {activeMatch.events.length === 0 ? (
-                    <p className="text-xs text-neutral-500">
-                      Aún no se registran eventos en vivo para este encuentro.
-                    </p>
-                  ) : (
-                    <ul className="divide-y divide-neutral-100 max-h-60 overflow-y-auto text-xs">
-                      {activeMatch.events.slice(0, 20).map((ev) => (
-                        <li
-                          key={ev.id}
-                          className="py-2.5 flex items-center justify-between gap-3"
-                        >
-                          <div className="min-w-0">
-                            <span className="text-[#0d0d0d] font-medium block truncate">
-                              {ev.detail}
-                            </span>
-                            <span className="text-[11px] text-neutral-400 tabular-nums">
-                              {ev.minuteOrPeriod} · {ev.type.replace('_', ' ')}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRevertLiveEvent(ev.id)}
-                            aria-label={`Revertir ${ev.detail}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 border border-red-200 bg-red-50 hover:bg-red-600 text-red-700 hover:text-white text-[11px] font-medium transition-colors shrink-0 cursor-pointer"
-                          >
-                            <Undo2 className="w-3 h-3" />
-                            <span>Revertir</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                {/* Upgraded Sport-Specific Live Scoreboard, Substitutions & Action Console */}
+                <LiveScoreboardPanel
+                  match={activeMatch}
+                  sportType={activeMatchMeta.sportType}
+                  disciplineName={activeMatchMeta.nombre}
+                  homeTeam={homeTeam}
+                  awayTeam={awayTeam}
+                  matchPlayers={matchPlayers}
+                  onUpdateMatch={onUpdateMatch}
+                />
               </div>
 
               {/* Right 5 cols: Scoresheet Photo Upload + Gemini AI Validation + Manual Fallback */}

@@ -434,6 +434,54 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSideIdList(lst) {
+      return lst is list
+        && lst.size() <= 15
+        && (lst.size() == 0 || (lst[0] is string && lst[0].size() >= 1 && lst[0].size() <= 128));
+    }
+
+    function isValidSideCountMap(m) {
+      return m is map
+        && m.keys().hasAll(['home', 'away'])
+        && m.keys().hasOnly(['home', 'away'])
+        && m.home is int && m.home >= 0 && m.home <= 200
+        && m.away is int && m.away >= 0 && m.away <= 200;
+    }
+
+    function isValidMatchLiveState(ls) {
+      return ls is map
+        && ls.keys().hasAll(['onCourt'])
+        && ls.keys().hasOnly([
+          'onCourt',
+          'excludedPlayerIds',
+          'periodFouls',
+          'servingSide',
+          'substitutionsCount',
+          'clockSeconds',
+          'stoppageMinutes'
+        ])
+        && ls.onCourt is map
+        && ls.onCourt.keys().hasAll(['home', 'away'])
+        && ls.onCourt.keys().hasOnly(['home', 'away'])
+        && isValidSideIdList(ls.onCourt.home)
+        && isValidSideIdList(ls.onCourt.away)
+        && (
+          !('excludedPlayerIds' in ls)
+          || (
+            ls.excludedPlayerIds is map
+            && ls.excludedPlayerIds.keys().hasAll(['home', 'away'])
+            && ls.excludedPlayerIds.keys().hasOnly(['home', 'away'])
+            && isValidSideIdList(ls.excludedPlayerIds.home)
+            && isValidSideIdList(ls.excludedPlayerIds.away)
+          )
+        )
+        && (!('periodFouls' in ls) || isValidSideCountMap(ls.periodFouls))
+        && (!('servingSide' in ls) || ls.servingSide in ['home', 'away'])
+        && (!('substitutionsCount' in ls) || isValidSideCountMap(ls.substitutionsCount))
+        && (!('clockSeconds' in ls) || (ls.clockSeconds is int && ls.clockSeconds >= 0 && ls.clockSeconds <= 7200))
+        && (!('stoppageMinutes' in ls) || (ls.stoppageMinutes is int && ls.stoppageMinutes >= 0 && ls.stoppageMinutes <= 30));
+    }
+
     function isValidMatch(data) {
       return data.keys().hasAll([
           'id',
@@ -480,6 +528,7 @@ service cloud.firestore {
           'fouls',
           'timeouts',
           'events',
+          'liveState',
           'refereeId',
           'scoresheetValidation',
           'createdAt',
@@ -505,7 +554,8 @@ service cloud.firestore {
         && data.periods is list && data.periods.size() <= 10
         && data.fouls is map && data.fouls.keys().hasOnly(['home', 'away'])
         && data.timeouts is map && data.timeouts.keys().hasOnly(['home', 'away'])
-        && data.events is list && data.events.size() <= 120
+        && data.events is list && data.events.size() <= 200
+        && (!('liveState' in data) || isValidMatchLiveState(data.liveState))
         && data.refereeId is string && data.refereeId.size() <= 128
         && (!('scoresheetValidation' in data) || data.scoresheetValidation is map)
         && data.createdAt is timestamp
@@ -1378,6 +1428,7 @@ service cloud.firestore {
               'fouls',
               'timeouts',
               'events',
+              'liveState',
               'refereeId',
               'scoresheetValidation',
               'updatedAt'
@@ -1397,6 +1448,7 @@ service cloud.firestore {
               'fouls',
               'timeouts',
               'events',
+              'liveState',
               'scoresheetValidation',
               'updatedAt'
             ])

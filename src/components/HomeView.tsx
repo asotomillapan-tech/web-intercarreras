@@ -927,9 +927,15 @@ export function HomeView({
                 </div>
 
                 <div className="flex items-center justify-between gap-3 text-xs text-neutral-500 pt-2 border-t border-neutral-100">
-                  <span className="truncate">
+                  <span className="truncate tabular-nums">
                     {revealData && disc.sportType === 'voleibol' && match.periods.length > 0
                       ? `Sets: ${match.periods.map((p) => `${p.home}-${p.away}`).join(' / ')}`
+                      : revealData && disc.sportType === 'basquetbol' && match.periods.length > 0
+                      ? `Cuartos: ${match.periods.map((p) => `${p.home}-${p.away}`).join(' · ')}`
+                      : revealData && disc.sportType === 'basquetbol3x3'
+                      ? `3x3 · Meta 21 pts${mvpTally.winner ? ` · MVP: ${mvpTally.winner.playerName}` : ''}`
+                      : revealData && disc.sportType === 'futbol7' && match.periods.length > 0
+                      ? `Tiempos: ${match.periods.map((p) => `${p.home}-${p.away}`).join(' / ')}`
                       : revealData && mvpTally.winner
                       ? `MVP: ${mvpTally.winner.playerName}`
                       : match.cancha}
