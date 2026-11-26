@@ -18,6 +18,7 @@ import {
 } from 'firebase/firestore';
 import { DEFAULT_MASTER_SHEETS, INITIAL_CONFIGS } from '../data/ufroSeed';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
+import type { PublicRealtimeStreamKey } from '../domain/realtimeSyncEngine';
 import type {
   AcademicLevel,
   AppUserProfile,
@@ -44,7 +45,7 @@ import type {
   TransferRecord,
   UserRole,
 } from '../types/tournament';
-import { db, handleFirestoreError, OperationType } from './firebaseAuth';
+import { auth, db, handleFirestoreError, OperationType } from './firebaseAuth';
 
 const ALL_DISCIPLINE_IDS: DisciplineId[] = [
   'f7-h-1',
@@ -147,8 +148,606 @@ function sanitizeHomeFeatured(raw: unknown): HomeFeaturedConfig | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Public Tournament Hydration (Runs for all visitors)
+// 1. Public Tournament Mappers, Hydration & Real-Time Subscriptions
 // ---------------------------------------------------------------------------
+
+function logFirestoreSnapshotError(error: unknown, operationType: OperationType, path: string): void {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo:
+        auth.currentUser?.providerData?.map((p) => ({
+          providerId: p.providerId,
+          email: p.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+}
+
+function mapSettingsData(s: Record<string, unknown>): Partial<TournamentState> {
+  const out: Partial<TournamentState> = {};
+  if (typeof s.temporada === 'string') out.temporada = s.temporada;
+  if (typeof s.driveUploadRootFolderId === 'string') {
+    out.driveUploadRootFolderId = s.driveUploadRootFolderId;
+  }
+  if (typeof s.driveUploadRootFolderName === 'string') {
+    out.driveUploadRootFolderName = s.driveUploadRootFolderName;
+  }
+  if (s.masterSheets && typeof s.masterSheets === 'object') {
+    const merged: MasterSheetsConfig = { ...DEFAULT_MASTER_SHEETS };
+    const allowedKeys: MasterSheetKey[] = [
+      'futbol_hombres',
+      'futbol_mujeres',
+      'basquet_hombres',
+      'basquet_3x3_mujeres',
+      'voley_mujeres',
+      'voley_hombres',
+      'consolidado',
+    ];
+    for (const key of allowedKeys) {
+      const val = (s.masterSheets as Record<string, unknown>)[key];
+      if (typeof val === 'string') {
+        if (val.trim()) {
+          merged[key] = val.trim().slice(0, 128);
+        } else if (key !== 'futbol_hombres') {
+          delete merged[key];
+        }
+      }
+    }
+    out.masterSheets = merged;
+  }
+  if (typeof s.autoSyncSheetsEnabled === 'boolean') {
+    out.autoSyncSheetsEnabled = s.autoSyncSheetsEnabled;
+  }
+  if (typeof s.lastSyncedSpreadsheetId === 'string') {
+    out.lastSyncedSpreadsheetId = s.lastSyncedSpreadsheetId;
+  }
+  if (typeof s.lastSyncedAt === 'string') {
+    out.lastSyncedAt = s.lastSyncedAt;
+  }
+  const parsedFeatured = sanitizeHomeFeatured(s.homeFeatured);
+  if (parsedFeatured) {
+    out.homeFeatured = parsedFeatured;
+  }
+  return out;
+}
+
+function mapConfigsDocs(
+  docs: QueryDocumentSnapshot[]
+): Record<DisciplineId, DisciplineFormatConfig> {
+  const mergedConfigs: Record<DisciplineId, DisciplineFormatConfig> = { ...INITIAL_CONFIGS };
+  docs.forEach((d) => {
+    const data = d.data();
+    const id = data.disciplineId as DisciplineId;
+    if (id in mergedConfigs) {
+      mergedConfigs[id] = {
+        disciplineId: id,
+        temporada: String(data.temporada || '2026'),
+        maxCupos: Number(data.maxCupos) || mergedConfigs[id].maxCupos,
+        numGrupos: Number(data.numGrupos) || mergedConfigs[id].numGrupos,
+        clasificadosPorGrupo:
+          Number(data.clasificadosPorGrupo) || mergedConfigs[id].clasificadosPorGrupo,
+        formatoPlayoff: ([4, 8, 16].includes(Number(data.formatoPlayoff))
+          ? Number(data.formatoPlayoff)
+          : mergedConfigs[id].formatoPlayoff) as 4 | 8 | 16,
+        incluyeTercerLugar:
+          typeof data.incluyeTercerLugar === 'boolean' ? data.incluyeTercerLugar : true,
+        playoffsIdaYVuelta:
+          typeof data.playoffsIdaYVuelta === 'boolean'
+            ? data.playoffsIdaYVuelta
+            : id === 'f7-h-1',
+        inscripcionesAbiertas: Boolean(data.inscripcionesAbiertas),
+        transferenciasAbiertas: Boolean(data.transferenciasAbiertas),
+        maxTransferenciasPorEquipo: Number(data.maxTransferenciasPorEquipo) ?? 2,
+        faseActual: (data.faseActual as DisciplineFormatConfig['faseActual']) || 'INSCRIPCIONES',
+      };
+    }
+  });
+  return mergedConfigs;
+}
+
+function mapTeamDoc(d: QueryDocumentSnapshot): Team {
+  const data = d.data();
+  return {
+    id: String(data.id || d.id),
+    nombre: String(data.nombre || ''),
+    sigla: String(data.sigla || ''),
+    disciplineId: data.disciplineId as DisciplineId,
+    carrera: String(data.carrera || ''),
+    facultad: String(data.facultad || ''),
+    groupName: String(data.groupName || 'Grupo A'),
+    escudo: typeof data.escudo === 'string' && data.escudo ? data.escudo : undefined,
+    anioFundacion:
+      typeof data.anioFundacion === 'number' && Number.isFinite(data.anioFundacion)
+        ? Math.trunc(data.anioFundacion)
+        : undefined,
+    logrosAnteriores: typeof data.logrosAnteriores === 'string' ? data.logrosAnteriores : undefined,
+    createdByUid: typeof data.createdByUid === 'string' ? data.createdByUid : undefined,
+  };
+}
+
+function mapPlayerPublicDoc(d: QueryDocumentSnapshot): Player {
+  const data = d.data();
+  return {
+    id: String(data.id || d.id),
+    teamId: String(data.teamId || ''),
+    disciplineId: data.disciplineId as DisciplineId,
+    dorsal: Number(data.dorsal) || 0,
+    posicion: String(data.posicion || ''),
+    nombre: String(data.nombre || ''),
+    apellidoPaterno: String(data.apellidoPaterno || ''),
+    apellidoMaterno: String(data.apellidoMaterno || ''),
+    carrera: String(data.carrera || ''),
+    facultad: String(data.facultad || ''),
+    // PII fields stay empty for public visitors and are hydrated only for authorized roles
+    rut: '',
+    numeroMatricula: '',
+    correoInstitucional: '',
+    fechaNacimiento: '',
+    nivelAcademico: (data.nivelAcademico as AcademicLevel) || 'Pregrado',
+    fotografia: typeof data.fotografia === 'string' ? data.fotografia : '',
+    esSeleccionadoUfro: Boolean(data.esSeleccionadoUfro),
+    stats: sanitizeStats(data.stats as Partial<PlayerStats> | undefined),
+  };
+}
+
+function mapMatchDoc(d: QueryDocumentSnapshot): Match {
+  const data = d.data();
+  return {
+    id: String(data.id || d.id),
+    disciplineId: data.disciplineId as DisciplineId,
+    groupName: String(data.groupName || 'Grupo A'),
+    fase: (data.fase as Match['fase']) || 'Grupos',
+    playoffLeg:
+      data.playoffLeg === 'IDA' || data.playoffLeg === 'VUELTA' || data.playoffLeg === 'UNICO'
+        ? (data.playoffLeg as Match['playoffLeg'])
+        : undefined,
+    jornada: Number(data.jornada) || 1,
+    fecha: String(data.fecha || ''),
+    hora: String(data.hora || ''),
+    cancha: String(data.cancha || ''),
+    homeTeamId: String(data.homeTeamId || ''),
+    awayTeamId: String(data.awayTeamId || ''),
+    homeScore: Number(data.homeScore) || 0,
+    awayScore: Number(data.awayScore) || 0,
+    status: (data.status as Match['status']) || 'PROGRAMADO',
+    periodLabel: String(data.periodLabel || 'Programado'),
+    clock: String(data.clock || 'Por iniciar'),
+    periods: Array.isArray(data.periods) ? data.periods : [],
+    fouls:
+      data.fouls && typeof data.fouls === 'object'
+        ? { home: Number(data.fouls.home) || 0, away: Number(data.fouls.away) || 0 }
+        : { home: 0, away: 0 },
+    timeouts:
+      data.timeouts && typeof data.timeouts === 'object'
+        ? { home: Number(data.timeouts.home) || 0, away: Number(data.timeouts.away) || 0 }
+        : { home: 0, away: 0 },
+    events: Array.isArray(data.events) ? data.events : [],
+    liveState: sanitizeMatchLiveState(data.liveState),
+    attendance: sanitizeMatchAttendance(data.attendance),
+    refereeId: String(data.refereeId || ''),
+    scoresheetValidation:
+      data.scoresheetValidation && typeof data.scoresheetValidation === 'object'
+        ? data.scoresheetValidation
+        : undefined,
+  };
+}
+
+function mapMvpVoteDoc(d: QueryDocumentSnapshot): MvpVoteRecord {
+  const data = d.data();
+  return {
+    id: d.id,
+    matchId: String(data.matchId || ''),
+    disciplineId: data.disciplineId as DisciplineId,
+    playerId: String(data.playerId || ''),
+    playerName: String(data.playerName || ''),
+    teamId: String(data.teamId || ''),
+    voterUid: String(data.voterUid || ''),
+    voterName: 'Usuario UFRO',
+    createdAt: toIso(data.createdAt),
+  };
+}
+
+function mapPhotoDoc(d: QueryDocumentSnapshot): PhotoEntry {
+  const data = d.data();
+  return {
+    id: String(data.id || d.id),
+    title: String(data.title || ''),
+    disciplineId: String(data.disciplineId || 'f7-h-1'),
+    stageLabel: typeof data.stageLabel === 'string' ? data.stageLabel : undefined,
+    matchLabel: String(data.matchLabel || ''),
+    season: String(data.season || '2026'),
+    source: (data.source as 'upload' | 'drive') || 'drive',
+    imageUrl: String(data.imageUrl || ''),
+    thumbnailUrl: typeof data.thumbnailUrl === 'string' ? data.thumbnailUrl : undefined,
+    driveFileId: typeof data.driveFileId === 'string' ? data.driveFileId : undefined,
+    driveWebViewLink: typeof data.driveWebViewLink === 'string' ? data.driveWebViewLink : undefined,
+    driveFolderPath: typeof data.driveFolderPath === 'string' ? data.driveFolderPath : undefined,
+    photographerUid: String(data.photographerUid || ''),
+    photographerName: String(data.photographerName || 'Prensa UFRO'),
+    createdAt: toIso(data.createdAt),
+  };
+}
+
+function mapAwardNomineesDocs(docs: QueryDocumentSnapshot[]): Partial<Record<DisciplineId, string[]>> {
+  const map: Partial<Record<DisciplineId, string[]>> = {};
+  docs.forEach((d) => {
+    const data = d.data();
+    const discId = (data.disciplineId || d.id) as DisciplineId;
+    if (ALL_DISCIPLINE_IDS.includes(discId) && Array.isArray(data.mvpNomineeIds)) {
+      map[discId] = data.mvpNomineeIds
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .slice(0, 5);
+    }
+  });
+  return map;
+}
+
+function mapChampionshipMvpVoteDoc(d: QueryDocumentSnapshot): ChampionshipMvpVoteRecord {
+  const data = d.data();
+  return {
+    id: d.id,
+    disciplineId: data.disciplineId as DisciplineId,
+    temporada: String(data.temporada || '2026'),
+    voterUid: String(data.voterUid || ''),
+    playerId: String(data.playerId || ''),
+    playerName: String(data.playerName || ''),
+    teamId: String(data.teamId || ''),
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+function mapPositionAwardVoteDoc(d: QueryDocumentSnapshot): PositionAwardVoteRecord {
+  const data = d.data();
+  return {
+    id: d.id,
+    disciplineId: data.disciplineId as DisciplineId,
+    temporada: String(data.temporada || '2026'),
+    positionKey: String(data.positionKey || ''),
+    positionLabel: String(data.positionLabel || ''),
+    voterUid: String(data.voterUid || ''),
+    playerId: String(data.playerId || ''),
+    playerName: String(data.playerName || ''),
+    teamId: String(data.teamId || ''),
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+function mapLeyendasDoc(d: QueryDocumentSnapshot): LeyendasLeaderboardEntry {
+  const data = d.data();
+  const rawStats = (data.stats && typeof data.stats === 'object' ? data.stats : {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    id: String(data.id || d.id),
+    uid: String(data.uid || ''),
+    playerName: String(data.playerName || 'Leyenda UFRO'),
+    career: String(data.career || 'Carrera UFRO'),
+    sportKey: (data.sportKey === 'basquet' || data.sportKey === 'voley'
+      ? data.sportKey
+      : 'futbol') as LeyendasLeaderboardEntry['sportKey'],
+    branch: (data.branch === 'mujer' ? 'mujer' : 'hombre') as LeyendasLeaderboardEntry['branch'],
+    pos: String(data.pos || 'DEL'),
+    ovr: Number(data.ovr) || 70,
+    maxOvr: Number(data.maxOvr) || Number(data.ovr) || 70,
+    score: Number(data.score) || 0,
+    legacyTitle: String(data.legacyTitle || 'Guerrero Universitario UFRO'),
+    legacyDesc: String(data.legacyDesc || ''),
+    titlesCount: Number(data.titlesCount) || 0,
+    awardsCount: Number(data.awardsCount) || 0,
+    capsCount: Number(data.capsCount) || 0,
+    semestersPlayed: Number(data.semestersPlayed) || 1,
+    stats: {
+      g: Number(rawStats.g) || 0,
+      a: Number(rawStats.a) || 0,
+      m: Number(rawStats.m) || 0,
+      pts: Number(rawStats.pts) || 0,
+      reb: Number(rawStats.reb) || 0,
+      ast: Number(rawStats.ast) || 0,
+      blk: Number(rawStats.blk) || 0,
+      ace: Number(rawStats.ace) || 0,
+    },
+    finalTeam: String(data.finalTeam || ''),
+    finalTeamId: typeof data.finalTeamId === 'string' ? data.finalTeamId : undefined,
+    finalTeamEscudo: typeof data.finalTeamEscudo === 'string' ? data.finalTeamEscudo : undefined,
+    stints: Array.isArray(data.stints) ? data.stints : [],
+    trophies: Array.isArray(data.trophies) ? data.trophies : [],
+    awards: Array.isArray(data.awards) ? data.awards : [],
+    weekKey: String(data.weekKey || ''),
+    createdAt: toIso(data.createdAt),
+  };
+}
+
+export interface PublicRealtimeCallbacks {
+  onSettings: (patch: Partial<TournamentState>, fromServer: boolean) => void;
+  onConfigs: (configs: Record<DisciplineId, DisciplineFormatConfig>, fromServer: boolean) => void;
+  onTeams: (teams: Team[], fromServer: boolean) => void;
+  onPlayers: (players: Player[], fromServer: boolean) => void;
+  onMatches: (matches: Match[], fromServer: boolean) => void;
+  onNews: (publishedNews: NewsArticle[], fromServer: boolean) => void;
+  onTransfers: (approvedTransfers: TransferRecord[], fromServer: boolean) => void;
+  onPhotos: (photos: PhotoEntry[], fromServer: boolean) => void;
+  onMvpVotes: (votes: MvpVoteRecord[], fromServer: boolean) => void;
+  onAwardNominees: (nominees: Partial<Record<DisciplineId, string[]>>, fromServer: boolean) => void;
+  onChampionshipMvpVotes: (votes: ChampionshipMvpVoteRecord[], fromServer: boolean) => void;
+  onPositionAwardVotes: (votes: PositionAwardVoteRecord[], fromServer: boolean) => void;
+  onLeyendasLeaderboard: (entries: LeyendasLeaderboardEntry[], fromServer: boolean) => void;
+  onStreamError: (stream: PublicRealtimeStreamKey, error: unknown) => void;
+}
+
+/**
+ * Subscribes to live Firestore snapshots for all public championship collections.
+ * Protects brand-new devices from IndexedDB cold-start empty flashes by ignoring
+ * empty cache-only snapshots until either non-empty cached data or the authoritative
+ * server snapshot arrives.
+ */
+export function subscribeToPublicTournamentState(
+  callbacks: PublicRealtimeCallbacks
+): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+  const snapshotOpts = { includeMetadataChanges: true } as const;
+
+  // 1. Settings (temporada, homeFeatured, masterSheets, Drive root)
+  unsubs.push(
+    onSnapshot(
+      doc(db, 'settings', 'tournament'),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && !snap.exists()) return;
+        const patch = snap.exists() ? mapSettingsData(snap.data() as Record<string, unknown>) : {};
+        callbacks.onSettings(patch, fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.GET, 'settings/tournament');
+        callbacks.onStreamError('settings', error);
+      }
+    )
+  );
+
+  // 2. Discipline configs
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onConfigs(mapConfigsDocs(snap.docs), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'configs');
+        callbacks.onStreamError('configs', error);
+      }
+    )
+  );
+
+  // 3. Teams
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'teams'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onTeams(snap.docs.map((d) => mapTeamDoc(d)), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'teams');
+        callbacks.onStreamError('teams', error);
+      }
+    )
+  );
+
+  // 4. Players (public profiles)
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onPlayers(snap.docs.map((d) => mapPlayerPublicDoc(d)), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'players');
+        callbacks.onStreamError('players', error);
+      }
+    )
+  );
+
+  // 5. Matches (schedule, live scores, substitutions, attendance, finalizations)
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onMatches(snap.docs.map((d) => mapMatchDoc(d)), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'matches');
+        callbacks.onStreamError('matches', error);
+      }
+    )
+  );
+
+  // 6. Published News
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'news'), where('published', '==', true)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        const news = snap.docs
+          .map((d) => mapNewsDoc(d.id, d.data()))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        callbacks.onNews(news, fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'news');
+        callbacks.onStreamError('news', error);
+      }
+    )
+  );
+
+  // 7. Approved Transfers
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'transfers'), where('estado', '==', 'APROBADA')),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onTransfers(snap.docs.map((d) => mapTransferDoc(d)), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'transfers');
+        callbacks.onStreamError('transfers', error);
+      }
+    )
+  );
+
+  // 8. Official Gallery Photos
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'photos'), where('source', 'in', ['upload', 'drive'])),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        const photos = snap.docs
+          .map((d) => mapPhotoDoc(d))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        callbacks.onPhotos(photos, fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'photos');
+        callbacks.onStreamError('photos', error);
+      }
+    )
+  );
+
+  // 9. Live POTM Votes
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onMvpVotes(snap.docs.map((d) => mapMvpVoteDoc(d)), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'mvp_votes');
+        callbacks.onStreamError('mvpVotes', error);
+      }
+    )
+  );
+
+  // 10. Award Nominees
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'award_nominees'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS)),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onAwardNominees(mapAwardNomineesDocs(snap.docs), fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'award_nominees');
+        callbacks.onStreamError('awardNominees', error);
+      }
+    )
+  );
+
+  // 11. Championship MVP Votes
+  unsubs.push(
+    onSnapshot(
+      query(
+        collection(db, 'championship_mvp_votes'),
+        where('disciplineId', 'in', ALL_DISCIPLINE_IDS)
+      ),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onChampionshipMvpVotes(
+          snap.docs.map((d) => mapChampionshipMvpVoteDoc(d)),
+          fromServer
+        );
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'championship_mvp_votes');
+        callbacks.onStreamError('championshipMvpVotes', error);
+      }
+    )
+  );
+
+  // 12. Position Award Votes
+  unsubs.push(
+    onSnapshot(
+      query(
+        collection(db, 'position_award_votes'),
+        where('disciplineId', 'in', ALL_DISCIPLINE_IDS)
+      ),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        callbacks.onPositionAwardVotes(
+          snap.docs.map((d) => mapPositionAwardVoteDoc(d)),
+          fromServer
+        );
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'position_award_votes');
+        callbacks.onStreamError('positionAwardVotes', error);
+      }
+    )
+  );
+
+  // 13. Leyendas Leaderboard
+  unsubs.push(
+    onSnapshot(
+      query(
+        collection(db, 'leyendas_leaderboard'),
+        where('sportKey', 'in', ['futbol', 'basquet', 'voley'])
+      ),
+      snapshotOpts,
+      (snap) => {
+        const fromServer = !snap.metadata.fromCache;
+        if (!fromServer && snap.empty) return;
+        const entries = snap.docs
+          .map((d) => mapLeyendasDoc(d))
+          .sort((a, b) => b.score - a.score);
+        callbacks.onLeyendasLeaderboard(entries, fromServer);
+      },
+      (error) => {
+        logFirestoreSnapshotError(error, OperationType.LIST, 'leyendas_leaderboard');
+        callbacks.onStreamError('leyendasLeaderboard', error);
+      }
+    )
+  );
+
+  return () => {
+    unsubs.forEach((u) => u());
+  };
+}
 
 export async function loadPublicTournamentState(): Promise<Partial<TournamentState>> {
   const [
@@ -174,8 +773,8 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
     getDocs(query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'transfers'), where('estado', '==', 'APROBADA'))),
-    getDocs(query(collection(db, 'mvp_votes'), where('matchId', '>=', ''))),
-    getDocs(query(collection(db, 'photos'), where('season', '>=', ''))),
+    getDocs(query(collection(db, 'mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'photos'), where('source', 'in', ['upload', 'drive']))),
     getDocs(query(collection(db, 'news'), where('published', '==', true))),
     getDocs(query(collection(db, 'award_nominees'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
     getDocs(query(collection(db, 'championship_mvp_votes'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
@@ -188,174 +787,23 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
   const result: Partial<TournamentState> = {};
 
   if (settingsRes.status === 'fulfilled' && settingsRes.value.exists()) {
-    const s = settingsRes.value.data();
-    if (typeof s.temporada === 'string') result.temporada = s.temporada;
-    if (typeof s.driveUploadRootFolderId === 'string') {
-      result.driveUploadRootFolderId = s.driveUploadRootFolderId;
-    }
-    if (typeof s.driveUploadRootFolderName === 'string') {
-      result.driveUploadRootFolderName = s.driveUploadRootFolderName;
-    }
-    if (s.masterSheets && typeof s.masterSheets === 'object') {
-      const merged: MasterSheetsConfig = { ...DEFAULT_MASTER_SHEETS };
-      const allowedKeys: MasterSheetKey[] = [
-        'futbol_hombres',
-        'futbol_mujeres',
-        'basquet_hombres',
-        'basquet_3x3_mujeres',
-        'voley_mujeres',
-        'voley_hombres',
-        'consolidado',
-      ];
-      for (const key of allowedKeys) {
-        const val = (s.masterSheets as Record<string, unknown>)[key];
-        if (typeof val === 'string') {
-          if (val.trim()) {
-            merged[key] = val.trim().slice(0, 128);
-          } else if (key !== 'futbol_hombres') {
-            delete merged[key];
-          }
-        }
-      }
-      result.masterSheets = merged;
-    }
-    if (typeof s.autoSyncSheetsEnabled === 'boolean') {
-      result.autoSyncSheetsEnabled = s.autoSyncSheetsEnabled;
-    }
-    if (typeof s.lastSyncedSpreadsheetId === 'string') {
-      result.lastSyncedSpreadsheetId = s.lastSyncedSpreadsheetId;
-    }
-    if (typeof s.lastSyncedAt === 'string') {
-      result.lastSyncedAt = s.lastSyncedAt;
-    }
-    const parsedFeatured = sanitizeHomeFeatured(s.homeFeatured);
-    if (parsedFeatured) {
-      result.homeFeatured = parsedFeatured;
-    }
+    Object.assign(result, mapSettingsData(settingsRes.value.data() as Record<string, unknown>));
   }
 
   if (configsRes.status === 'fulfilled' && !configsRes.value.empty) {
-    const mergedConfigs: Record<DisciplineId, DisciplineFormatConfig> = { ...INITIAL_CONFIGS };
-    configsRes.value.docs.forEach((d) => {
-      const data = d.data();
-      const id = data.disciplineId as DisciplineId;
-      if (id in mergedConfigs) {
-        mergedConfigs[id] = {
-          disciplineId: id,
-          temporada: String(data.temporada || '2026'),
-          maxCupos: Number(data.maxCupos) || mergedConfigs[id].maxCupos,
-          numGrupos: Number(data.numGrupos) || mergedConfigs[id].numGrupos,
-          clasificadosPorGrupo: Number(data.clasificadosPorGrupo) || mergedConfigs[id].clasificadosPorGrupo,
-          formatoPlayoff: ([4, 8, 16].includes(Number(data.formatoPlayoff))
-            ? Number(data.formatoPlayoff)
-            : mergedConfigs[id].formatoPlayoff) as 4 | 8 | 16,
-          incluyeTercerLugar:
-            typeof data.incluyeTercerLugar === 'boolean' ? data.incluyeTercerLugar : true,
-          playoffsIdaYVuelta:
-            typeof data.playoffsIdaYVuelta === 'boolean'
-              ? data.playoffsIdaYVuelta
-              : id === 'f7-h-1',
-          inscripcionesAbiertas: Boolean(data.inscripcionesAbiertas),
-          transferenciasAbiertas: Boolean(data.transferenciasAbiertas),
-          maxTransferenciasPorEquipo: Number(data.maxTransferenciasPorEquipo) ?? 2,
-          faseActual: (data.faseActual as DisciplineFormatConfig['faseActual']) || 'INSCRIPCIONES',
-        };
-      }
-    });
-    result.configs = mergedConfigs;
+    result.configs = mapConfigsDocs(configsRes.value.docs);
   }
 
   if (teamsRes.status === 'fulfilled') {
-    result.teams = teamsRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: String(data.id || d.id),
-        nombre: String(data.nombre || ''),
-        sigla: String(data.sigla || ''),
-        disciplineId: data.disciplineId as DisciplineId,
-        carrera: String(data.carrera || ''),
-        facultad: String(data.facultad || ''),
-        groupName: String(data.groupName || 'Grupo A'),
-        escudo: typeof data.escudo === 'string' && data.escudo ? data.escudo : undefined,
-        anioFundacion:
-          typeof data.anioFundacion === 'number' && Number.isFinite(data.anioFundacion)
-            ? Math.trunc(data.anioFundacion)
-            : undefined,
-        logrosAnteriores: typeof data.logrosAnteriores === 'string' ? data.logrosAnteriores : undefined,
-        createdByUid: typeof data.createdByUid === 'string' ? data.createdByUid : undefined,
-      };
-    });
+    result.teams = teamsRes.value.docs.map((d) => mapTeamDoc(d));
   }
 
   if (playersRes.status === 'fulfilled') {
-    result.players = playersRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: String(data.id || d.id),
-        teamId: String(data.teamId || ''),
-        disciplineId: data.disciplineId as DisciplineId,
-        dorsal: Number(data.dorsal) || 0,
-        posicion: String(data.posicion || ''),
-        nombre: String(data.nombre || ''),
-        apellidoPaterno: String(data.apellidoPaterno || ''),
-        apellidoMaterno: String(data.apellidoMaterno || ''),
-        carrera: String(data.carrera || ''),
-        facultad: String(data.facultad || ''),
-        // PII fields stay empty for public visitors and are hydrated only for authorized roles
-        rut: '',
-        numeroMatricula: '',
-        correoInstitucional: '',
-        fechaNacimiento: '',
-        nivelAcademico: (data.nivelAcademico as AcademicLevel) || 'Pregrado',
-        fotografia: typeof data.fotografia === 'string' ? data.fotografia : '',
-        esSeleccionadoUfro: Boolean(data.esSeleccionadoUfro),
-        stats: sanitizeStats(data.stats as Partial<PlayerStats> | undefined),
-      };
-    });
+    result.players = playersRes.value.docs.map((d) => mapPlayerPublicDoc(d));
   }
 
   if (matchesRes.status === 'fulfilled') {
-    result.matches = matchesRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: String(data.id || d.id),
-        disciplineId: data.disciplineId as DisciplineId,
-        groupName: String(data.groupName || 'Grupo A'),
-        fase: (data.fase as Match['fase']) || 'Grupos',
-        playoffLeg:
-          data.playoffLeg === 'IDA' || data.playoffLeg === 'VUELTA' || data.playoffLeg === 'UNICO'
-            ? (data.playoffLeg as Match['playoffLeg'])
-            : undefined,
-        jornada: Number(data.jornada) || 1,
-        fecha: String(data.fecha || ''),
-        hora: String(data.hora || ''),
-        cancha: String(data.cancha || ''),
-        homeTeamId: String(data.homeTeamId || ''),
-        awayTeamId: String(data.awayTeamId || ''),
-        homeScore: Number(data.homeScore) || 0,
-        awayScore: Number(data.awayScore) || 0,
-        status: (data.status as Match['status']) || 'PROGRAMADO',
-        periodLabel: String(data.periodLabel || 'Programado'),
-        clock: String(data.clock || 'Por iniciar'),
-        periods: Array.isArray(data.periods) ? data.periods : [],
-        fouls:
-          data.fouls && typeof data.fouls === 'object'
-            ? { home: Number(data.fouls.home) || 0, away: Number(data.fouls.away) || 0 }
-            : { home: 0, away: 0 },
-        timeouts:
-          data.timeouts && typeof data.timeouts === 'object'
-            ? { home: Number(data.timeouts.home) || 0, away: Number(data.timeouts.away) || 0 }
-            : { home: 0, away: 0 },
-        events: Array.isArray(data.events) ? data.events : [],
-        liveState: sanitizeMatchLiveState(data.liveState),
-        attendance: sanitizeMatchAttendance(data.attendance),
-        refereeId: String(data.refereeId || ''),
-        scoresheetValidation:
-          data.scoresheetValidation && typeof data.scoresheetValidation === 'object'
-            ? data.scoresheetValidation
-            : undefined,
-      };
-    });
+    result.matches = matchesRes.value.docs.map((d) => mapMatchDoc(d));
   }
 
   if (transfersRes.status === 'fulfilled') {
@@ -363,44 +811,12 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
   }
 
   if (votesRes.status === 'fulfilled') {
-    result.mvpVotes = votesRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        matchId: String(data.matchId || ''),
-        disciplineId: data.disciplineId as DisciplineId,
-        playerId: String(data.playerId || ''),
-        playerName: String(data.playerName || ''),
-        teamId: String(data.teamId || ''),
-        voterUid: String(data.voterUid || ''),
-        voterName: 'Usuario UFRO',
-        createdAt: toIso(data.createdAt),
-      };
-    });
+    result.mvpVotes = votesRes.value.docs.map((d) => mapMvpVoteDoc(d));
   }
 
   if (photosRes.status === 'fulfilled') {
     result.photos = photosRes.value.docs
-      .map((d) => {
-        const data = d.data();
-        return {
-          id: String(data.id || d.id),
-          title: String(data.title || ''),
-          disciplineId: String(data.disciplineId || 'f7-h-1'),
-          stageLabel: typeof data.stageLabel === 'string' ? data.stageLabel : undefined,
-          matchLabel: String(data.matchLabel || ''),
-          season: String(data.season || '2026'),
-          source: (data.source as 'upload' | 'drive') || 'drive',
-          imageUrl: String(data.imageUrl || ''),
-          thumbnailUrl: typeof data.thumbnailUrl === 'string' ? data.thumbnailUrl : undefined,
-          driveFileId: typeof data.driveFileId === 'string' ? data.driveFileId : undefined,
-          driveWebViewLink: typeof data.driveWebViewLink === 'string' ? data.driveWebViewLink : undefined,
-          driveFolderPath: typeof data.driveFolderPath === 'string' ? data.driveFolderPath : undefined,
-          photographerUid: String(data.photographerUid || ''),
-          photographerName: String(data.photographerName || 'Prensa UFRO'),
-          createdAt: toIso(data.createdAt),
-        };
-      })
+      .map((d) => mapPhotoDoc(d))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -411,53 +827,15 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
   }
 
   if (nomineesRes.status === 'fulfilled') {
-    const map: Partial<Record<DisciplineId, string[]>> = {};
-    nomineesRes.value.docs.forEach((d) => {
-      const data = d.data();
-      const discId = (data.disciplineId || d.id) as DisciplineId;
-      if (ALL_DISCIPLINE_IDS.includes(discId) && Array.isArray(data.mvpNomineeIds)) {
-        map[discId] = data.mvpNomineeIds
-          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-          .slice(0, 5);
-      }
-    });
-    result.awardNominees = map;
+    result.awardNominees = mapAwardNomineesDocs(nomineesRes.value.docs);
   }
 
   if (champMvpRes.status === 'fulfilled') {
-    result.championshipMvpVotes = champMvpRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        disciplineId: data.disciplineId as DisciplineId,
-        temporada: String(data.temporada || '2026'),
-        voterUid: String(data.voterUid || ''),
-        playerId: String(data.playerId || ''),
-        playerName: String(data.playerName || ''),
-        teamId: String(data.teamId || ''),
-        createdAt: toIso(data.createdAt),
-        updatedAt: toIso(data.updatedAt),
-      };
-    });
+    result.championshipMvpVotes = champMvpRes.value.docs.map((d) => mapChampionshipMvpVoteDoc(d));
   }
 
   if (posAwardsRes.status === 'fulfilled') {
-    result.positionAwardVotes = posAwardsRes.value.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        disciplineId: data.disciplineId as DisciplineId,
-        temporada: String(data.temporada || '2026'),
-        positionKey: String(data.positionKey || ''),
-        positionLabel: String(data.positionLabel || ''),
-        voterUid: String(data.voterUid || ''),
-        playerId: String(data.playerId || ''),
-        playerName: String(data.playerName || ''),
-        teamId: String(data.teamId || ''),
-        createdAt: toIso(data.createdAt),
-        updatedAt: toIso(data.updatedAt),
-      };
-    });
+    result.positionAwardVotes = posAwardsRes.value.docs.map((d) => mapPositionAwardVoteDoc(d));
   }
 
   if (totyRes.status === 'fulfilled') {
@@ -477,46 +855,7 @@ export async function loadPublicTournamentState(): Promise<Partial<TournamentSta
 
   if (leyendasRes.status === 'fulfilled') {
     result.leyendasLeaderboard = leyendasRes.value.docs
-      .map((d) => {
-        const data = d.data();
-        const rawStats = (data.stats && typeof data.stats === 'object' ? data.stats : {}) as Record<string, unknown>;
-        return {
-          id: String(data.id || d.id),
-          uid: String(data.uid || ''),
-          playerName: String(data.playerName || 'Leyenda UFRO'),
-          career: String(data.career || 'Carrera UFRO'),
-          sportKey: (data.sportKey === 'basquet' || data.sportKey === 'voley' ? data.sportKey : 'futbol') as LeyendasLeaderboardEntry['sportKey'],
-          branch: (data.branch === 'mujer' ? 'mujer' : 'hombre') as LeyendasLeaderboardEntry['branch'],
-          pos: String(data.pos || 'DEL'),
-          ovr: Number(data.ovr) || 70,
-          maxOvr: Number(data.maxOvr) || Number(data.ovr) || 70,
-          score: Number(data.score) || 0,
-          legacyTitle: String(data.legacyTitle || 'Guerrero Universitario UFRO'),
-          legacyDesc: String(data.legacyDesc || ''),
-          titlesCount: Number(data.titlesCount) || 0,
-          awardsCount: Number(data.awardsCount) || 0,
-          capsCount: Number(data.capsCount) || 0,
-          semestersPlayed: Number(data.semestersPlayed) || 1,
-          stats: {
-            g: Number(rawStats.g) || 0,
-            a: Number(rawStats.a) || 0,
-            m: Number(rawStats.m) || 0,
-            pts: Number(rawStats.pts) || 0,
-            reb: Number(rawStats.reb) || 0,
-            ast: Number(rawStats.ast) || 0,
-            blk: Number(rawStats.blk) || 0,
-            ace: Number(rawStats.ace) || 0,
-          },
-          finalTeam: String(data.finalTeam || ''),
-          finalTeamId: typeof data.finalTeamId === 'string' ? data.finalTeamId : undefined,
-          finalTeamEscudo: typeof data.finalTeamEscudo === 'string' ? data.finalTeamEscudo : undefined,
-          stints: Array.isArray(data.stints) ? data.stints : [],
-          trophies: Array.isArray(data.trophies) ? data.trophies : [],
-          awards: Array.isArray(data.awards) ? data.awards : [],
-          weekKey: String(data.weekKey || ''),
-          createdAt: toIso(data.createdAt),
-        } satisfies LeyendasLeaderboardEntry;
-      })
+      .map((d) => mapLeyendasDoc(d))
       .sort((a, b) => b.score - a.score);
   } else {
     console.error('Error leyendo ranking semanal leyendas_leaderboard:', leyendasRes.reason);

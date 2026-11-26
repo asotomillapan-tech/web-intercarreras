@@ -5,6 +5,15 @@ import { validateRoleChange } from './domain/rbacEngine';
 import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tournamentEngine';
 import { applyStatDeltaClamped, type PlayerStatDelta } from './domain/liveMatchEngine';
 import {
+  CORE_REALTIME_STREAMS,
+  computeInitialSyncPhase,
+  mergePublicNewsPreservingDrafts,
+  mergePublicPlayersPreservingPii,
+  mergePublicTransfersPreservingPrivate,
+  type CoreRealtimeStreamKey,
+  type PublicRealtimeStreamKey,
+} from './domain/realtimeSyncEngine';
+import {
   getGoogleAccessToken,
   initGoogleAuth,
   signInWithGoogleBasic,
@@ -36,7 +45,6 @@ import {
   listDelegateFirestoreTransfers,
   listFirestoreUsers,
   loadAuthorizedPlayerPrivateMap,
-  loadPublicTournamentState,
   rejectFirestoreTransferRequest,
   saveFirestoreAwardNominees,
   saveFirestoreChampionshipMvpVote,
@@ -52,6 +60,7 @@ import {
   saveFirestoreTeam,
   saveFirestoreTotyBallot,
   saveFirestoreTotyConfig,
+  subscribeToPublicTournamentState,
   subscribeToTotyBallots,
   subscribeToTotyConfigs,
   syncGoogleUserToFirestore,
@@ -75,6 +84,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Footer } from './components/Footer';
 import { GalleryView } from './components/GalleryView';
 import { HomeView } from './components/HomeView';
+import { InitialLoadSkeleton } from './components/InitialLoadSkeleton';
 import { MatchMvpModal } from './components/MatchMvpModal';
 import { MinigamesView } from './components/MinigamesView';
 import { Navbar, type NavSection } from './components/Navbar';
@@ -123,11 +133,13 @@ function isPrivacyPath(pathname: string): boolean {
 }
 
 function AppContent() {
-  const [state, setState] = useState<TournamentState>(() => {
+  const [initialBoot] = useState<{ state: TournamentState; hasCachedSnapshot: boolean }>(() => {
     const base = createInitialTournamentState();
     const cached = loadCachedPublicTournamentState();
-    if (!cached?.data) return base;
-    return {
+    if (!cached?.data) {
+      return { state: base, hasCachedSnapshot: false };
+    }
+    const merged: TournamentState = {
       ...base,
       ...cached.data,
       configs: cached.data.configs ?? base.configs,
@@ -146,7 +158,15 @@ function AppContent() {
       news: cached.data.news ?? base.news,
       leyendasLeaderboard: cached.data.leyendasLeaderboard ?? base.leyendasLeaderboard,
     };
+    const hasMeaningfulData =
+      merged.teams.length > 0 ||
+      merged.players.length > 0 ||
+      merged.matches.length > 0 ||
+      merged.news.length > 0 ||
+      Boolean(merged.homeFeatured);
+    return { state: merged, hasCachedSnapshot: hasMeaningfulData };
   });
+  const [state, setState] = useState<TournamentState>(() => initialBoot.state);
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
     typeof window !== 'undefined' && isPrivacyPath(window.location.pathname)
       ? 'privacidad'
@@ -171,6 +191,33 @@ function AppContent() {
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [totyLastSyncAt, setTotyLastSyncAt] = useState<string | null>(null);
   const [totyRealtimeActive, setTotyRealtimeActive] = useState(false);
+
+  // Real-Time Initial Hydration State (prevents empty "0 equipos" flash on brand-new devices)
+  const [settledCoreStreams, setSettledCoreStreams] = useState<Set<CoreRealtimeStreamKey>>(
+    () => new Set()
+  );
+  const [failedCoreStreams, setFailedCoreStreams] = useState<Set<CoreRealtimeStreamKey>>(
+    () => new Set()
+  );
+  const [initialSyncTimedOut, setInitialSyncTimedOut] = useState(false);
+  const [initialSyncErrorDetail, setInitialSyncErrorDetail] = useState<string | null>(null);
+  const [realtimeRetryNonce, setRealtimeRetryNonce] = useState(0);
+
+  const initialSyncPhase = useMemo(
+    () =>
+      computeInitialSyncPhase({
+        hasCachedSnapshot: initialBoot.hasCachedSnapshot,
+        settledCoreStreams,
+        failedCoreStreams,
+        timedOut: initialSyncTimedOut,
+      }),
+    [
+      initialBoot.hasCachedSnapshot,
+      settledCoreStreams,
+      failedCoreStreams,
+      initialSyncTimedOut,
+    ]
+  );
 
   // Master Google Sheets Auto-Sync Engine (requires explicit session confirmation via ConfirmDialog)
   const [autoSyncSessionApproved, setAutoSyncSessionApproved] = useState(false);
@@ -208,92 +255,148 @@ function AppContent() {
     setCloudError(`${context}: ${detail}`);
   }, []);
 
-  const inFlightPublicSyncRef = useRef<Promise<Partial<TournamentState>> | null>(null);
-  const lastPublicSyncAtRef = useRef<number>(0);
+  const currentUserRoleRef = useRef<UserRole | null>(null);
 
-  const fetchPublicStateDeduped = useCallback(
-    async (force = false): Promise<Partial<TournamentState>> => {
-      if (inFlightPublicSyncRef.current) {
-        return inFlightPublicSyncRef.current;
-      }
-      if (!force && Date.now() - lastPublicSyncAtRef.current < 15_000) {
-        return {};
-      }
-      const promise = loadPublicTournamentState()
-        .then((cloud) => {
-          lastPublicSyncAtRef.current = Date.now();
-          return cloud;
-        })
-        .finally(() => {
-          inFlightPublicSyncRef.current = null;
-        });
-      inFlightPublicSyncRef.current = promise;
-      return promise;
-    },
-    []
-  );
-
-  const applyCloudPublicState = useCallback((cloud: Partial<TournamentState>) => {
-    if (!cloud || Object.keys(cloud).length === 0) return;
-    setState((prev) => {
-      const merged: TournamentState = {
-        ...prev,
-        temporada: cloud.temporada ?? prev.temporada,
-        homeFeatured: cloud.homeFeatured !== undefined ? cloud.homeFeatured : prev.homeFeatured,
-        driveUploadRootFolderId: cloud.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
-        driveUploadRootFolderName: cloud.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
-        masterSheets: cloud.masterSheets ?? prev.masterSheets,
-        autoSyncSheetsEnabled: cloud.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
-        lastSyncedSpreadsheetId: cloud.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
-        lastSyncedAt: cloud.lastSyncedAt ?? prev.lastSyncedAt,
-        configs: cloud.configs ?? prev.configs,
-        teams: cloud.teams ?? prev.teams,
-        players: cloud.players ?? prev.players,
-        matches: cloud.matches ?? prev.matches,
-        transfers: cloud.transfers ?? prev.transfers,
-        mvpVotes: cloud.mvpVotes ?? prev.mvpVotes,
-        awardNominees: cloud.awardNominees ?? prev.awardNominees,
-        championshipMvpVotes: cloud.championshipMvpVotes ?? prev.championshipMvpVotes,
-        positionAwardVotes: cloud.positionAwardVotes ?? prev.positionAwardVotes,
-        totyBallots: cloud.totyBallots ?? prev.totyBallots,
-        totyConfigs: cloud.totyConfigs ?? prev.totyConfigs,
-        photos: cloud.photos ?? prev.photos,
-        news: cloud.news ?? prev.news,
-        leyendasLeaderboard: cloud.leyendasLeaderboard ?? prev.leyendasLeaderboard,
-      };
-      saveCachedPublicTournamentState(merged);
-      return merged;
-    });
+  const handleRetryInitialSync = useCallback(() => {
+    setSettledCoreStreams(new Set());
+    setFailedCoreStreams(new Set());
+    setInitialSyncTimedOut(false);
+    setInitialSyncErrorDetail(null);
+    setCloudError(null);
+    setRealtimeRetryNonce((n) => n + 1);
   }, []);
 
-  // 1. Hydrate all public tournament data in background (stale-while-revalidate over localStorage cache)
+  // 1. Live Real-Time Firestore Subscriptions for all public tournament collections
+  // Any change published by an Admin, Referee, Delegate, or Press user propagates instantly across devices.
   useEffect(() => {
-    let active = true;
-    fetchPublicStateDeduped(true)
-      .then((cloud) => {
-        if (!active) return;
-        applyCloudPublicState(cloud);
-      })
-      .catch((err) => {
-        if (active) reportCloudError('Error cargando datos del campeonato', err);
+    const coreSet = new Set<string>(CORE_REALTIME_STREAMS);
+    const markCoreSettled = (key: CoreRealtimeStreamKey) => {
+      setSettledCoreStreams((prev) => {
+        if (prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.add(key);
+        return next;
       });
-    return () => {
-      active = false;
+      setFailedCoreStreams((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     };
-  }, [fetchPublicStateDeduped, applyCloudPublicState, reportCloudError]);
 
-  // 1A. Debounced persistence of public tournament snapshot to localStorage for instant subsequent loads
-  const didMountCacheRef = useRef(false);
+    const timeoutId = window.setTimeout(() => {
+      setInitialSyncTimedOut(true);
+    }, 10_000);
+
+    const unsubscribePublic = subscribeToPublicTournamentState({
+      onSettings: (patch) => {
+        setState((prev) => ({
+          ...prev,
+          temporada: patch.temporada ?? prev.temporada,
+          homeFeatured: patch.homeFeatured !== undefined ? patch.homeFeatured : prev.homeFeatured,
+          driveUploadRootFolderId: patch.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
+          driveUploadRootFolderName:
+            patch.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
+          masterSheets: patch.masterSheets ?? prev.masterSheets,
+          autoSyncSheetsEnabled: patch.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
+          lastSyncedSpreadsheetId: patch.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
+          lastSyncedAt: patch.lastSyncedAt ?? prev.lastSyncedAt,
+        }));
+        markCoreSettled('settings');
+      },
+      onConfigs: (configs) => {
+        setState((prev) => ({ ...prev, configs }));
+        markCoreSettled('configs');
+      },
+      onTeams: (teams) => {
+        setState((prev) => ({ ...prev, teams }));
+        markCoreSettled('teams');
+      },
+      onPlayers: (incomingPlayers) => {
+        setState((prev) => ({
+          ...prev,
+          players: mergePublicPlayersPreservingPii(prev.players, incomingPlayers),
+        }));
+        markCoreSettled('players');
+      },
+      onMatches: (matches) => {
+        setState((prev) => ({ ...prev, matches }));
+        markCoreSettled('matches');
+      },
+      onNews: (publishedNews) => {
+        const keepDrafts =
+          currentUserRoleRef.current === 'admin' || currentUserRoleRef.current === 'prensa';
+        setState((prev) => ({
+          ...prev,
+          news: mergePublicNewsPreservingDrafts(prev.news, publishedNews, keepDrafts),
+        }));
+        markCoreSettled('news');
+      },
+      onTransfers: (approvedTransfers) => {
+        const keepPrivate =
+          currentUserRoleRef.current === 'admin' || currentUserRoleRef.current === 'delegado';
+        setState((prev) => ({
+          ...prev,
+          transfers: mergePublicTransfersPreservingPrivate(
+            prev.transfers,
+            approvedTransfers,
+            keepPrivate
+          ),
+        }));
+      },
+      onPhotos: (photos) => {
+        setState((prev) => ({ ...prev, photos }));
+      },
+      onMvpVotes: (mvpVotes) => {
+        setState((prev) => ({ ...prev, mvpVotes }));
+      },
+      onAwardNominees: (awardNominees) => {
+        setState((prev) => ({ ...prev, awardNominees }));
+      },
+      onChampionshipMvpVotes: (championshipMvpVotes) => {
+        setState((prev) => ({ ...prev, championshipMvpVotes }));
+      },
+      onPositionAwardVotes: (positionAwardVotes) => {
+        setState((prev) => ({ ...prev, positionAwardVotes }));
+      },
+      onLeyendasLeaderboard: (leyendasLeaderboard) => {
+        setState((prev) => ({ ...prev, leyendasLeaderboard }));
+      },
+      onStreamError: (stream: PublicRealtimeStreamKey, err: unknown) => {
+        const detail =
+          err instanceof Error ? err.message : 'Error de conexión en tiempo real con Firestore.';
+        if (detail.toLowerCase().includes('quota exceeded')) {
+          reportCloudError('Cuota diaria de Firestore alcanzada', err);
+        }
+        if (coreSet.has(stream)) {
+          const coreKey = stream as CoreRealtimeStreamKey;
+          setFailedCoreStreams((prev) => {
+            if (prev.has(coreKey)) return prev;
+            const next = new Set(prev);
+            next.add(coreKey);
+            return next;
+          });
+          setInitialSyncErrorDetail((prev) => prev ?? detail);
+        }
+      },
+    });
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsubscribePublic();
+    };
+  }, [realtimeRetryNonce, reportCloudError]);
+
+  // 1A. Debounced persistence of public tournament snapshot to localStorage (only after initial hydration)
   useEffect(() => {
-    if (!didMountCacheRef.current) {
-      didMountCacheRef.current = true;
-      return;
-    }
+    if (initialSyncPhase !== 'ready') return;
     const timer = window.setTimeout(() => {
       saveCachedPublicTournamentState(state);
     }, 1200);
     return () => window.clearTimeout(timer);
   }, [
+    initialSyncPhase,
     state.temporada,
     state.homeFeatured,
     state.configs,
@@ -412,12 +515,9 @@ function AppContent() {
       async (firebaseUser) => {
         try {
           const profile = await syncGoogleUserToFirestore(firebaseUser);
-          let snapshotPlayers: Player[] = [];
-          let snapshotConfigs: Record<DisciplineId, DisciplineFormatConfig> = createInitialTournamentState().configs;
+          currentUserRoleRef.current = profile.role;
 
           setState((prev) => {
-            snapshotPlayers = prev.players;
-            snapshotConfigs = prev.configs;
             const exists = prev.users.some((u) => u.uid === profile.uid);
             const mergedUsers = exists
               ? prev.users.map((u) => (u.uid === profile.uid ? profile : u))
@@ -426,20 +526,17 @@ function AppContent() {
           });
           setCurrentUserUid(profile.uid);
 
-          // Deduplicate with mount fetch: await in-flight sync or reuse fresh snapshot
-          const freshPublic = await fetchPublicStateDeduped(false).catch(() => null);
-          if (freshPublic && Object.keys(freshPublic).length > 0) {
-            snapshotPlayers = freshPublic.players ?? snapshotPlayers;
-            snapshotConfigs = freshPublic.configs ?? snapshotConfigs;
-            applyCloudPublicState(freshPublic);
-          }
-
-          await hydrateForAuthenticatedProfile(profile, snapshotPlayers, snapshotConfigs);
+          await hydrateForAuthenticatedProfile(
+            profile,
+            stateRef.current.players,
+            stateRef.current.configs
+          );
         } catch (err) {
           reportCloudError('Error sincronizando sesión con Firestore', err);
         }
       },
       () => {
+        currentUserRoleRef.current = null;
         setCurrentUserUid(null);
         // Strip isolated PII, unpublished news drafts, and private transfer requests from memory on sign-out
         setState((prev) => ({
@@ -458,7 +555,7 @@ function AppContent() {
       }
     );
     return () => unsub();
-  }, [fetchPublicStateDeduped, applyCloudPublicState, hydrateForAuthenticatedProfile, reportCloudError]);
+  }, [hydrateForAuthenticatedProfile, reportCloudError]);
 
   // 2B. Real-time Firestore listeners for TOTY ballots & discipline formation configs
   useEffect(() => {
@@ -498,6 +595,51 @@ function AppContent() {
     if (!currentUserUid) return null;
     return state.users.find((u) => u.uid === currentUserUid) ?? null;
   }, [currentUserUid, state.users]);
+
+  useEffect(() => {
+    currentUserRoleRef.current = currentUser?.role ?? null;
+  }, [currentUser?.role]);
+
+  // 2C. Hydrate authorized student PII once players stream finishes arriving for signed-in staff/delegates/players
+  const piiHydratedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      piiHydratedKeyRef.current = null;
+      return;
+    }
+    if (
+      currentUser.role !== 'admin' &&
+      currentUser.role !== 'delegado' &&
+      currentUser.role !== 'jugador'
+    ) {
+      return;
+    }
+    if (state.players.length === 0) return;
+
+    const hydrationKey = `${currentUser.uid}:${currentUser.role}:${state.players.length}`;
+    if (piiHydratedKeyRef.current === hydrationKey) return;
+    piiHydratedKeyRef.current = hydrationKey;
+
+    let active = true;
+    loadAuthorizedPlayerPrivateMap(currentUser, state.players)
+      .then((privateMap) => {
+        if (!active || Object.keys(privateMap).length === 0) return;
+        setState((prev) => ({
+          ...prev,
+          players: prev.players.map((p) => {
+            const pii = privateMap[p.id];
+            return pii ? { ...p, ...pii } : p;
+          }),
+        }));
+      })
+      .catch((err) => {
+        console.error('Error hidratando datos privados de jugadores:', err);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser, state.players.length]);
 
   const handleClearDeletedTombstones = useCallback(() => {
     setDeletedTombstones({ teamIds: [], playerIds: [], matchIds: [] });
@@ -1566,185 +1708,195 @@ function AppContent() {
       )}
 
       <main className="flex-1">
-        {activeSection === 'inicio' && (
-          <HomeView
-            state={state}
-            currentUser={currentUser}
-            selectedDiscipline={selectedDiscipline}
-            editorialPhotos={editorialPhotos}
-            onSelectDiscipline={setSelectedDiscipline}
-            onNavigate={handleNavigate}
-            onInspectPlayer={handleInspectPlayerFromHome}
-            onInspectTeam={setInspectedTeamId}
-            onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
-            onOpenMatchInReferee={handleOpenMatchInReferee}
-            onOpenNewsArticle={setActiveNewsArticle}
-            onOpenNewsManager={handleOpenNewsManager}
-            onOpenFeaturedManager={handleOpenFeaturedManager}
-            onToggleFavoriteTeam={handleToggleFavoriteTeam}
-            onOpenAuth={() => setAuthModalOpen(true)}
+        {activeSection !== 'privacidad' && initialSyncPhase !== 'ready' ? (
+          <InitialLoadSkeleton
+            phase={initialSyncPhase}
+            errorDetail={initialSyncErrorDetail}
+            onRetry={handleRetryInitialSync}
           />
-        )}
+        ) : (
+          <>
+            {activeSection === 'inicio' && (
+              <HomeView
+                state={state}
+                currentUser={currentUser}
+                selectedDiscipline={selectedDiscipline}
+                editorialPhotos={editorialPhotos}
+                onSelectDiscipline={setSelectedDiscipline}
+                onNavigate={handleNavigate}
+                onInspectPlayer={handleInspectPlayerFromHome}
+                onInspectTeam={setInspectedTeamId}
+                onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
+                onOpenMatchInReferee={handleOpenMatchInReferee}
+                onOpenNewsArticle={setActiveNewsArticle}
+                onOpenNewsManager={handleOpenNewsManager}
+                onOpenFeaturedManager={handleOpenFeaturedManager}
+                onToggleFavoriteTeam={handleToggleFavoriteTeam}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'posiciones' && (
-          <StandingsView
-            state={state}
-            currentUser={currentUser}
-            selectedDiscipline={selectedDiscipline}
-            onSelectDiscipline={setSelectedDiscipline}
-            onInspectTeam={setInspectedTeamId}
-            onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
-            onToggleFavoriteTeam={handleToggleFavoriteTeam}
-            onOpenAuth={() => setAuthModalOpen(true)}
-          />
-        )}
+            {activeSection === 'posiciones' && (
+              <StandingsView
+                state={state}
+                currentUser={currentUser}
+                selectedDiscipline={selectedDiscipline}
+                onSelectDiscipline={setSelectedDiscipline}
+                onInspectTeam={setInspectedTeamId}
+                onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
+                onToggleFavoriteTeam={handleToggleFavoriteTeam}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'equipos' && (
-          <TeamsView
-            state={state}
-            selectedDiscipline={selectedDiscipline}
-            onSelectDiscipline={setSelectedDiscipline}
-            onOpenTeamProfile={(team) => setInspectedTeamId(team.id)}
-          />
-        )}
+            {activeSection === 'equipos' && (
+              <TeamsView
+                state={state}
+                selectedDiscipline={selectedDiscipline}
+                onSelectDiscipline={setSelectedDiscipline}
+                onOpenTeamProfile={(team) => setInspectedTeamId(team.id)}
+              />
+            )}
 
-        {activeSection === 'jugadores' && (
-          <PlayersView
-            state={state}
-            currentUser={currentUser}
-            selectedPlayer={inspectedPlayer}
-            onSelectPlayer={setInspectedPlayer}
-            onInspectTeam={setInspectedTeamId}
-            onUpdatePlayer={handleUpdatePlayer}
-          />
-        )}
+            {activeSection === 'jugadores' && (
+              <PlayersView
+                state={state}
+                currentUser={currentUser}
+                selectedPlayer={inspectedPlayer}
+                onSelectPlayer={setInspectedPlayer}
+                onInspectTeam={setInspectedTeamId}
+                onUpdatePlayer={handleUpdatePlayer}
+              />
+            )}
 
-        {activeSection === 'votaciones' && (
-          <VotationsView
-            state={state}
-            selectedDiscipline={selectedDiscipline}
-            currentUser={currentUser}
-            onSelectDiscipline={setSelectedDiscipline}
-            onOpenAuth={() => setAuthModalOpen(true)}
-            onOpenMatchMvp={(match) => setActiveMatchModalId(match.id)}
-            onVoteChampionshipMvp={handleVoteChampionshipMvp}
-            onVotePositionAward={handleVotePositionAward}
-            onSubmitTotyBallot={handleSubmitTotyBallot}
-          />
-        )}
+            {activeSection === 'votaciones' && (
+              <VotationsView
+                state={state}
+                selectedDiscipline={selectedDiscipline}
+                currentUser={currentUser}
+                onSelectDiscipline={setSelectedDiscipline}
+                onOpenAuth={() => setAuthModalOpen(true)}
+                onOpenMatchMvp={(match) => setActiveMatchModalId(match.id)}
+                onVoteChampionshipMvp={handleVoteChampionshipMvp}
+                onVotePositionAward={handleVotePositionAward}
+                onSubmitTotyBallot={handleSubmitTotyBallot}
+              />
+            )}
 
-        {activeSection === 'minijuegos' && (
-          <MinigamesView
-            state={state}
-            currentUser={currentUser}
-            onOpenAuth={() => setAuthModalOpen(true)}
-            onSaveLeyendasEntry={handleSaveLeyendasEntry}
-          />
-        )}
+            {activeSection === 'minijuegos' && (
+              <MinigamesView
+                state={state}
+                currentUser={currentUser}
+                onOpenAuth={() => setAuthModalOpen(true)}
+                onSaveLeyendasEntry={handleSaveLeyendasEntry}
+              />
+            )}
 
-        {activeSection === 'galeria' && (
-          <GalleryView
-            state={state}
-            currentUser={currentUser}
-            onAddPhoto={handleAddPhoto}
-            onDeletePhoto={handleDeletePhoto}
-            onSaveDriveRootFolder={handleSaveDriveRootFolder}
-            onOpenAuth={() => setAuthModalOpen(true)}
-          />
-        )}
+            {activeSection === 'galeria' && (
+              <GalleryView
+                state={state}
+                currentUser={currentUser}
+                onAddPhoto={handleAddPhoto}
+                onDeletePhoto={handleDeletePhoto}
+                onSaveDriveRootFolder={handleSaveDriveRootFolder}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'inscripciones' && (
-          <RegistrationView
-            state={state}
-            currentUser={currentUser}
-            onRegisterTeam={handleRegisterTeam}
-            onUpdateTeam={handleUpdateTeam}
-            onUpdatePlayer={handleUpdatePlayer}
-            onAddPlayerToTeam={handleAddPlayerToTeam}
-            onOpenSheetsSync={handleOpenSheetsSync}
-            onOpenAuth={() => setAuthModalOpen(true)}
-          />
-        )}
+            {activeSection === 'inscripciones' && (
+              <RegistrationView
+                state={state}
+                currentUser={currentUser}
+                onRegisterTeam={handleRegisterTeam}
+                onUpdateTeam={handleUpdateTeam}
+                onUpdatePlayer={handleUpdatePlayer}
+                onAddPlayerToTeam={handleAddPlayerToTeam}
+                onOpenSheetsSync={handleOpenSheetsSync}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'transferencias' && (
-          <TransfersView
-            state={state}
-            currentUser={currentUser}
-            onCreateTransferRequest={handleCreateTransferRequest}
-            onApproveTransferRequest={handleApproveTransferRequest}
-            onRejectTransferRequest={handleRejectTransferRequest}
-            onNavigate={handleNavigate}
-            onOpenAuth={() => setAuthModalOpen(true)}
-          />
-        )}
+            {activeSection === 'transferencias' && (
+              <TransfersView
+                state={state}
+                currentUser={currentUser}
+                onCreateTransferRequest={handleCreateTransferRequest}
+                onApproveTransferRequest={handleApproveTransferRequest}
+                onRejectTransferRequest={handleRejectTransferRequest}
+                onNavigate={handleNavigate}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'transferencias-publicas' && (
-          <PublicTransfersView
-            state={state}
-            currentUser={currentUser}
-            onInspectTeam={setInspectedTeamId}
-            onNavigate={handleNavigate}
-          />
-        )}
+            {activeSection === 'transferencias-publicas' && (
+              <PublicTransfersView
+                state={state}
+                currentUser={currentUser}
+                onInspectTeam={setInspectedTeamId}
+                onNavigate={handleNavigate}
+              />
+            )}
 
-        {activeSection === 'cuenta' && (
-          <AccountView
-            state={state}
-            currentUser={currentUser}
-            onOpenAuth={() => setAuthModalOpen(true)}
-            onToggleFavoriteTeam={handleToggleFavoriteTeam}
-            onToggleNotifications={handleToggleNotifications}
-            onUpdateUserProfile={handleUpdateUserProfile}
-            onUpdatePlayerProfile={handleUpdatePlayer}
-            onInspectTeam={setInspectedTeamId}
-            onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
-            onNavigate={handleNavigate}
-          />
-        )}
+            {activeSection === 'cuenta' && (
+              <AccountView
+                state={state}
+                currentUser={currentUser}
+                onOpenAuth={() => setAuthModalOpen(true)}
+                onToggleFavoriteTeam={handleToggleFavoriteTeam}
+                onToggleNotifications={handleToggleNotifications}
+                onUpdateUserProfile={handleUpdateUserProfile}
+                onUpdatePlayerProfile={handleUpdatePlayer}
+                onInspectTeam={setInspectedTeamId}
+                onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
+                onNavigate={handleNavigate}
+              />
+            )}
 
-        {activeSection === 'panel' && (
-          <AdminRefereeView
-            state={state}
-            currentUser={currentUser}
-            editorialPhotos={editorialPhotos}
-            initialSubTab={panelInitialSubTab}
-            focusedMatchId={focusedMatchId}
-            pendingSyncKeys={pendingSyncKeys}
-            deletedIds={deletedTombstones}
-            autoSyncSessionApproved={autoSyncSessionApproved}
-            autoSyncState={autoSyncState}
-            onUpdateMatch={handleUpdateMatch}
-            onAddMatch={handleAdminAddMatch}
-            onAddTeam={handleAdminAddTeam}
-            onUpdateTeam={handleUpdateTeam}
-            onDeleteTeam={handleAdminDeleteTeam}
-            onAddPlayer={handleAddPlayerToTeam}
-            onUpdatePlayer={handleUpdatePlayer}
-            onDeletePlayer={handleDeletePlayer}
-            onAddNews={handleAddNews}
-            onUpdateNews={handleUpdateNews}
-            onDeleteNews={handleDeleteNews}
-            onUpdateConfig={handleUpdateConfig}
-            onSaveMasterSheets={handleSaveMasterSheets}
-            onApproveAutoSyncSession={setAutoSyncSessionApproved}
-            onClearPendingSyncKeys={handleClearPendingSyncKeys}
-            onClearDeletedTombstones={handleClearDeletedTombstones}
-            onApplySheetImports={handleApplySheetImports}
-            onMarkSynced={handleMarkSynced}
-            onAdminChangeUserRole={handleAdminChangeUserRole}
-            onSaveAwardNominees={handleSaveAwardNominees}
-            totyLastSyncAt={totyLastSyncAt}
-            totyRealtimeActive={totyRealtimeActive}
-            onSaveTotyConfig={handleSaveTotyConfig}
-            onResetTotyConfig={handleResetTotyConfig}
-            onSaveHomeFeatured={handleSaveHomeFeatured}
-            onRefreshUsers={handleRefreshUsers}
-            onOpenAuth={() => setAuthModalOpen(true)}
-          />
-        )}
+            {activeSection === 'panel' && (
+              <AdminRefereeView
+                state={state}
+                currentUser={currentUser}
+                editorialPhotos={editorialPhotos}
+                initialSubTab={panelInitialSubTab}
+                focusedMatchId={focusedMatchId}
+                pendingSyncKeys={pendingSyncKeys}
+                deletedIds={deletedTombstones}
+                autoSyncSessionApproved={autoSyncSessionApproved}
+                autoSyncState={autoSyncState}
+                onUpdateMatch={handleUpdateMatch}
+                onAddMatch={handleAdminAddMatch}
+                onAddTeam={handleAdminAddTeam}
+                onUpdateTeam={handleUpdateTeam}
+                onDeleteTeam={handleAdminDeleteTeam}
+                onAddPlayer={handleAddPlayerToTeam}
+                onUpdatePlayer={handleUpdatePlayer}
+                onDeletePlayer={handleDeletePlayer}
+                onAddNews={handleAddNews}
+                onUpdateNews={handleUpdateNews}
+                onDeleteNews={handleDeleteNews}
+                onUpdateConfig={handleUpdateConfig}
+                onSaveMasterSheets={handleSaveMasterSheets}
+                onApproveAutoSyncSession={setAutoSyncSessionApproved}
+                onClearPendingSyncKeys={handleClearPendingSyncKeys}
+                onClearDeletedTombstones={handleClearDeletedTombstones}
+                onApplySheetImports={handleApplySheetImports}
+                onMarkSynced={handleMarkSynced}
+                onAdminChangeUserRole={handleAdminChangeUserRole}
+                onSaveAwardNominees={handleSaveAwardNominees}
+                totyLastSyncAt={totyLastSyncAt}
+                totyRealtimeActive={totyRealtimeActive}
+                onSaveTotyConfig={handleSaveTotyConfig}
+                onResetTotyConfig={handleResetTotyConfig}
+                onSaveHomeFeatured={handleSaveHomeFeatured}
+                onRefreshUsers={handleRefreshUsers}
+                onOpenAuth={() => setAuthModalOpen(true)}
+              />
+            )}
 
-        {activeSection === 'privacidad' && (
-          <PrivacyPolicyView onNavigate={handleNavigate} />
+            {activeSection === 'privacidad' && (
+              <PrivacyPolicyView onNavigate={handleNavigate} />
+            )}
+          </>
         )}
       </main>
 

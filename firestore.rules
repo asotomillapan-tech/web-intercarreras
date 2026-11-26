@@ -1625,7 +1625,7 @@ service cloud.firestore {
     // --- Collection 10: /mvp_votes/{voteId} (Live-Hour MVP Voting for All Roles) ---
     match /mvp_votes/{voteId} {
       allow get: if isValidId(voteId);
-      allow list: if resource.data.matchId is string && resource.data.matchId.size() <= 128;
+      allow list: if isValidDiscipline(resource.data.disciplineId);
 
       allow create: if isVerified()
         && isValidId(voteId)
@@ -1657,7 +1657,7 @@ service cloud.firestore {
     // --- Collection 11: /photos/{photoId} (Official Photography Index + Drive Links) ---
     match /photos/{photoId} {
       allow get: if isValidId(photoId);
-      allow list: if resource.data.season is string && resource.data.season.size() <= 16;
+      allow list: if resource.data.source in ['upload', 'drive'];
 
       allow create: if isVerified()
         && isValidId(photoId)
