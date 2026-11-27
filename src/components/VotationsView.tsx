@@ -48,6 +48,7 @@ import { RevealSection, SectionKicker } from './MotionPrimitives';
 import { TeamCrest } from './TeamCrest';
 import {
   TotyCoBrandLockup,
+  TotyCrestBadge,
   TotyDoubleShieldFrame,
   TotyWordmark,
 } from './TotyVisuals';
@@ -987,17 +988,19 @@ export function VotationsView({
                     >
                       {tab.label}
                     </span>
-                    <Icon
-                      className={`w-4 h-4 shrink-0 ${
-                        isActive
-                          ? isTotyTab
-                            ? 'text-[#dbeeff]'
-                            : 'text-[#707ef9]'
-                          : isTotyTab
-                          ? 'text-[#8bbaff]'
-                          : 'text-zinc-500'
-                      }`}
-                    />
+                    {isTotyTab ? (
+                      <TotyCrestBadge
+                        className={`h-5 w-auto shrink-0 transition-opacity ${
+                          isActive ? 'opacity-100' : 'opacity-75'
+                        }`}
+                      />
+                    ) : (
+                      <Icon
+                        className={`w-4 h-4 shrink-0 ${
+                          isActive ? 'text-[#707ef9]' : 'text-zinc-500'
+                        }`}
+                      />
+                    )}
                   </div>
                   <p
                     className={`text-xs mt-1 ${
@@ -1667,14 +1670,15 @@ export function VotationsView({
         {activeTab === 'toty' && (
           <div className="space-y-6">
             {/* Bespoke TOTYs Cobalt-Sapphire-Ice Editorial Banner */}
-            <div className="relative overflow-hidden rounded-[2rem] toty-stage-bg border border-[#9ec8ff]/28 shadow-[0_28px_72px_-36px_rgba(24,78,224,0.72)]">
+            <div className="relative overflow-hidden rounded-[2rem] toty-stage-bg border border-[#9ec8ff]/30 shadow-[0_28px_72px_-36px_rgba(24,78,224,0.72)]">
               <div aria-hidden="true" className="absolute inset-0 toty-grain" />
 
+              {/* Official Escudo_TOTY architectural frame motif */}
               <div
                 aria-hidden="true"
-                className="pointer-events-none hidden md:block absolute right-10 lg:right-20 top-1/2 -translate-y-1/2 w-[250px] h-[305px] opacity-28"
+                className="pointer-events-none hidden md:flex items-center justify-center absolute right-14 lg:right-52 top-1/2 -translate-y-1/2 h-[86%] opacity-34"
               >
-                <TotyDoubleShieldFrame />
+                <TotyDoubleShieldFrame className="h-full w-auto" />
               </div>
 
               <div className="relative z-10 p-6 sm:p-8 lg:p-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -1720,17 +1724,20 @@ export function VotationsView({
               {/* Left: Tactical Full-Formation TOTYs Board */}
               <div className="lg:col-span-7 rounded-3xl bg-[#060b1d] text-white border border-[#9ec8ff]/24 overflow-hidden shadow-[0_24px_60px_-34px_rgba(20,66,204,0.6)]">
                 <div className="px-6 py-5 border-b border-[#9ec8ff]/16 bg-gradient-to-r from-[#08102a] via-[#0c1d54]/85 to-[#08102a] flex flex-wrap items-center justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-[#9ec8ff] font-medium flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-[#b8dcff]" />
-                      <span>
-                        {totyFormation.formationName} · {discMeta.nombreCorto}
-                      </span>
-                    </p>
-                    <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.025em] text-white">
-                      {totyBoardMode === 'community' ? 'TOTY Oficial ' : 'Tu formación '}
-                      <span className="font-editorial text-[#b8dcff]">{state.temporada}</span>
-                    </h2>
+                  <div className="flex items-center gap-3.5">
+                    <TotyCrestBadge className="h-9 w-auto opacity-90 shrink-0" />
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-[#9ec8ff] font-medium flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#b8dcff]" />
+                        <span>
+                          {totyFormation.formationName} · {discMeta.nombreCorto}
+                        </span>
+                      </p>
+                      <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.025em] text-white">
+                        {totyBoardMode === 'community' ? 'TOTY Oficial ' : 'Tu formación '}
+                        <span className="font-editorial text-[#b8dcff]">{state.temporada}</span>
+                      </h2>
+                    </div>
                   </div>
 
                   <div className="inline-flex rounded-full border border-[#9ec8ff]/25 bg-[#040919]/80 p-1">
@@ -1762,6 +1769,14 @@ export function VotationsView({
                 {/* Tactical Pitch / Court Surface */}
                 <div className="relative p-5 sm:p-6 toty-pitch-bg overflow-hidden">
                   <div aria-hidden="true" className="absolute inset-0 toty-grain opacity-60" />
+
+                  {/* Official Escudo_TOTY centered crest aura behind the tactical lineup */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.14]"
+                  >
+                    <TotyDoubleShieldFrame className="h-[88%] w-auto" />
+                  </div>
 
                   <svg
                     aria-hidden="true"
@@ -1998,8 +2013,9 @@ export function VotationsView({
               <div className="lg:col-span-5 rounded-3xl bg-[#070d20] border border-[#9ec8ff]/24 p-6 space-y-5 shadow-[0_24px_60px_-34px_rgba(20,66,204,0.5)]">
                 <div className="border-b border-[#9ec8ff]/16 pb-4 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-[#9ec8ff] font-medium">
-                      Tu papeleta · {totyFormation.formationName}
+                    <p className="text-xs text-[#9ec8ff] font-medium flex items-center gap-2">
+                      <TotyCrestBadge className="h-4 w-auto opacity-90" />
+                      <span>Tu papeleta · {totyFormation.formationName}</span>
                     </p>
                     <span className="text-xs font-mono text-[#dbeeff] tabular-nums">
                       {totySelectedCount}/{totyFormation.slots.length}

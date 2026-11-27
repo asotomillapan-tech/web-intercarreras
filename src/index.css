@@ -251,6 +251,30 @@
   box-shadow: 0 12px 28px -14px rgba(45, 108, 245, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
+.toty-mask-logo {
+  background: linear-gradient(180deg, #ffffff 0%, #dbeeff 50%, #8bbaff 100%);
+  -webkit-mask-image: url('/assets/aistudio/Logo_TOTY_0430e247.svg');
+  mask-image: url('/assets/aistudio/Logo_TOTY_0430e247.svg');
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: left center;
+  mask-position: left center;
+}
+
+.toty-mask-shield {
+  background: linear-gradient(180deg, rgba(235, 246, 255, 0.96) 0%, rgba(164, 206, 255, 0.62) 52%, rgba(212, 234, 255, 0.92) 100%);
+  -webkit-mask-image: url('/assets/aistudio/Escudo_TOTY_f61c43b6.svg');
+  mask-image: url('/assets/aistudio/Escudo_TOTY_f61c43b6.svg');
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

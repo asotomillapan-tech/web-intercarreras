@@ -66,12 +66,12 @@ export function HomeTotySpotlight({
           {/* Fine monochrome grain matching the TOTYs identity */}
           <div aria-hidden="true" className="absolute inset-0 toty-grain" />
 
-          {/* Architectural double-shield background accent */}
+          {/* Architectural official Escudo_TOTY background accent */}
           <div
             aria-hidden="true"
-            className="pointer-events-none hidden lg:block absolute right-[24%] top-1/2 -translate-y-1/2 w-[310px] h-[380px] opacity-30"
+            className="pointer-events-none hidden lg:flex items-center justify-center absolute right-[31%] top-1/2 -translate-y-1/2 h-[88%] opacity-35"
           >
-            <TotyDoubleShieldFrame />
+            <TotyDoubleShieldFrame className="h-full w-auto" />
           </div>
 
           <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 p-7 sm:p-10 lg:p-12 items-center">
