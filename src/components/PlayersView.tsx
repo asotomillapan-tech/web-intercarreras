@@ -1,4 +1,14 @@
-import { useDeferredValue, useEffect, useMemo, useState, type FormEvent } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type FormEvent,
+} from 'react';
 import {
   Award,
   CheckCircle2,
@@ -10,12 +20,18 @@ import {
   User,
   X,
 } from 'lucide-react';
+import {
+  TableVirtuoso,
+  type TableComponents,
+  type TableVirtuosoHandle,
+} from 'react-virtuoso';
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
 import { computePlayerAttendanceSummary } from '../domain/attendanceEngine';
 import {
   buildUnifiedPlayers,
   findPlayerParticipations,
   normalizeTextToken,
+  type UnifiedPlayerProfile,
 } from '../domain/identityCrossRefEngine';
 import { computePlayerSeasonPerformance } from '../domain/playerPerformanceEngine';
 import { canEditPlayerProfile } from '../domain/rbacEngine';
@@ -38,7 +54,55 @@ interface PlayersViewProps {
   onUpdatePlayer: (updated: Player) => void;
 }
 
-const PAGE_SIZE = 40;
+const getPlayerInitials = (p: Player) =>
+  `${p.nombre[0] ?? ''}${p.apellidoPaterno[0] ?? ''}`.toUpperCase();
+
+const VIRTUOSO_TABLE_COMPONENTS: TableComponents<UnifiedPlayerProfile> = {
+  Scroller: forwardRef<HTMLDivElement, ComponentProps<'div'> & { context?: unknown }>(
+    function VirtuosoScroller({ context: _context, className, ...props }, ref) {
+      return (
+        <div
+          {...props}
+          ref={ref}
+          className={`overflow-x-auto bg-white ${className ?? ''}`}
+        />
+      );
+    }
+  ),
+  Table: ({ context: _context, ...props }) => (
+    <table {...props} className="w-full text-left border-collapse text-sm" />
+  ),
+  TableHead: forwardRef<
+    HTMLTableSectionElement,
+    ComponentProps<'thead'> & { context?: unknown }
+  >(function VirtuosoTableHead({ context: _context, ...props }, ref) {
+    return <thead {...props} ref={ref} className="bg-[#f5f6f8] z-10" />;
+  }),
+  TableRow: ({ item: _item, context: _context, ...props }) => (
+    <tr
+      {...props}
+      className="border-b border-neutral-200 hover:bg-[#f9fafb] transition-colors bg-white"
+    />
+  ),
+  TableBody: forwardRef<
+    HTMLTableSectionElement,
+    ComponentProps<'tbody'> & { context?: unknown }
+  >(function VirtuosoTableBody({ context: _context, ...props }, ref) {
+    return <tbody {...props} ref={ref} />;
+  }),
+};
+
+const renderPlayersTableHeader = () => (
+  <tr className="bg-[#f5f6f8] text-xs text-neutral-500 uppercase shadow-[inset_0_-1px_0_0_#e5e5e5]">
+    <th className="py-3 px-4 font-medium bg-[#f5f6f8]">Estudiante</th>
+    <th className="py-3 px-3 font-medium bg-[#f5f6f8]">Equipos y Disciplinas</th>
+    <th className="py-3 px-3 hidden md:table-cell font-medium bg-[#f5f6f8]">Carrera / Nivel</th>
+    <th className="py-3 px-3 hidden lg:table-cell font-medium bg-[#f5f6f8]">RUT</th>
+    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#f5f6f8]">PJ</th>
+    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#f5f6f8]">Rendimiento</th>
+    <th className="py-3 px-4 text-right font-medium bg-[#f5f6f8]">Ficha</th>
+  </tr>
+);
 
 export function PlayersView({
   state,
@@ -54,7 +118,7 @@ export function PlayersView({
   const [facultyFilter, setFacultyFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<'ALL' | AcademicLevel>('ALL');
   const [onlySelectedUfro, setOnlySelectedUfro] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const virtuosoRef = useRef<TableVirtuosoHandle>(null);
 
   // Inline edit state for authorized roles (admin, delegate of same team, or player editing self)
   const [isEditing, setIsEditing] = useState(false);
@@ -173,9 +237,9 @@ export function PlayersView({
     setEditSaved(null);
   }, [activeParticipationRecord?.id]);
 
-  // Reset pagination when filters change
+  // Reset virtualized scroll position to top when filters change
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
+    virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'auto' });
   }, [deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
 
   const canEditSelected = activeParticipationRecord
@@ -252,16 +316,122 @@ export function PlayersView({
     return results;
   }, [indexedProfiles, deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
 
-  const filteredProfiles = useMemo(
-    () => matchedProfiles.slice(0, visibleCount),
-    [matchedProfiles, visibleCount]
+  const renderPlayerRow = useCallback(
+    (_index: number, profile: UnifiedPlayerProfile) => {
+      const focusedParticipation =
+        disciplineFilter !== 'ALL'
+          ? profile.participations.find((p) => p.disciplineId === disciplineFilter) ??
+            profile.participations[0]
+          : profile.participations[0];
+      const player = focusedParticipation.player;
+      const primary = profile.primaryRecord;
+      const disc = DISCIPLINE_MAP[player.disciplineId];
+      const statLabel =
+        disc.sportType === 'futbol7'
+          ? `${player.stats.goles}G / ${player.stats.asistencias}A`
+          : disc.sportType === 'voleibol'
+          ? `${player.stats.puntos} Pts / ${player.stats.aces} Aces`
+          : `${player.stats.puntos} Pts / ${player.stats.rebotes} Reb`;
+      const isMulti = profile.participations.length > 1;
+
+      return (
+        <>
+          <td className="py-3.5 px-4">
+            <div className="flex items-center gap-3">
+              {primary.fotografia ? (
+                <img
+                  src={primary.fotografia}
+                  alt={`${primary.nombre} ${primary.apellidoPaterno}`}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-9 h-9 object-cover border border-neutral-200 shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-9 h-9 bg-[#0d0d0d] text-white font-display text-xs font-bold flex items-center justify-center shrink-0">
+                  {getPlayerInitials(primary)}
+                </div>
+              )}
+              <div>
+                <p className="font-bold text-[#0d0d0d]">
+                  {primary.nombre} {primary.apellidoPaterno}
+                  {primary.apellidoMaterno && !/^[-–—\s.]+$/.test(primary.apellidoMaterno)
+                    ? ` ${primary.apellidoMaterno}`
+                    : ''}
+                </p>
+                <p className="text-xs text-neutral-500">
+                  #{player.dorsal} · {player.posicion}
+                  {isMulti && (
+                    <span className="text-[#707ef9] font-medium">
+                      {' '}· {profile.participations.length} equipos
+                    </span>
+                  )}
+                  {profile.esSeleccionadoUfro && (
+                    <span className="text-[#707ef9] font-medium"> · Seleccionado UFRO</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </td>
+          <td className="py-3.5 px-3">
+            <div className="space-y-1.5">
+              {profile.participations.map((part) => {
+                const partDisc = DISCIPLINE_MAP[part.disciplineId];
+                return (
+                  <div key={part.player.id} className="leading-tight">
+                    <button
+                      type="button"
+                      onClick={() => onInspectTeam(part.player.teamId)}
+                      className="text-left group cursor-pointer"
+                    >
+                      <span className="font-medium text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors">
+                        {part.team?.nombre ?? part.player.teamId}
+                      </span>
+                      <span className="text-xs text-neutral-500 ml-1.5">
+                        · {partDisc.nombreCorto} (#{part.player.dorsal})
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </td>
+          <td className="py-3.5 px-3 hidden md:table-cell">
+            <p className="text-xs text-[#0d0d0d]">{primary.carrera}</p>
+            <p className="text-xs text-neutral-500">{primary.nivelAcademico}</p>
+          </td>
+          <td className="py-3.5 px-3 hidden lg:table-cell text-xs tabular-nums text-neutral-600">
+            {primary.rut || 'Reservado'}
+          </td>
+          <td className="py-3.5 px-3 text-right tabular-nums text-neutral-700">
+            {disciplineFilter !== 'ALL'
+              ? player.stats.partidosJugados
+              : profile.totalPartidosJugados}
+          </td>
+          <td className="py-3.5 px-3 text-right tabular-nums font-medium text-[#0d0d0d]">
+            <span>{statLabel}</span>
+            {isMulti && disciplineFilter === 'ALL' && (
+              <span className="block text-[10px] font-normal text-neutral-500">
+                {disc.nombreCorto}
+              </span>
+            )}
+          </td>
+          <td className="py-3.5 px-4 text-right">
+            <button
+              type="button"
+              onClick={() => onSelectPlayer(player)}
+              className="text-xs font-display font-bold uppercase tracking-wider text-[#707ef9] hover:text-[#0d0d0d] cursor-pointer"
+            >
+              Ver perfil
+            </button>
+          </td>
+        </>
+      );
+    },
+    [disciplineFilter, onInspectTeam, onSelectPlayer]
   );
 
-  const hasMoreProfiles = filteredProfiles.length < matchedProfiles.length;
-  const remainingProfilesCount = matchedProfiles.length - filteredProfiles.length;
-
-  const getInitials = (p: Player) =>
-    `${p.nombre[0] ?? ''}${p.apellidoPaterno[0] ?? ''}`.toUpperCase();
+  const getInitials = getPlayerInitials;
 
   return (
     <div className="bg-white min-h-[75vh]">
@@ -359,10 +529,10 @@ export function PlayersView({
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 mb-4">
           <span className="tabular-nums">
-            Mostrando {filteredProfiles.length} de {matchedProfiles.length} perfiles
+            Mostrando {matchedProfiles.length}
             {matchedProfiles.length !== unifiedPlayers.length
-              ? ` (${unifiedPlayers.length} totales)`
-              : ' únicos'}
+              ? ` de ${unifiedPlayers.length} perfiles`
+              : ' perfiles únicos'}
             {multiTeamPlayerCount > 0 && (
               <span className="text-[#707ef9] font-medium">
                 {' '}· {multiTeamPlayerCount} participan en múltiples equipos/disciplinas
@@ -372,7 +542,7 @@ export function PlayersView({
           <span>Haz clic en un jugador para abrir su ficha unificada UFRO</span>
         </div>
 
-        {filteredProfiles.length === 0 ? (
+        {matchedProfiles.length === 0 ? (
           <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-3">
             <p className="font-display text-xl uppercase text-[#0d0d0d]">
               {state.players.length === 0
@@ -401,151 +571,27 @@ export function PlayersView({
             )}
           </div>
         ) : (
-          <div className="border border-neutral-200 overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="bg-[#f5f6f8] border-b border-neutral-200 text-xs text-neutral-500 uppercase">
-                  <th className="py-3 px-4 font-medium">Estudiante</th>
-                  <th className="py-3 px-3 font-medium">Equipos y Disciplinas</th>
-                  <th className="py-3 px-3 hidden md:table-cell font-medium">Carrera / Nivel</th>
-                  <th className="py-3 px-3 hidden lg:table-cell font-medium">RUT</th>
-                  <th className="py-3 px-3 text-right font-medium tabular-nums">PJ</th>
-                  <th className="py-3 px-3 text-right font-medium tabular-nums">Rendimiento</th>
-                  <th className="py-3 px-4 text-right font-medium">Ficha</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-200">
-                {filteredProfiles.map((profile) => {
-                  const focusedParticipation =
-                    disciplineFilter !== 'ALL'
-                      ? profile.participations.find((p) => p.disciplineId === disciplineFilter) ??
-                        profile.participations[0]
-                      : profile.participations[0];
-                  const player = focusedParticipation.player;
-                  const primary = profile.primaryRecord;
-                  const disc = DISCIPLINE_MAP[player.disciplineId];
-                  const statLabel =
-                    disc.sportType === 'futbol7'
-                      ? `${player.stats.goles}G / ${player.stats.asistencias}A`
-                      : disc.sportType === 'voleibol'
-                      ? `${player.stats.puntos} Pts / ${player.stats.aces} Aces`
-                      : `${player.stats.puntos} Pts / ${player.stats.rebotes} Reb`;
-                  const isMulti = profile.participations.length > 1;
-
-                  return (
-                    <tr
-                      key={profile.personKey}
-                      className="hover:bg-[#f9fafb] transition-colors"
-                    >
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-3">
-                          {primary.fotografia ? (
-                            <img
-                              src={primary.fotografia}
-                              alt={`${primary.nombre} ${primary.apellidoPaterno}`}
-                              loading="lazy"
-                              decoding="async"
-                              className="w-9 h-9 object-cover border border-neutral-200 shrink-0"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="w-9 h-9 bg-[#0d0d0d] text-white font-display text-xs font-bold flex items-center justify-center shrink-0">
-                              {getInitials(primary)}
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-bold text-[#0d0d0d]">
-                              {primary.nombre} {primary.apellidoPaterno}
-                              {primary.apellidoMaterno && !/^[-–—\s.]+$/.test(primary.apellidoMaterno)
-                                ? ` ${primary.apellidoMaterno}`
-                                : ''}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              #{player.dorsal} · {player.posicion}
-                              {isMulti && (
-                                <span className="text-[#707ef9] font-medium">
-                                  {' '}· {profile.participations.length} equipos
-                                </span>
-                              )}
-                              {profile.esSeleccionadoUfro && (
-                                <span className="text-[#707ef9] font-medium"> · Seleccionado UFRO</span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <div className="space-y-1.5">
-                          {profile.participations.map((part) => {
-                            const partDisc = DISCIPLINE_MAP[part.disciplineId];
-                            return (
-                              <div key={part.player.id} className="leading-tight">
-                                <button
-                                  type="button"
-                                  onClick={() => onInspectTeam(part.player.teamId)}
-                                  className="text-left group cursor-pointer"
-                                >
-                                  <span className="font-medium text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors">
-                                    {part.team?.nombre ?? part.player.teamId}
-                                  </span>
-                                  <span className="text-xs text-neutral-500 ml-1.5">
-                                    · {partDisc.nombreCorto} (#{part.player.dorsal})
-                                  </span>
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3 hidden md:table-cell">
-                        <p className="text-xs text-[#0d0d0d]">{primary.carrera}</p>
-                        <p className="text-xs text-neutral-500">{primary.nivelAcademico}</p>
-                      </td>
-                      <td className="py-3.5 px-3 hidden lg:table-cell text-xs tabular-nums text-neutral-600">
-                        {primary.rut || 'Reservado'}
-                      </td>
-                      <td className="py-3.5 px-3 text-right tabular-nums text-neutral-700">
-                        {disciplineFilter !== 'ALL'
-                          ? player.stats.partidosJugados
-                          : profile.totalPartidosJugados}
-                      </td>
-                      <td className="py-3.5 px-3 text-right tabular-nums font-medium text-[#0d0d0d]">
-                        <span>{statLabel}</span>
-                        {isMulti && disciplineFilter === 'ALL' && (
-                          <span className="block text-[10px] font-normal text-neutral-500">
-                            {disc.nombreCorto}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => onSelectPlayer(player)}
-                          className="text-xs font-display font-bold uppercase tracking-wider text-[#707ef9] hover:text-[#0d0d0d] cursor-pointer"
-                        >
-                          Ver perfil
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-
-            {hasMoreProfiles && (
-              <div className="bg-[#f5f6f8] border-t border-neutral-200 px-4 py-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-neutral-600 tabular-nums">
-                  Mostrando {filteredProfiles.length} de {matchedProfiles.length} jugadores
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-                  className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
-                >
-                  Mostrar {Math.min(PAGE_SIZE, remainingProfilesCount)} más ({remainingProfilesCount} restantes)
-                </button>
-              </div>
-            )}
+          <div
+            data-testid="virtualized-players-container"
+            className={`border border-neutral-200 bg-white ${
+              matchedProfiles.length <= 3
+                ? 'h-[260px]'
+                : matchedProfiles.length <= 6
+                ? 'h-[450px]'
+                : 'h-[70vh] min-h-[480px] max-h-[760px]'
+            }`}
+          >
+            <TableVirtuoso
+              ref={virtuosoRef}
+              className="h-full w-full"
+              data={matchedProfiles}
+              defaultItemHeight={68}
+              increaseViewportBy={{ top: 240, bottom: 320 }}
+              computeItemKey={(_index, profile) => profile.personKey}
+              components={VIRTUOSO_TABLE_COMPONENTS}
+              fixedHeaderContent={renderPlayersTableHeader}
+              itemContent={renderPlayerRow}
+            />
           </div>
         )}
       </div>

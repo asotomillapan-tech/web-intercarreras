@@ -64,17 +64,55 @@ export const MONTHS_LONG_ES = [
   'Diciembre',
 ];
 
+const MONTH_NAME_TO_NUMBER: Record<string, number> = {
+  ene: 1,
+  enero: 1,
+  feb: 2,
+  febrero: 2,
+  mar: 3,
+  marzo: 3,
+  abr: 4,
+  abril: 4,
+  may: 5,
+  mayo: 5,
+  jun: 6,
+  junio: 6,
+  jul: 7,
+  julio: 7,
+  ago: 8,
+  agosto: 8,
+  sep: 9,
+  sept: 9,
+  septiembre: 9,
+  set: 9,
+  setiembre: 9,
+  oct: 10,
+  octubre: 10,
+  nov: 11,
+  noviembre: 11,
+  dic: 12,
+  diciembre: 12,
+};
+
 /**
  * Normalizes a match date string into canonical YYYY-MM-DD format.
- * Supports ISO (YYYY-MM-DD, YYYY/MM/DD) and Chilean/Sheets (DD/MM/YYYY, DD-MM-YYYY).
+ * Supports ISO (YYYY-MM-DD, YYYY/MM/DD), Chilean/Sheets (DD/MM/YYYY, DD-MM-YYYY,
+ * DD.MM.YYYY, DD/MM/YY), optional weekday prefixes, and Spanish textual dates
+ * (e.g., "12 abr 2026", "12 de noviembre de 2026").
  */
 export function normalizeMatchDateToIso(raw: string | undefined | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  // YYYY-MM-DD or YYYY/MM/DD (with optional trailing timestamp)
-  const isoMatch = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(trimmed);
+  // Strip optional leading weekday (e.g. "Sábado 12/11/2026", "Sab, 12-11-2026")
+  const cleaned = trimmed.replace(
+    /^(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s+/i,
+    ''
+  );
+
+  // YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD (with optional trailing timestamp)
+  const isoMatch = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(cleaned);
   if (isoMatch) {
     const year = Number(isoMatch[1]);
     const month = Number(isoMatch[2]);
@@ -85,16 +123,36 @@ export function normalizeMatchDateToIso(raw: string | undefined | null): string 
     return null;
   }
 
-  // Chilean / Sheets format: DD/MM/YYYY or DD-MM-YYYY
-  const dmyMatch = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(trimmed);
+  // Chilean / Sheets format: DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, or 2-digit year DD/MM/YY
+  const dmyMatch = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?:\D|$)/.exec(cleaned);
   if (dmyMatch) {
     const day = Number(dmyMatch[1]);
     const month = Number(dmyMatch[2]);
-    const year = Number(dmyMatch[3]);
+    const rawYear = Number(dmyMatch[3]);
+    const year = dmyMatch[3].length === 2 ? 2000 + rawYear : rawYear;
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
     return null;
+  }
+
+  // Spanish textual date: "12 abr 2026", "12 de noviembre de 2026", "12-nov-2026"
+  const textMatch =
+    /^(\d{1,2})(?:\s+de\s+|\s+|[-/])([a-záéíóúñ]+)\.?(?:\s+de\s+|\s+|[-/])(\d{2}|\d{4})(?:\D|$)/i.exec(
+      cleaned
+    );
+  if (textMatch) {
+    const day = Number(textMatch[1]);
+    const monthKey = textMatch[2]
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    const month = MONTH_NAME_TO_NUMBER[monthKey];
+    const rawYear = Number(textMatch[3]);
+    const year = textMatch[3].length === 2 ? 2000 + rawYear : rawYear;
+    if (month && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
   }
 
   return null;

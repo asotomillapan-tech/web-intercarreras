@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -10,8 +10,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, TrendingUp } from 'lucide-react';
-import type { TeamProgressionPoint } from '../domain/tournamentEngine';
+import { ArrowDownRight, ArrowUpRight, BarChart3, ShieldCheck, TrendingUp } from 'lucide-react';
+import {
+  computeTeamScoringExtremes,
+  type TeamMatchExtremeRecord,
+  type TeamProgressionPoint,
+} from '../domain/tournamentEngine';
 import type { SportType } from '../types/tournament';
 
 interface TeamProgressionChartProps {
@@ -31,6 +35,17 @@ interface CustomTooltipProps {
   payload?: ReadonlyArray<TooltipPayloadItem>;
   unitPlural: string;
   mode: ChartMode;
+}
+
+function formatVolleyPeriodTag(record: TeamMatchExtremeRecord, sportType: SportType): string | null {
+  if (
+    sportType !== 'voleibol' ||
+    record.periodPointsFavor === undefined ||
+    record.periodPointsContra === undefined
+  ) {
+    return null;
+  }
+  return `${record.periodPointsFavor}-${record.periodPointsContra} pts`;
 }
 
 function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltipProps) {
@@ -54,13 +69,19 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
       : String(point.acumuladoDiferencia);
 
   return (
-    <div className="bg-[#0d0d0d] text-white border border-white/15 px-3.5 py-3 shadow-xl text-xs min-w-[215px]">
+    <div className="bg-[#0d0d0d] text-white border border-white/15 px-3.5 py-3 shadow-xl text-xs min-w-[225px]">
       <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-1.5 mb-2">
         <span className="font-display text-base uppercase tracking-wider text-white">
-          {point.fullLabel}
+          {point.shortDate}
         </span>
-        <span className="text-[11px] text-neutral-400 tabular-nums">{point.fecha}</span>
+        <span className="text-[11px] text-neutral-400 tabular-nums">
+          {point.fecha || point.label}
+        </span>
       </div>
+
+      <p className="text-[11px] uppercase tracking-wider text-[#a5b0ff] mb-1">
+        {point.fullLabel}
+      </p>
 
       <p className="text-neutral-300 mb-2">
         {point.isHome ? 'Local vs ' : 'Visita vs '}
@@ -96,17 +117,19 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
         <div className="flex items-center justify-between gap-4 pt-1.5 mt-1.5 border-t border-white/15 text-[11px] text-neutral-300">
           <span>
             {mode === 'acumulado'
-              ? `Marcador fecha: ${point.favor} - ${point.contra}`
-              : `Balance acumulado:`}
+              ? `Marcador partido: ${point.favor} - ${point.contra}`
+              : 'Balance acumulado:'}
           </span>
           <strong className="text-[#a5b0ff]">
-            {mode === 'acumulado' ? `Dif. ${accDiffFormatted}` : `${point.acumuladoFavor}-${point.acumuladoContra} (${accDiffFormatted})`}
+            {mode === 'acumulado'
+              ? `Dif. ${accDiffFormatted}`
+              : `${point.acumuladoFavor}-${point.acumuladoContra} (${accDiffFormatted})`}
           </strong>
         </div>
 
         {mode === 'por_fecha' && (
           <div className="flex items-center justify-between gap-4 text-[11px] text-neutral-400">
-            <span>Diferencia en fecha</span>
+            <span>Diferencia en partido</span>
             <span className="text-white">{diffFormatted}</span>
           </div>
         )}
@@ -129,6 +152,10 @@ export function TeamProgressionChart({
       ? 'Sets'
       : 'Puntos';
 
+  const unitLower = unitPlural.toLowerCase();
+  const unitShort =
+    sportType === 'futbol7' ? 'goles' : sportType === 'voleibol' ? 'sets' : 'pts';
+
   const favorSeriesName = `${unitPlural} a favor`;
   const contraSeriesName = `${unitPlural} en contra`;
 
@@ -142,21 +169,88 @@ export function TeamProgressionChart({
     matchCount > 0 && lastPoint
       ? (lastPoint.acumuladoContra / matchCount).toFixed(1)
       : '0.0';
-  const maxFavorMatch =
-    matchCount > 0
-      ? progression.reduce((best, cur) => (cur.favor > best.favor ? cur : best), progression[0])
+
+  const pointByIndex = useMemo(
+    () => new Map(progression.map((p) => [p.index, p])),
+    [progression]
+  );
+
+  const extremes = useMemo(
+    () => computeTeamScoringExtremes(progression, sportType),
+    [progression, sportType]
+  );
+
+  const primaryFor = extremes.biggestWin ?? extremes.mostScoredMatch;
+  const secondaryMostScored =
+    extremes.biggestWin &&
+    extremes.mostScoredMatch &&
+    extremes.mostScoredMatch.matchId !== extremes.biggestWin.matchId &&
+    (sportType === 'voleibol'
+      ? (extremes.mostScoredMatch.periodPointsFavor ?? extremes.mostScoredMatch.favor) >
+        (extremes.biggestWin.periodPointsFavor ?? extremes.biggestWin.favor)
+      : extremes.mostScoredMatch.favor > extremes.biggestWin.favor)
+      ? extremes.mostScoredMatch
       : null;
+
+  const primaryAgainst = extremes.worstDefeat ?? extremes.mostConcededMatch;
+  const secondaryMostConceded =
+    extremes.worstDefeat &&
+    extremes.mostConcededMatch &&
+    extremes.mostConcededMatch.matchId !== extremes.worstDefeat.matchId &&
+    (sportType === 'voleibol'
+      ? (extremes.mostConcededMatch.periodPointsContra ?? extremes.mostConcededMatch.contra) >
+        (extremes.worstDefeat.periodPointsContra ?? extremes.worstDefeat.contra)
+      : extremes.mostConcededMatch.contra > extremes.worstDefeat.contra)
+      ? extremes.mostConcededMatch
+      : null;
+
+  const forCardTitle =
+    sportType === 'futbol7'
+      ? extremes.biggestWin
+        ? 'Mayor goleada a favor'
+        : 'Más goles anotados a un rival'
+      : sportType === 'voleibol'
+      ? extremes.biggestWin
+        ? 'Mayor triunfo a favor'
+        : 'Mayor anotación a favor'
+      : extremes.biggestWin
+      ? 'Mayor ventaja / puntos a favor'
+      : 'Más puntos anotados a un rival';
+
+  const againstCardTitle =
+    sportType === 'futbol7'
+      ? extremes.worstDefeat
+        ? 'Mayor goleada recibida'
+        : extremes.mostConcededMatch
+        ? 'Rival que más goles les anotó'
+        : 'Valla invicta'
+      : sportType === 'voleibol'
+      ? extremes.worstDefeat
+        ? 'Mayor derrota sufrida'
+        : extremes.mostConcededMatch
+        ? 'Rival que más sets les ganó'
+        : 'Sin sets en contra'
+      : extremes.worstDefeat
+      ? 'Mayor derrota / puntos recibidos'
+      : extremes.mostConcededMatch
+      ? 'Rival que más puntos les anotó'
+      : 'Sin puntos en contra';
+
+  const formatXAxisTick = (val: string | number) => {
+    const pt = pointByIndex.get(Number(val));
+    return pt ? pt.shortDate : String(val);
+  };
 
   return (
     <section
       className="space-y-4"
       data-testid="team-progression-chart"
-      aria-label={`Progresión de ${unitPlural.toLowerCase()} de ${teamName}`}
+      aria-label={`Progresión de ${unitLower} de ${teamName}`}
     >
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-neutral-200 pb-3">
         <div>
           <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-            Análisis Comparativo por Fecha
+            Análisis Comparativo · Ordenado por Fecha
           </p>
           <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
             Progresión de {unitPlural} a Favor vs. en Contra
@@ -210,7 +304,7 @@ export function TeamProgressionChart({
             Sin fechas disputadas registradas
           </p>
           <p className="text-xs text-neutral-600 max-w-md mx-auto leading-relaxed">
-            La curva comparativa de {unitPlural.toLowerCase()} a favor y en contra se generará automáticamente cuando {teamName} finalice su primer encuentro oficial.
+            La curva comparativa de {unitLower} a favor y en contra se generará automáticamente cuando {teamName} finalice su primer encuentro oficial.
           </p>
         </div>
       ) : (
@@ -241,17 +335,11 @@ export function TeamProgressionChart({
                 Prom. contra:{' '}
                 <strong className="text-[#0d0d0d]">{avgContra}</strong> / partido
               </span>
-              {maxFavorMatch && (
-                <>
-                  <span aria-hidden="true" className="text-neutral-300">·</span>
-                  <span>
-                    Mejor fecha:{' '}
-                    <strong className="text-[#0d0d0d]">
-                      {maxFavorMatch.label} ({maxFavorMatch.favor}-{maxFavorMatch.contra})
-                    </strong>
-                  </span>
-                </>
-              )}
+              <span aria-hidden="true" className="text-neutral-300">·</span>
+              <span>
+                Partidos:{' '}
+                <strong className="text-[#0d0d0d]">{matchCount}</strong>
+              </span>
             </div>
           </div>
 
@@ -275,7 +363,10 @@ export function TeamProgressionChart({
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                   <XAxis
-                    dataKey="label"
+                    dataKey="index"
+                    tickFormatter={formatXAxisTick}
+                    interval="preserveStartEnd"
+                    minTickGap={18}
                     tick={{ fill: '#525252', fontSize: 12 }}
                     axisLine={{ stroke: '#d4d4d4' }}
                     tickLine={false}
@@ -330,7 +421,10 @@ export function TeamProgressionChart({
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                   <XAxis
-                    dataKey="label"
+                    dataKey="index"
+                    tickFormatter={formatXAxisTick}
+                    interval="preserveStartEnd"
+                    minTickGap={18}
                     tick={{ fill: '#525252', fontSize: 12 }}
                     axisLine={{ stroke: '#d4d4d4' }}
                     tickLine={false}
@@ -371,6 +465,148 @@ export function TeamProgressionChart({
                 </BarChart>
               )}
             </ResponsiveContainer>
+          </div>
+
+          {/* Biggest Win / Most Scored vs. Worst Defeat / Most Conceded Cards */}
+          <div
+            data-testid="team-scoring-extremes"
+            className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-4 border-t border-neutral-200"
+          >
+            {/* A quién han goleado más / metido más puntos */}
+            <div
+              data-testid="extreme-for-card"
+              className="border border-neutral-200 border-l-4 border-l-[#707ef9] bg-[#f8f9ff] p-3.5 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-widest text-[#707ef9] font-semibold flex items-center gap-1.5">
+                  <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>{forCardTitle}</span>
+                </p>
+                {primaryFor && (
+                  <span className="font-display text-lg leading-none tabular-nums px-2 py-0.5 bg-[#0d0d0d] text-white shrink-0">
+                    {primaryFor.favor} — {primaryFor.contra}
+                  </span>
+                )}
+              </div>
+
+              {primaryFor ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-[#0d0d0d] leading-snug">
+                    vs {primaryFor.opponentName}
+                  </p>
+                  <p className="text-xs text-neutral-600 tabular-nums">
+                    {extremes.biggestWin ? (
+                      <>
+                        Diferencia{' '}
+                        <strong className="text-[#0d0d0d]">
+                          +{primaryFor.diferencia} {unitShort}
+                        </strong>
+                        {formatVolleyPeriodTag(primaryFor, sportType)
+                          ? ` (${formatVolleyPeriodTag(primaryFor, sportType)})`
+                          : ''}
+                      </>
+                    ) : (
+                      <>
+                        Anotaron{' '}
+                        <strong className="text-[#0d0d0d]">
+                          {primaryFor.favor} {unitShort}
+                        </strong>
+                      </>
+                    )}{' '}
+                    · {primaryFor.shortDate} · {primaryFor.fullLabel}
+                  </p>
+
+                  {secondaryMostScored && (
+                    <p className="text-[11px] text-neutral-600 pt-2 mt-1.5 border-t border-neutral-200/80 tabular-nums">
+                      Más {unitLower} en un partido:{' '}
+                      <strong className="text-[#0d0d0d]">
+                        {sportType === 'voleibol' && secondaryMostScored.periodPointsFavor
+                          ? `${secondaryMostScored.periodPointsFavor} pts`
+                          : `${secondaryMostScored.favor} ${unitShort}`}{' '}
+                        vs {secondaryMostScored.opponentName}
+                      </strong>{' '}
+                      ({secondaryMostScored.favor}-{secondaryMostScored.contra} ·{' '}
+                      {secondaryMostScored.shortDate})
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-500">
+                  Sin {unitLower} a favor registrados todavía en encuentros finalizados.
+                </p>
+              )}
+            </div>
+
+            {/* Quién los ha goleado / les ha metido más puntos */}
+            <div
+              data-testid="extreme-against-card"
+              className="border border-neutral-200 border-l-4 border-l-[#dc2626] bg-[#fef7f7] p-3.5 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-widest text-[#dc2626] font-semibold flex items-center gap-1.5">
+                  {primaryAgainst ? (
+                    <ArrowDownRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>{againstCardTitle}</span>
+                </p>
+                {primaryAgainst && (
+                  <span className="font-display text-lg leading-none tabular-nums px-2 py-0.5 bg-[#dc2626] text-white shrink-0">
+                    {primaryAgainst.favor} — {primaryAgainst.contra}
+                  </span>
+                )}
+              </div>
+
+              {primaryAgainst ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-[#0d0d0d] leading-snug">
+                    vs {primaryAgainst.opponentName}
+                  </p>
+                  <p className="text-xs text-neutral-600 tabular-nums">
+                    {extremes.worstDefeat ? (
+                      <>
+                        Diferencia{' '}
+                        <strong className="text-[#dc2626]">
+                          {primaryAgainst.diferencia} {unitShort}
+                        </strong>
+                        {formatVolleyPeriodTag(primaryAgainst, sportType)
+                          ? ` (${formatVolleyPeriodTag(primaryAgainst, sportType)})`
+                          : ''}
+                      </>
+                    ) : (
+                      <>
+                        Recibieron{' '}
+                        <strong className="text-[#dc2626]">
+                          {primaryAgainst.contra} {unitShort}
+                        </strong>{' '}
+                        (Invicto)
+                      </>
+                    )}{' '}
+                    · {primaryAgainst.shortDate} · {primaryAgainst.fullLabel}
+                  </p>
+
+                  {secondaryMostConceded && (
+                    <p className="text-[11px] text-neutral-600 pt-2 mt-1.5 border-t border-neutral-200/80 tabular-nums">
+                      Más {unitLower} recibidos en un partido:{' '}
+                      <strong className="text-[#0d0d0d]">
+                        {sportType === 'voleibol' && secondaryMostConceded.periodPointsContra
+                          ? `${secondaryMostConceded.periodPointsContra} pts`
+                          : `${secondaryMostConceded.contra} ${unitShort}`}{' '}
+                        vs {secondaryMostConceded.opponentName}
+                      </strong>{' '}
+                      ({secondaryMostConceded.favor}-{secondaryMostConceded.contra} ·{' '}
+                      {secondaryMostConceded.shortDate})
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-600 tabular-nums">
+                  0 {unitLower} recibidos en {matchCount}{' '}
+                  {matchCount === 1 ? 'partido finalizado' : 'partidos finalizados'}.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

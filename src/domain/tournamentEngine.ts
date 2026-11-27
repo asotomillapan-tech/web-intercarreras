@@ -4,6 +4,7 @@ import type {
   DisciplineId,
   FullPlayoffBracket,
   Match,
+  MatchPhase,
   Player,
   PlayoffBracketSlot,
   PlayoffMatchup,
@@ -13,6 +14,7 @@ import type {
   Team,
   TransferRecord,
 } from '../types/tournament';
+import { normalizeMatchDateToIso } from './calendarEngine';
 
 /**
  * Validates a Chilean RUT using modulo-11 verifier digit algorithm.
@@ -962,6 +964,74 @@ export interface TeamHistoricalStats {
   history: TeamHistoryMatchItem[];
 }
 
+const PHASE_SORT_RANK: Record<MatchPhase, number> = {
+  Grupos: 0,
+  Octavos: 1,
+  Cuartos: 2,
+  Semifinal: 3,
+  'Tercer Lugar': 4,
+  Final: 5,
+};
+
+const SHORT_MONTHS_ES = [
+  'ene',
+  'feb',
+  'mar',
+  'abr',
+  'may',
+  'jun',
+  'jul',
+  'ago',
+  'sep',
+  'oct',
+  'nov',
+  'dic',
+];
+
+function normalizeHoraSortable(hora: string | undefined | null): string {
+  const raw = (hora ?? '').trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(raw);
+  if (!match) return '99:99';
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
+function formatShortDateEs(dateIso: string | null, fallback: string): string {
+  if (!dateIso) return fallback;
+  const parts = dateIso.split('-');
+  if (parts.length !== 3) return fallback;
+  const monthIdx = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  if (monthIdx < 0 || monthIdx > 11 || !Number.isFinite(day) || day < 1) return fallback;
+  return `${String(day).padStart(2, '0')} ${SHORT_MONTHS_ES[monthIdx]}`;
+}
+
+/**
+ * Compares two matches in true chronological ascending order (oldest -> newest).
+ * Normalizes ISO, Chilean DD/MM/YYYY, DD-MM-YYYY, and Spanish textual dates so
+ * day-first strings never sort out of order. Undated matches fall back to phase + jornada.
+ */
+export function compareMatchesByDateAsc(a: Match, b: Match): number {
+  const isoA = normalizeMatchDateToIso(a.fecha);
+  const isoB = normalizeMatchDateToIso(b.fecha);
+
+  if (isoA && isoB) {
+    if (isoA !== isoB) return isoA.localeCompare(isoB);
+    const timeA = normalizeHoraSortable(a.hora);
+    const timeB = normalizeHoraSortable(b.hora);
+    if (timeA !== timeB) return timeA.localeCompare(timeB);
+  } else if (isoA && !isoB) {
+    return -1;
+  } else if (!isoA && isoB) {
+    return 1;
+  }
+
+  const phaseA = PHASE_SORT_RANK[a.fase] ?? 99;
+  const phaseB = PHASE_SORT_RANK[b.fase] ?? 99;
+  if (phaseA !== phaseB) return phaseA - phaseB;
+  if (a.jornada !== b.jornada) return a.jornada - b.jornada;
+  return a.id.localeCompare(b.id);
+}
+
 /**
  * Computes complete historical match list and aggregate performance statistics for a single team
  * across ALL phases (Grupos + Playoffs).
@@ -973,11 +1043,7 @@ export function computeTeamHistoricalStats(
 ): TeamHistoricalStats {
   const teamMatches = allMatches
     .filter((m) => m.homeTeamId === team.id || m.awayTeamId === team.id)
-    .sort((a, b) => {
-      const aKey = `${a.fecha} ${a.hora}`;
-      const bKey = `${b.fecha} ${b.hora}`;
-      return bKey.localeCompare(aKey);
-    });
+    .sort((a, b) => compareMatchesByDateAsc(b, a));
 
   let pj = 0;
   let pg = 0;
@@ -1115,6 +1181,8 @@ export interface TeamProgressionPoint {
   label: string;
   fullLabel: string;
   fecha: string;
+  dateIso: string | null;
+  shortDate: string;
   fase: Match['fase'];
   jornada: number;
   opponentId: string;
@@ -1128,6 +1196,37 @@ export interface TeamProgressionPoint {
   acumuladoFavor: number;
   acumuladoContra: number;
   acumuladoDiferencia: number;
+  periodPointsFavor?: number;
+  periodPointsContra?: number;
+}
+
+export interface TeamMatchExtremeRecord {
+  matchId: string;
+  opponentId: string;
+  opponentName: string;
+  opponentSigla: string;
+  favor: number;
+  contra: number;
+  diferencia: number;
+  fecha: string;
+  dateIso: string | null;
+  shortDate: string;
+  fullLabel: string;
+  isHome: boolean;
+  outcome: 'G' | 'E' | 'P';
+  periodPointsFavor?: number;
+  periodPointsContra?: number;
+}
+
+export interface TeamScoringExtremes {
+  /** Largest margin victory inflicted by this team (diferencia > 0) */
+  biggestWin: TeamMatchExtremeRecord | null;
+  /** Single match where this team scored the most goals/points/sets (favor > 0) */
+  mostScoredMatch: TeamMatchExtremeRecord | null;
+  /** Largest margin defeat suffered by this team (diferencia < 0) */
+  worstDefeat: TeamMatchExtremeRecord | null;
+  /** Single match where an opponent scored the most goals/points/sets against this team (contra > 0) */
+  mostConcededMatch: TeamMatchExtremeRecord | null;
 }
 
 /**
@@ -1145,13 +1244,7 @@ export function computeTeamMatchProgression(
         m.status === 'FINALIZADO' &&
         (m.homeTeamId === team.id || m.awayTeamId === team.id)
     )
-    .sort((a, b) => {
-      const aDateKey = `${a.fecha} ${a.hora}`;
-      const bDateKey = `${b.fecha} ${b.hora}`;
-      if (aDateKey !== bDateKey) return aDateKey.localeCompare(bDateKey);
-      if (a.jornada !== b.jornada) return a.jornada - b.jornada;
-      return a.id.localeCompare(b.id);
-    });
+    .sort(compareMatchesByDateAsc);
 
   let acumuladoFavor = 0;
   let acumuladoContra = 0;
@@ -1163,6 +1256,26 @@ export function computeTeamMatchProgression(
     const favor = isHome ? match.homeScore : match.awayScore;
     const contra = isHome ? match.awayScore : match.homeScore;
     const diferencia = favor - contra;
+
+    const hasPeriodScores = match.periods.length > 0;
+    const homePeriodPts = hasPeriodScores
+      ? match.periods.reduce((acc, p) => acc + p.home, 0)
+      : 0;
+    const awayPeriodPts = hasPeriodScores
+      ? match.periods.reduce((acc, p) => acc + p.away, 0)
+      : 0;
+    const periodPointsFavor =
+      hasPeriodScores && (homePeriodPts > 0 || awayPeriodPts > 0)
+        ? isHome
+          ? homePeriodPts
+          : awayPeriodPts
+        : undefined;
+    const periodPointsContra =
+      hasPeriodScores && (homePeriodPts > 0 || awayPeriodPts > 0)
+        ? isHome
+          ? awayPeriodPts
+          : homePeriodPts
+        : undefined;
 
     acumuladoFavor += favor;
     acumuladoContra += contra;
@@ -1183,6 +1296,9 @@ export function computeTeamMatchProgression(
         ? '3° Lugar'
         : 'Final';
 
+    const dateIso = normalizeMatchDateToIso(match.fecha);
+    const shortDate = formatShortDateEs(dateIso, shortPhaseLabel);
+
     return {
       matchId: match.id,
       index: idx + 1,
@@ -1192,6 +1308,8 @@ export function computeTeamMatchProgression(
           ? `Fecha ${match.jornada} · ${match.groupName}`
           : `${match.fase} · Jornada ${match.jornada}`,
       fecha: match.fecha,
+      dateIso,
+      shortDate,
       fase: match.fase,
       jornada: match.jornada,
       opponentId,
@@ -1205,7 +1323,147 @@ export function computeTeamMatchProgression(
       acumuladoFavor,
       acumuladoContra,
       acumuladoDiferencia: acumuladoFavor - acumuladoContra,
+      periodPointsFavor,
+      periodPointsContra,
     };
   });
+}
+
+function toExtremeRecord(p: TeamProgressionPoint): TeamMatchExtremeRecord {
+  return {
+    matchId: p.matchId,
+    opponentId: p.opponentId,
+    opponentName: p.opponentName,
+    opponentSigla: p.opponentSigla,
+    favor: p.favor,
+    contra: p.contra,
+    diferencia: p.diferencia,
+    fecha: p.fecha,
+    dateIso: p.dateIso,
+    shortDate: p.shortDate,
+    fullLabel: p.fullLabel,
+    isHome: p.isHome,
+    outcome: p.outcome,
+    periodPointsFavor: p.periodPointsFavor,
+    periodPointsContra: p.periodPointsContra,
+  };
+}
+
+/**
+ * Extracts a team's biggest thrashing/win inflicted, highest-scoring match,
+ * worst defeat suffered, and highest-conceded match from its progression series.
+ */
+export function computeTeamScoringExtremes(
+  progression: TeamProgressionPoint[],
+  sportType: SportType
+): TeamScoringExtremes {
+  if (progression.length === 0) {
+    return {
+      biggestWin: null,
+      mostScoredMatch: null,
+      worstDefeat: null,
+      mostConcededMatch: null,
+    };
+  }
+
+  let bestWin: TeamProgressionPoint | null = null;
+  let bestScored: TeamProgressionPoint | null = null;
+  let worstLoss: TeamProgressionPoint | null = null;
+  let worstConceded: TeamProgressionPoint | null = null;
+
+  const isVolley = sportType === 'voleibol';
+
+  for (const p of progression) {
+    // 1. Biggest win (strictly positive margin)
+    if (p.diferencia > 0) {
+      if (!bestWin) {
+        bestWin = p;
+      } else {
+        const diffDelta = p.diferencia - bestWin.diferencia;
+        const pVolleyDiff = (p.periodPointsFavor ?? 0) - (p.periodPointsContra ?? 0);
+        const bVolleyDiff = (bestWin.periodPointsFavor ?? 0) - (bestWin.periodPointsContra ?? 0);
+        if (
+          diffDelta > 0 ||
+          (diffDelta === 0 && isVolley && pVolleyDiff > bVolleyDiff) ||
+          (diffDelta === 0 &&
+            (!isVolley || pVolleyDiff === bVolleyDiff) &&
+            (p.favor > bestWin.favor || (p.favor === bestWin.favor && p.index > bestWin.index)))
+        ) {
+          bestWin = p;
+        }
+      }
+    }
+
+    // 2. Most goals/points/sets scored in a single match
+    if (p.favor > 0) {
+      if (!bestScored) {
+        bestScored = p;
+      } else {
+        const pPts = isVolley ? p.periodPointsFavor ?? p.favor : p.favor;
+        const bPts = isVolley ? bestScored.periodPointsFavor ?? bestScored.favor : bestScored.favor;
+        const primaryDelta = isVolley ? pPts - bPts : p.favor - bestScored.favor;
+        if (
+          primaryDelta > 0 ||
+          (primaryDelta === 0 &&
+            (p.diferencia > bestScored.diferencia ||
+              (p.diferencia === bestScored.diferencia && p.index > bestScored.index)))
+        ) {
+          bestScored = p;
+        }
+      }
+    }
+
+    // 3. Worst defeat (strictly negative margin)
+    if (p.diferencia < 0) {
+      if (!worstLoss) {
+        worstLoss = p;
+      } else {
+        // More negative diferencia = worse defeat
+        const marginWorse = p.diferencia < worstLoss.diferencia;
+        const marginSame = p.diferencia === worstLoss.diferencia;
+        const pVolleyDeficit = (p.periodPointsContra ?? 0) - (p.periodPointsFavor ?? 0);
+        const wVolleyDeficit =
+          (worstLoss.periodPointsContra ?? 0) - (worstLoss.periodPointsFavor ?? 0);
+        if (
+          marginWorse ||
+          (marginSame && isVolley && pVolleyDeficit > wVolleyDeficit) ||
+          (marginSame &&
+            (!isVolley || pVolleyDeficit === wVolleyDeficit) &&
+            (p.contra > worstLoss.contra ||
+              (p.contra === worstLoss.contra && p.index > worstLoss.index)))
+        ) {
+          worstLoss = p;
+        }
+      }
+    }
+
+    // 4. Most goals/points/sets conceded in a single match
+    if (p.contra > 0) {
+      if (!worstConceded) {
+        worstConceded = p;
+      } else {
+        const pPts = isVolley ? p.periodPointsContra ?? p.contra : p.contra;
+        const wPts = isVolley
+          ? worstConceded.periodPointsContra ?? worstConceded.contra
+          : worstConceded.contra;
+        const primaryDelta = isVolley ? pPts - wPts : p.contra - worstConceded.contra;
+        if (
+          primaryDelta > 0 ||
+          (primaryDelta === 0 &&
+            (p.diferencia < worstConceded.diferencia ||
+              (p.diferencia === worstConceded.diferencia && p.index > worstConceded.index)))
+        ) {
+          worstConceded = p;
+        }
+      }
+    }
+  }
+
+  return {
+    biggestWin: bestWin ? toExtremeRecord(bestWin) : null,
+    mostScoredMatch: bestScored ? toExtremeRecord(bestScored) : null,
+    worstDefeat: worstLoss ? toExtremeRecord(worstLoss) : null,
+    mostConcededMatch: worstConceded ? toExtremeRecord(worstConceded) : null,
+  };
 }
 

@@ -6,6 +6,7 @@ import {
   computeStandings,
   computeTeamHistoricalStats,
   computeTeamMatchProgression,
+  computeTeamScoringExtremes,
   formatRut,
   generateEquitableGroups,
   generatePlayoffBracket,
@@ -677,6 +678,192 @@ test('buildFullPlayoffTree supports Ida y Vuelta (two-legged) ties with swapped 
   assert.equal(dmySlot.awayScore, 3);
   assert.equal(dmySlot.winnerSide, 'home');
 });
+
+test('computeTeamMatchProgression sorts Chilean DD/MM/YYYY, mixed dates, unpadded times, and undated matches chronologically', () => {
+  const teamA: Team = {
+    id: 'a',
+    nombre: 'Industrial FC',
+    sigla: 'IND',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ingeniería Civil Industrial',
+    facultad: 'FICA',
+    groupName: 'Grupo A',
+  };
+  const lookup = new Map<string, Pick<Team, 'nombre' | 'sigla'>>([
+    ['b', { nombre: 'Medicina FC', sigla: 'MED' }],
+    ['c', { nombre: 'Derecho FC', sigla: 'DER' }],
+    ['d', { nombre: 'Kinesiología FC', sigla: 'KIN' }],
+    ['e', { nombre: 'Agronomía FC', sigla: 'AGR' }],
+  ]);
+
+  const makeMatch = (overrides: Partial<Match>): Match => ({
+    id: 'm1',
+    disciplineId: 'f7-h-1',
+    groupName: 'Grupo A',
+    fase: 'Grupos',
+    jornada: 1,
+    fecha: '24/04/2026',
+    hora: '18:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a',
+    awayTeamId: 'b',
+    homeScore: 2,
+    awayScore: 1,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 0, away: 0 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+    ...overrides,
+  });
+
+  // Intentionally scrambled Chilean DD/MM/YYYY, 2-digit year, Spanish text, unpadded hour, and undated
+  const matches: Match[] = [
+    makeMatch({ id: 'may-12', jornada: 4, fecha: '12/05/2026', hora: '18:00', homeScore: 5, awayScore: 0, awayTeamId: 'd' }),
+    makeMatch({ id: 'undated', jornada: 5, fecha: 'Por definir', hora: '', homeScore: 1, awayScore: 1, awayTeamId: 'e' }),
+    makeMatch({ id: 'may-05-pm', jornada: 3, fecha: '05-05-26', hora: '19:30', homeScore: 1, awayScore: 4, awayTeamId: 'c' }),
+    makeMatch({ id: 'apr-24', jornada: 1, fecha: '24/04/2026', hora: '15:00', homeScore: 3, awayScore: 1, awayTeamId: 'b' }),
+    makeMatch({ id: 'may-05-am', jornada: 2, fecha: '5 de mayo 2026', hora: '9:30', homeScore: 2, awayScore: 2, awayTeamId: 'b' }),
+  ];
+
+  const series = computeTeamMatchProgression(teamA, matches, lookup);
+  assert.deepEqual(
+    series.map((p) => p.matchId),
+    ['apr-24', 'may-05-am', 'may-05-pm', 'may-12', 'undated']
+  );
+  assert.deepEqual(
+    series.map((p) => p.shortDate),
+    ['24 abr', '05 may', '05 may', '12 may', 'F5']
+  );
+  // Cumulative progression must reflect exact chronological order
+  assert.deepEqual(
+    series.map((p) => p.acumuladoFavor),
+    [3, 5, 6, 11, 12]
+  );
+  assert.deepEqual(
+    series.map((p) => p.acumuladoContra),
+    [1, 3, 7, 7, 8]
+  );
+
+  // computeTeamHistoricalStats racha must also follow true chronological order (G, E, P, G, E)
+  const hist = computeTeamHistoricalStats(teamA, 'futbol7', matches);
+  assert.deepEqual(hist.racha, ['G', 'E', 'P', 'G', 'E']);
+  assert.equal(hist.history[0].match.id, 'undated');
+  assert.equal(hist.history[1].match.id, 'may-12');
+});
+
+test('computeTeamScoringExtremes identifies biggest win, worst defeat, most scored, and most conceded opponents across sports', () => {
+  const teamA: Team = {
+    id: 'a',
+    nombre: 'Industrial FC',
+    sigla: 'IND',
+    disciplineId: 'f7-h-1',
+    carrera: 'Ingeniería',
+    facultad: 'FICA',
+    groupName: 'Grupo A',
+  };
+  const lookup = new Map<string, Pick<Team, 'nombre' | 'sigla'>>([
+    ['med', { nombre: 'Medicina FC', sigla: 'MED' }],
+    ['der', { nombre: 'Derecho FC', sigla: 'DER' }],
+    ['kin', { nombre: 'Kinesiología FC', sigla: 'KIN' }],
+    ['odo', { nombre: 'Odontología FC', sigla: 'ODO' }],
+  ]);
+
+  const makeMatch = (overrides: Partial<Match>): Match => ({
+    id: 'm1',
+    disciplineId: 'f7-h-1',
+    groupName: 'Grupo A',
+    fase: 'Grupos',
+    jornada: 1,
+    fecha: '01/05/2026',
+    hora: '18:00',
+    cancha: 'Cancha 1',
+    homeTeamId: 'a',
+    awayTeamId: 'med',
+    homeScore: 0,
+    awayScore: 0,
+    status: 'FINALIZADO',
+    periodLabel: 'Final',
+    clock: '50:00',
+    periods: [],
+    fouls: { home: 0, away: 0 },
+    timeouts: { home: 0, away: 0 },
+    events: [],
+    refereeId: 'ref-1',
+    ...overrides,
+  });
+
+  // Futbol 7:
+  // - Beat Medicina 5-0 (+5 biggest win)
+  // - Beat Derecho 7-5 (+2, highest goals scored = 7, AND Derecho scored 5 against them!)
+  // - Lost to Kinesiología 0-4 (-4 worst defeat)
+  const f7Matches: Match[] = [
+    makeMatch({ id: 'g1', fecha: '01/05/2026', awayTeamId: 'med', homeScore: 5, awayScore: 0 }),
+    makeMatch({ id: 'g2', fecha: '08/05/2026', awayTeamId: 'der', homeScore: 7, awayScore: 5 }),
+    makeMatch({ id: 'g3', fecha: '15/05/2026', awayTeamId: 'kin', homeScore: 0, awayScore: 4 }),
+  ];
+
+  const f7Prog = computeTeamMatchProgression(teamA, f7Matches, lookup);
+  const f7Extremes = computeTeamScoringExtremes(f7Prog, 'futbol7');
+
+  assert.equal(f7Extremes.biggestWin?.opponentName, 'Medicina FC');
+  assert.equal(f7Extremes.biggestWin?.diferencia, 5);
+  assert.equal(f7Extremes.mostScoredMatch?.opponentName, 'Derecho FC');
+  assert.equal(f7Extremes.mostScoredMatch?.favor, 7);
+
+  assert.equal(f7Extremes.worstDefeat?.opponentName, 'Kinesiología FC');
+  assert.equal(f7Extremes.worstDefeat?.diferencia, -4);
+  assert.equal(f7Extremes.mostConcededMatch?.opponentName, 'Derecho FC');
+  assert.equal(f7Extremes.mostConcededMatch?.contra, 5);
+
+  // Undefeated with clean sheets -> worstDefeat and mostConcededMatch are both null
+  const cleanProg = computeTeamMatchProgression(
+    teamA,
+    [makeMatch({ id: 'c1', fecha: '01/05/2026', awayTeamId: 'odo', homeScore: 3, awayScore: 0 })],
+    lookup
+  );
+  const cleanExtremes = computeTeamScoringExtremes(cleanProg, 'futbol7');
+  assert.equal(cleanExtremes.biggestWin?.opponentName, 'Odontología FC');
+  assert.equal(cleanExtremes.worstDefeat, null);
+  assert.equal(cleanExtremes.mostConcededMatch, null);
+
+  // Volleyball: breaks 2-0 tie using period point margin (50-22 beats 50-44)
+  const volleyMatches: Match[] = [
+    makeMatch({
+      id: 'v1',
+      disciplineId: 'voley-h',
+      fecha: '02/05/2026',
+      awayTeamId: 'med',
+      homeScore: 2,
+      awayScore: 0,
+      periods: [
+        { home: 25, away: 22 },
+        { home: 25, away: 22 },
+      ],
+    }),
+    makeMatch({
+      id: 'v2',
+      disciplineId: 'voley-h',
+      fecha: '09/05/2026',
+      awayTeamId: 'odo',
+      homeScore: 2,
+      awayScore: 0,
+      periods: [
+        { home: 25, away: 10 },
+        { home: 25, away: 12 },
+      ],
+    }),
+  ];
+  const volleyProg = computeTeamMatchProgression(teamA, volleyMatches, lookup);
+  const volleyExtremes = computeTeamScoringExtremes(volleyProg, 'voleibol');
+  assert.equal(volleyExtremes.biggestWin?.opponentName, 'Odontología FC');
+  assert.equal(volleyExtremes.biggestWin?.periodPointsFavor, 50);
+  assert.equal(volleyExtremes.biggestWin?.periodPointsContra, 22);
+});
+
 
 
 
