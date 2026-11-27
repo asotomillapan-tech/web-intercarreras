@@ -241,6 +241,17 @@ export function SportScoreboard({
               >
                 {match.homeScore} — {match.awayScore}
               </span>
+              {sportType === 'futbol7' && match.penaltyScore && (
+                <p
+                  data-testid="penalty-scoreboard"
+                  className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#707ef9]/20 border border-[#707ef9]/40 text-[11px] font-mono font-semibold text-[#c8ceff] tabular-nums"
+                >
+                  <span>Pen.</span>
+                  <span>
+                    {match.penaltyScore.home} — {match.penaltyScore.away}
+                  </span>
+                </p>
+              )}
               {sportType === 'voleibol' && mode === 'final' && (
                 <p className="text-[10px] uppercase tracking-widest text-neutral-400 mt-1.5">
                   Sets ganados

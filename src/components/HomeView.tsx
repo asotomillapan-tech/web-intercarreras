@@ -363,9 +363,16 @@ export function HomeView({
 
                     <div className="px-4 py-2.5 rounded-2xl bg-white/[0.04] border border-white/[0.09] text-center shrink-0">
                       {shouldRevealPublicMatchData(featuredMatch) ? (
-                        <span className="text-2xl sm:text-3xl font-semibold tabular-nums tracking-tight text-white whitespace-nowrap">
-                          {featuredMatch.homeScore} — {featuredMatch.awayScore}
-                        </span>
+                        <div>
+                          <span className="text-2xl sm:text-3xl font-semibold tabular-nums tracking-tight text-white whitespace-nowrap block">
+                            {featuredMatch.homeScore} — {featuredMatch.awayScore}
+                          </span>
+                          {featuredMatch.penaltyScore && (
+                            <span className="text-[10px] font-mono text-[#a5b0ff] tabular-nums block mt-0.5">
+                              Pen. {featuredMatch.penaltyScore.home} — {featuredMatch.penaltyScore.away}
+                            </span>
+                          )}
+                        </div>
                       ) : canVoteMatchMvp(featuredMatch) ? (
                         <div className="px-1">
                           <span className="text-xs font-medium text-[#a5b0ff] block whitespace-nowrap">
@@ -901,9 +908,16 @@ export function HomeView({
                               }`}
                             >
                               {revealData ? (
-                                <span className="text-lg sm:text-xl font-semibold">
-                                  {match.homeScore} — {match.awayScore}
-                                </span>
+                                <div>
+                                  <span className="text-lg sm:text-xl font-semibold block leading-tight">
+                                    {match.homeScore} — {match.awayScore}
+                                  </span>
+                                  {match.penaltyScore && (
+                                    <span className="text-[10px] font-mono text-[#a5b0ff] block">
+                                      Pen. {match.penaltyScore.home}-{match.penaltyScore.away}
+                                    </span>
+                                  )}
+                                </div>
                               ) : votingOpen ? (
                                 <span className="text-[11px] font-medium flex items-center gap-1">
                                   <Lock className="w-3 h-3" />

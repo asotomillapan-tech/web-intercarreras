@@ -406,8 +406,12 @@ function resolveSlotOutcome(
   const awaySeed = swappedSides ? slot.homeSeed : slot.awaySeed;
 
   let winnerSide: 'home' | 'away' | null = null;
-  if (m.status === 'FINALIZADO' && m.homeScore !== m.awayScore) {
-    winnerSide = m.homeScore > m.awayScore ? 'home' : 'away';
+  if (m.status === 'FINALIZADO') {
+    if (m.homeScore !== m.awayScore) {
+      winnerSide = m.homeScore > m.awayScore ? 'home' : 'away';
+    } else if (m.penaltyScore && m.penaltyScore.home !== m.penaltyScore.away) {
+      winnerSide = m.penaltyScore.home > m.penaltyScore.away ? 'home' : 'away';
+    }
   }
 
   return {
@@ -513,7 +517,24 @@ function resolveTwoLeggedSlotOutcome(
     } else if (aggAway > aggHome) {
       winnerSide = 'away';
     } else {
-      isAggregateDraw = true;
+      const penMatch = secondLegMatch ?? firstLegMatch;
+      if (penMatch?.penaltyScore && penMatch.penaltyScore.home !== penMatch.penaltyScore.away) {
+        const homePen =
+          penMatch.homeTeamId === homeTeamId
+            ? penMatch.penaltyScore.home
+            : penMatch.penaltyScore.away;
+        const awayPen =
+          penMatch.homeTeamId === homeTeamId
+            ? penMatch.penaltyScore.away
+            : penMatch.penaltyScore.home;
+        if (homePen !== awayPen) {
+          winnerSide = homePen > awayPen ? 'home' : 'away';
+        } else {
+          isAggregateDraw = true;
+        }
+      } else {
+        isAggregateDraw = true;
+      }
     }
   }
 

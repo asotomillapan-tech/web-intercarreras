@@ -68,6 +68,7 @@ export interface Team {
   facultad: string;
   groupName: string;
   escudo?: string;
+  clubName?: string;
   anioFundacion?: number;
   logrosAnteriores?: string;
   capitanCorreo?: string;
@@ -183,6 +184,8 @@ export interface MatchAttendanceRecord {
   status: MatchAttendanceStatus;
   homePresentIds: string[];
   awayPresentIds: string[];
+  /** Per-match jersey number overrides for teams with rotating kits (playerId -> 1..99). */
+  matchDorsals?: Record<string, number>;
   recordedAt?: string;
   recordedByName?: string;
   notes?: string;
@@ -202,6 +205,8 @@ export interface Match {
   awayTeamId: string;
   homeScore: number;
   awayScore: number;
+  /** Optional penalty shootout score for Fútbol 7 tiebreaks. */
+  penaltyScore?: PeriodScore;
   status: MatchStatus;
   periodLabel: string;
   clock: string;
@@ -212,7 +217,17 @@ export interface Match {
   liveState?: MatchLiveState;
   attendance?: MatchAttendanceRecord;
   refereeId: string;
+  /** UID of the assigned referee user for scoped visibility in Mesa Arbitral. */
+  assignedRefereeUid?: string;
+  assignedRefereeName?: string;
   scoresheetValidation?: ScoresheetValidationRecord;
+}
+
+export interface RefereeRosterEntry {
+  uid: string;
+  displayName: string;
+  role: 'arbitro' | 'jefe_arbitros_futbol' | 'jefe_arbitros_basquetbol' | 'jefe_arbitros_voleibol';
+  updatedAt?: string;
 }
 
 export interface RefereeProfile {
@@ -317,8 +332,12 @@ export type UserRole =
   | 'jugador'
   | 'delegado'
   | 'arbitro'
+  | 'jefe_arbitros_futbol'
+  | 'jefe_arbitros_basquetbol'
+  | 'jefe_arbitros_voleibol'
   | 'fotografo'
   | 'prensa'
+  | 'moderador'
   | 'admin';
 
 export interface AppUserProfile {
@@ -423,7 +442,7 @@ export interface NewsArticle {
   aiGenerated?: boolean;
   authorUid: string;
   authorName: string;
-  authorRole: 'admin' | 'prensa';
+  authorRole: 'admin' | 'moderador' | 'prensa';
   createdAt: string;
   updatedAt: string;
 }
@@ -569,6 +588,7 @@ export interface TournamentState {
   matches: Match[];
   transfers: TransferRecord[];
   referees: RefereeProfile[];
+  refereeRoster?: RefereeRosterEntry[];
   users: AppUserProfile[];
   mvpVotes: MvpVoteRecord[];
   awardNominees: Partial<Record<DisciplineId, string[]>>;

@@ -426,8 +426,13 @@ export function applyPlayerSubstitution(params: ApplySubstitutionParams): ApplyS
         : formatMatchClock(liveState.clockSeconds, sportType, liveState.stoppageMinutes)
       : match.clock;
 
-  const inLabel = `#${playerIn.dorsal} ${playerIn.nombre} ${playerIn.apellidoPaterno}`;
-  const outLabel = `#${playerOut.dorsal} ${playerOut.nombre} ${playerOut.apellidoPaterno}`;
+  const resolveDorsalTag = (p: Pick<Player, 'id' | 'dorsal'>) => {
+    const ov = match.attendance?.matchDorsals?.[p.id];
+    const eff = typeof ov === 'number' && ov >= 1 && ov <= 99 ? Math.trunc(ov) : p.dorsal;
+    return eff > 0 ? `#${eff}` : 'S/N';
+  };
+  const inLabel = `${resolveDorsalTag(playerIn)} ${playerIn.nombre} ${playerIn.apellidoPaterno}`;
+  const outLabel = `${resolveDorsalTag(playerOut)} ${playerOut.nombre} ${playerOut.apellidoPaterno}`;
 
   const event: MatchEvent = {
     id: params.eventId ?? `ev-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -643,7 +648,12 @@ export function applyMatchLiveEvent(params: ApplyLiveEventParams): ApplyLiveEven
   const resolvedPoints = inferPointsDelta(actionType, params.pointsDelta);
   const teamId = side === 'home' ? match.homeTeamId : match.awayTeamId;
   const actorLabel = player
-    ? `${player.nombre} ${player.apellidoPaterno} (#${player.dorsal})`
+    ? (() => {
+        const ov = match.attendance?.matchDorsals?.[player.id];
+        const eff = typeof ov === 'number' && ov >= 1 && ov <= 99 ? Math.trunc(ov) : player.dorsal;
+        const tag = eff > 0 ? `#${eff}` : 'S/N';
+        return `${player.nombre} ${player.apellidoPaterno} (${tag})`;
+      })()
     : teamName;
 
   let nextHome = match.homeScore;

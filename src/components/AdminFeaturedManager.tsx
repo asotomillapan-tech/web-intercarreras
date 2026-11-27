@@ -55,7 +55,6 @@ export function AdminFeaturedManager({
     initialConfig.ctaSection ?? 'posiciones'
   );
 
-  // Match picker filters
   const [discFilter, setDiscFilter] = useState<'ALL' | DisciplineId>('ALL');
   const [matchSearch, setMatchSearch] = useState('');
 
@@ -105,17 +104,11 @@ export function AdminFeaturedManager({
   const handleSave = async () => {
     setFeedback(null);
     if (mode === 'match' && !matchId) {
-      setFeedback({
-        type: 'err',
-        text: 'Selecciona un partido específico para fijar en la portada.',
-      });
+      setFeedback({ type: 'err', text: 'Selecciona un partido para fijar en portada.' });
       return;
     }
     if (mode === 'custom' && customTitle.trim().length < 3) {
-      setFeedback({
-        type: 'err',
-        text: 'Ingresa un título de al menos 3 caracteres para el anuncio destacado.',
-      });
+      setFeedback({ type: 'err', text: 'Ingresa un título de al menos 3 caracteres.' });
       return;
     }
 
@@ -140,37 +133,33 @@ export function AdminFeaturedManager({
     setSaving(true);
     try {
       await onSaveHomeFeatured(payload);
-      setFeedback({
-        type: 'ok',
-        text: 'Bloque destacado de la portada guardado y publicado para todos los visitantes.',
-      });
+      setFeedback({ type: 'ok', text: 'Bloque destacado de portada actualizado.' });
     } catch (err: unknown) {
       setFeedback({
         type: 'err',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'No se pudo guardar la configuración de portada en Firestore.',
+        text: err instanceof Error ? err.message : 'No se pudo guardar la configuración.',
       });
     } finally {
       setSaving(false);
     }
   };
 
+  const inputCls =
+    'w-full rounded-xl bg-[#050507] border border-white/[0.1] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]';
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-neutral-200 pb-6">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-widest text-[#707ef9]">
-            Administración de Portada · Bloque Hero
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
+        <div className="space-y-1">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff]">
+            Portada · Bloque Hero
           </p>
-          <h2 className="font-display text-3xl font-bold uppercase tracking-tight text-[#0d0d0d] mt-1">
-            Información Destacada de la Página Principal
+          <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
+            Contenido{' '}
+            <span className="font-editorial italic font-normal text-[#c8ceff]">destacado</span>
           </h2>
-          <p className="text-sm text-neutral-600 mt-1.5 max-w-2xl">
-            Define exactamente qué aparece en la tarjeta destacada superior del inicio: selección
-            automática del partido más reciente o en vivo, un encuentro designado por administración
-            o un comunicado personalizado del campeonato.
+          <p className="text-xs text-zinc-400 max-w-2xl">
+            Define qué aparece en la tarjeta destacada superior de la página principal.
           </p>
         </div>
 
@@ -178,20 +167,20 @@ export function AdminFeaturedManager({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] text-xs font-medium text-white transition-colors cursor-pointer disabled:opacity-50 shrink-0 self-start md:self-auto"
         >
           <Star className="w-4 h-4" />
-          <span>{saving ? 'Guardando...' : 'Publicar en Portada'}</span>
+          <span>{saving ? 'Guardando...' : 'Publicar en portada'}</span>
         </button>
       </div>
 
       {feedback && (
         <div
           role="status"
-          className={`px-4 py-3 border text-xs font-medium flex items-center gap-2 ${
+          className={`px-4 py-3 rounded-2xl border text-xs flex items-center gap-2 ${
             feedback.type === 'ok'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-red-50 border-red-200 text-red-900'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+              : 'bg-red-500/10 border-red-500/30 text-red-200'
           }`}
         >
           <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -199,32 +188,16 @@ export function AdminFeaturedManager({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Configuration Column */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* Mode Selector */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="lg:col-span-7 space-y-5">
           <div className="space-y-2.5">
-            <label className="text-xs font-bold uppercase tracking-wider text-neutral-600 block">
-              Modo del bloque destacado
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <span className="text-xs text-zinc-400 block">Modo del bloque</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {(
                 [
-                  {
-                    id: 'auto' as const,
-                    title: 'Automático',
-                    desc: 'Partido en vivo o el más reciente / programado.',
-                  },
-                  {
-                    id: 'match' as const,
-                    title: 'Partido Designado',
-                    desc: 'Elige manualmente un encuentro específico.',
-                  },
-                  {
-                    id: 'custom' as const,
-                    title: 'Anuncio Personalizado',
-                    desc: 'Destaca una final, aviso o convocatoria propia.',
-                  },
+                  { id: 'auto' as const, title: 'Automático', desc: 'Partido más reciente o en juego.' },
+                  { id: 'match' as const, title: 'Partido fijado', desc: 'Elige un encuentro específico.' },
+                  { id: 'custom' as const, title: 'Anuncio libre', desc: 'Comunicado o aviso propio.' },
                 ]
               ).map((opt) => (
                 <button
@@ -234,18 +207,16 @@ export function AdminFeaturedManager({
                     setMode(opt.id);
                     setFeedback(null);
                   }}
-                  className={`text-left p-4 border transition-colors cursor-pointer ${
+                  className={`text-left p-4 rounded-2xl border transition-colors cursor-pointer ${
                     mode === opt.id
-                      ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                      : 'bg-white text-[#0d0d0d] border-neutral-200 hover:border-[#707ef9]'
+                      ? 'bg-white text-[#050507] border-white'
+                      : 'bg-[#101016] text-white border-white/[0.08] hover:border-white/[0.22]'
                   }`}
                 >
-                  <p className="font-display text-sm font-bold uppercase tracking-wide">
-                    {opt.title}
-                  </p>
+                  <p className="text-sm font-medium">{opt.title}</p>
                   <p
                     className={`text-xs mt-1 leading-relaxed ${
-                      mode === opt.id ? 'text-neutral-300' : 'text-neutral-600'
+                      mode === opt.id ? 'text-zinc-600' : 'text-zinc-400'
                     }`}
                   >
                     {opt.desc}
@@ -255,13 +226,9 @@ export function AdminFeaturedManager({
             </div>
           </div>
 
-          {/* Optional Kicker Label for Match or Custom */}
           {mode !== 'auto' && (
             <div>
-              <label
-                htmlFor="featured-badge-label"
-                className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-              >
+              <label htmlFor="featured-badge-label" className="text-xs text-zinc-400 block mb-1.5">
                 Etiqueta superior (opcional)
               </label>
               <input
@@ -272,34 +239,33 @@ export function AdminFeaturedManager({
                 onChange={(e) => setBadgeLabel(e.target.value)}
                 placeholder={
                   mode === 'match'
-                    ? 'Ej. Partido de la Fecha · Clásico Intercarreras'
-                    : 'Ej. Aviso Oficial · Fase Final 2026'
+                    ? 'Ej. Partido de la Fecha'
+                    : 'Ej. Aviso Oficial · Fase Final'
                 }
-                className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                className={inputCls}
               />
             </div>
           )}
 
-          {/* MODE: MATCH PICKER */}
           {mode === 'match' && (
-            <div className="border border-neutral-200 bg-[#f5f6f8] p-5 space-y-4">
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-5 space-y-4">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="search"
                     value={matchSearch}
                     onChange={(e) => setMatchSearch(e.target.value)}
-                    placeholder="Buscar equipo, fecha, cancha o fase..."
+                    placeholder="Buscar equipo, fecha o fase..."
                     aria-label="Buscar partido para destacar en portada"
-                    className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                    className="w-full rounded-xl bg-[#050507] border border-white/[0.1] pl-10 pr-3 py-2 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
                   />
                 </div>
                 <select
                   aria-label="Filtrar partidos por disciplina"
                   value={discFilter}
                   onChange={(e) => setDiscFilter(e.target.value as 'ALL' | DisciplineId)}
-                  className="bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                  className="rounded-xl bg-[#050507] border border-white/[0.1] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#707ef9]"
                 >
                   <option value="ALL">Todas las disciplinas</option>
                   {DISCIPLINES.map((d) => (
@@ -310,10 +276,10 @@ export function AdminFeaturedManager({
                 </select>
               </div>
 
-              <div className="max-h-80 overflow-y-auto divide-y divide-neutral-200 border border-neutral-200 bg-white">
+              <div className="max-h-80 overflow-y-auto divide-y divide-white/[0.06] rounded-2xl border border-white/[0.08] bg-[#050507]">
                 {orderedMatches.length === 0 ? (
-                  <p className="p-6 text-center text-xs text-neutral-500">
-                    No se encontraron partidos con ese criterio.
+                  <p className="p-6 text-center text-xs text-zinc-500">
+                    No se encontraron partidos.
                   </p>
                 ) : (
                   orderedMatches.slice(0, 60).map((m) => {
@@ -327,26 +293,26 @@ export function AdminFeaturedManager({
                         type="button"
                         onClick={() => setMatchId(m.id)}
                         className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
-                          active ? 'bg-[#707ef9]/10' : 'hover:bg-[#f5f6f8]'
+                          active ? 'bg-[#707ef9]/15' : 'hover:bg-white/[0.03]'
                         }`}
                       >
                         <div className="min-w-0">
-                          <p className="text-xs text-neutral-500 flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold text-[#0d0d0d]">{disc.nombreCorto}</span>
-                            <span aria-hidden="true">·</span>
+                          <p className="text-[11px] text-zinc-400 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[#a5b0ff] font-medium">{disc.nombreCorto}</span>
+                            <span>·</span>
                             <span>{m.fase === 'Grupos' ? m.groupName : m.fase}</span>
-                            <span aria-hidden="true">·</span>
+                            <span>·</span>
                             <span className="tabular-nums">
                               {m.fecha} {m.hora}
                             </span>
                           </p>
-                          <p className="font-display text-sm font-bold uppercase text-[#0d0d0d] mt-0.5 truncate">
+                          <p className="text-sm font-medium text-white mt-0.5 truncate">
                             {home} vs {away}
                           </p>
                         </div>
                         <span
-                          className={`text-[11px] font-bold uppercase tracking-wider shrink-0 ${
-                            active ? 'text-[#707ef9]' : 'text-neutral-400'
+                          className={`text-[11px] font-medium shrink-0 ${
+                            active ? 'text-[#c8ceff]' : 'text-zinc-500'
                           }`}
                         >
                           {active
@@ -365,14 +331,10 @@ export function AdminFeaturedManager({
             </div>
           )}
 
-          {/* MODE: CUSTOM HIGHLIGHT FORM */}
           {mode === 'custom' && (
-            <div className="border border-neutral-200 bg-[#f5f6f8] p-5 space-y-4">
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-5 space-y-4">
               <div>
-                <label
-                  htmlFor="featured-custom-title"
-                  className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-                >
+                <label htmlFor="featured-custom-title" className="text-xs text-zinc-400 block mb-1.5">
                   Título principal *
                 </label>
                 <input
@@ -381,17 +343,14 @@ export function AdminFeaturedManager({
                   maxLength={140}
                   value={customTitle}
                   onChange={(e) => setCustomTitle(e.target.value)}
-                  placeholder="Ej. Gran Jornada de Semifinales Intercarreras 2026"
-                  className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                  placeholder="Ej. Semifinales Intercarreras UFRO"
+                  className={inputCls}
                 />
               </div>
 
               <div>
-                <label
-                  htmlFor="featured-custom-subtitle"
-                  className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-                >
-                  Subtítulo o fecha/lugar (opcional)
+                <label htmlFor="featured-custom-subtitle" className="text-xs text-zinc-400 block mb-1.5">
+                  Subtítulo o fecha/lugar
                 </label>
                 <input
                   id="featured-custom-subtitle"
@@ -399,16 +358,13 @@ export function AdminFeaturedManager({
                   maxLength={160}
                   value={customSubtitle}
                   onChange={(e) => setCustomSubtitle(e.target.value)}
-                  placeholder="Ej. Sábado 28 de Noviembre · Gimnasio Olímpico y Canchas UFRO"
-                  className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                  placeholder="Ej. Sábado · Gimnasio Olímpico UFRO"
+                  className={inputCls}
                 />
               </div>
 
               <div>
-                <label
-                  htmlFor="featured-custom-desc"
-                  className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-                >
+                <label htmlFor="featured-custom-desc" className="text-xs text-zinc-400 block mb-1.5">
                   Descripción breve
                 </label>
                 <textarea
@@ -417,17 +373,14 @@ export function AdminFeaturedManager({
                   maxLength={400}
                   value={customDescription}
                   onChange={(e) => setCustomDescription(e.target.value)}
-                  placeholder="Detalle clave para los estudiantes, horarios, votaciones abiertas o acceso..."
-                  className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                  placeholder="Detalle clave para visitantes..."
+                  className={inputCls}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label
-                    htmlFor="featured-cta-label"
-                    className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-                  >
+                  <label htmlFor="featured-cta-label" className="text-xs text-zinc-400 block mb-1.5">
                     Texto del botón
                   </label>
                   <input
@@ -437,21 +390,18 @@ export function AdminFeaturedManager({
                     value={ctaLabel}
                     onChange={(e) => setCtaLabel(e.target.value)}
                     placeholder="Ver programación"
-                    className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                    className={inputCls}
                   />
                 </div>
                 <div>
-                  <label
-                    htmlFor="featured-cta-section"
-                    className="text-xs font-bold uppercase tracking-wider text-neutral-600 block mb-1.5"
-                  >
-                    Sección de destino
+                  <label htmlFor="featured-cta-section" className="text-xs text-zinc-400 block mb-1.5">
+                    Destino
                   </label>
                   <select
                     id="featured-cta-section"
                     value={ctaSection}
                     onChange={(e) => setCtaSection(e.target.value as HomeFeaturedCtaSection)}
-                    className="w-full bg-white border border-neutral-300 px-3.5 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                    className={inputCls}
                   >
                     {CTA_SECTION_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -465,104 +415,96 @@ export function AdminFeaturedManager({
           )}
 
           {mode === 'auto' && (
-            <div className="border border-neutral-200 bg-[#f5f6f8] p-5 text-xs text-neutral-600 leading-relaxed space-y-1.5">
-              <p className="font-semibold text-[#0d0d0d]">Selección automática inteligente</p>
-              <p>
-                Cuando está activo el modo Automático, la portada muestra primero cualquier partido
-                en horario en vivo y, si no hay partidos en curso, el encuentro más reciente o
-                próximo programado del torneo.
-              </p>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-5 text-xs text-zinc-400 leading-relaxed">
+              Muestra automáticamente el encuentro en curso o el partido más reciente/próximo del
+              campeonato.
             </div>
           )}
         </div>
 
         {/* Live Preview Column */}
-        <div className="lg:col-span-5 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-            Vista previa en tiempo real (Hero Portada)
-          </p>
-
-          <div className="bg-[#0d0d0d] p-5">
+        <div className="lg:col-span-5 space-y-2.5">
+          <p className="text-xs text-zinc-400">Vista previa en portada</p>
+          <div className="rounded-3xl border border-white/[0.1] bg-[#050507] p-5">
             {mode === 'custom' ? (
-              <div className="bg-[#141418] border border-white/15 p-6 space-y-4 text-white">
-                <div className="flex items-center justify-between gap-2 text-xs text-neutral-300 border-b border-white/10 pb-3">
-                  <span className="font-bold uppercase tracking-wider text-[#707ef9]">
-                    {badgeLabel.trim() || `Destacado · Temporada ${state.temporada}`}
+              <div className="rounded-2xl bg-[#101016] border border-white/[0.1] p-6 space-y-4 text-white">
+                <div className="flex items-center justify-between gap-2 text-xs border-b border-white/[0.08] pb-3">
+                  <span className="text-[#a5b0ff] font-medium">
+                    {badgeLabel.trim() || `Destacado · ${state.temporada}`}
                   </span>
-                  <Sparkles className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                  <Sparkles className="w-3.5 h-3.5 text-[#a5b0ff] shrink-0" />
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="font-display text-2xl font-bold uppercase tracking-tight leading-tight text-white">
+                  <h3 className="text-xl font-medium tracking-tight text-white">
                     {customTitle.trim() || 'Título del anuncio destacado'}
                   </h3>
                   {customSubtitle.trim() && (
-                    <p className="text-xs text-neutral-300 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                    <p className="text-xs text-zinc-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-[#a5b0ff] shrink-0" />
                       <span>{customSubtitle.trim()}</span>
                     </p>
                   )}
-                  <p className="text-xs text-neutral-300 leading-relaxed pt-1">
-                    {customDescription.trim() ||
-                      'Aquí se mostrará el mensaje informativo designado por la administración.'}
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {customDescription.trim() || 'Mensaje informativo destacado en portada.'}
                   </p>
                 </div>
 
-                <div className="pt-3 border-t border-white/10">
-                  <span className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-xs">
-                    <span>{ctaLabel.trim() || 'Explorar sección'}</span>
+                <div className="pt-3 border-t border-white/[0.08]">
+                  <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-[#050507] text-xs font-medium">
+                    <span>{ctaLabel.trim() || 'Explorar'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
               </div>
             ) : selectedMatch ? (
-              <div className="bg-[#141418] border border-white/15 p-6 space-y-5 text-white">
-                <div className="flex items-center justify-between gap-3 text-xs text-neutral-300 border-b border-white/10 pb-3">
+              <div className="rounded-2xl bg-[#101016] border border-white/[0.1] p-6 space-y-5 text-white">
+                <div className="flex items-center justify-between gap-3 text-xs border-b border-white/[0.08] pb-3">
                   <span className="font-medium text-white truncate">
                     {badgeLabel.trim()
                       ? `${badgeLabel.trim()} · ${DISCIPLINE_MAP[selectedMatch.disciplineId].nombreCorto}`
                       : DISCIPLINE_MAP[selectedMatch.disciplineId].nombreCorto}
                   </span>
-                  <span className="text-neutral-400 tabular-nums whitespace-nowrap shrink-0">
+                  <span className="text-zinc-500 tabular-nums shrink-0">
                     {selectedMatch.fecha} · {selectedMatch.hora}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 py-1">
                   <div className="min-w-0">
-                    <p className="font-display text-lg font-bold uppercase text-white leading-tight break-words">
+                    <p className="text-sm font-medium text-white leading-tight break-words">
                       {teamMap.get(selectedMatch.homeTeamId)?.nombre ?? selectedMatch.homeTeamId}
                     </p>
-                    <p className="text-xs text-neutral-400 mt-0.5 truncate">
+                    <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
                       {teamMap.get(selectedMatch.homeTeamId)?.carrera}
                     </p>
                   </div>
-                  <div className="px-3 py-1.5 bg-[#0d0d0d] border border-white/10 font-display text-xl font-bold tabular-nums">
+                  <div className="px-3 py-1.5 rounded-full bg-[#050507] border border-white/[0.1] text-base font-mono tabular-nums">
                     {selectedMatch.status === 'FINALIZADO'
                       ? `${selectedMatch.homeScore} — ${selectedMatch.awayScore}`
                       : 'vs'}
                   </div>
                   <div className="text-right min-w-0">
-                    <p className="font-display text-lg font-bold uppercase text-white leading-tight break-words">
+                    <p className="text-sm font-medium text-white leading-tight break-words">
                       {teamMap.get(selectedMatch.awayTeamId)?.nombre ?? selectedMatch.awayTeamId}
                     </p>
-                    <p className="text-xs text-neutral-400 mt-0.5 truncate">
+                    <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
                       {teamMap.get(selectedMatch.awayTeamId)?.carrera}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/10 text-xs text-neutral-400">
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.08] text-xs text-zinc-500">
                   <span className="flex items-center gap-1.5 truncate">
-                    <MapPin className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
+                    <MapPin className="w-3.5 h-3.5 text-[#a5b0ff] shrink-0" />
                     <span className="truncate">{selectedMatch.cancha}</span>
                   </span>
-                  <span className="text-white whitespace-nowrap">Ver ficha oficial →</span>
+                  <span className="text-white whitespace-nowrap">Ver ficha →</span>
                 </div>
               </div>
             ) : (
-              <div className="bg-[#141418] border border-white/15 p-6 text-xs text-neutral-400">
-                No hay partidos registrados aún. Puedes usar el modo Anuncio Personalizado.
+              <div className="rounded-2xl bg-[#101016] border border-white/[0.08] p-6 text-xs text-zinc-500">
+                Sin partidos registrados. Puedes usar el modo Anuncio libre.
               </div>
             )}
           </div>

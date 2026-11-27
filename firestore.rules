@@ -49,9 +49,49 @@ service cloud.firestore {
       );
     }
 
+    function isModerator() {
+      return isVerified()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderador';
+    }
+
+    function isAdminOrModerator() {
+      return isAdmin() || isModerator();
+    }
+
+    function isRefereeChiefForDiscipline(discId) {
+      return isVerified()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'jefe_arbitros_futbol'
+            && discId in ['f7-h-1', 'f7-h-2', 'f7-h-3', 'f7-m']
+          )
+          || (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'jefe_arbitros_basquetbol'
+            && discId in ['basquet-h', 'basquet-3x3-m']
+          )
+          || (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'jefe_arbitros_voleibol'
+            && discId in ['voley-m', 'voley-h']
+          )
+        );
+    }
+
+    function isAnyRefereeChief() {
+      return isVerified()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in [
+          'jefe_arbitros_futbol',
+          'jefe_arbitros_basquetbol',
+          'jefe_arbitros_voleibol'
+        ];
+    }
+
     function isReferee() {
       return isVerified() && (
         isAdmin()
+        || isAnyRefereeChief()
         || (
           exists(/databases/$(database)/documents/users/$(request.auth.uid))
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'arbitro'
@@ -61,7 +101,7 @@ service cloud.firestore {
 
     function isPhotographer() {
       return isVerified() && (
-        isAdmin()
+        isAdminOrModerator()
         || (
           exists(/databases/$(database)/documents/users/$(request.auth.uid))
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'fotografo'
@@ -71,7 +111,7 @@ service cloud.firestore {
 
     function isPress() {
       return isVerified() && (
-        isAdmin()
+        isAdminOrModerator()
         || (
           exists(/databases/$(database)/documents/users/$(request.auth.uid))
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'prensa'
@@ -98,7 +138,19 @@ service cloud.firestore {
     }
 
     function isValidRole(role) {
-      return role in ['tradicional', 'jugador', 'delegado', 'arbitro', 'fotografo', 'prensa', 'admin'];
+      return role in [
+        'tradicional',
+        'jugador',
+        'delegado',
+        'arbitro',
+        'jefe_arbitros_futbol',
+        'jefe_arbitros_basquetbol',
+        'jefe_arbitros_voleibol',
+        'fotografo',
+        'prensa',
+        'moderador',
+        'admin'
+      ];
     }
 
     function isValidDiscipline(d) {
@@ -164,6 +216,20 @@ service cloud.firestore {
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
         && isValidId(data.grantedBy)
         && data.createdAt is timestamp;
+    }
+
+    function isValidRefereeRosterEntry(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'role', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in [
+          'arbitro',
+          'jefe_arbitros_futbol',
+          'jefe_arbitros_basquetbol',
+          'jefe_arbitros_voleibol'
+        ]
+        && data.updatedAt is timestamp;
     }
 
     function isValidMasterSheetsMap(ms) {
@@ -297,6 +363,7 @@ service cloud.firestore {
           'id',
           'nombre',
           'sigla',
+          'clubName',
           'disciplineId',
           'carrera',
           'facultad',
@@ -311,6 +378,7 @@ service cloud.firestore {
         && isValidId(data.id)
         && data.nombre is string && data.nombre.size() >= 2 && data.nombre.size() <= 120
         && data.sigla is string && data.sigla.size() >= 2 && data.sigla.size() <= 8
+        && (!('clubName' in data) || (data.clubName is string && data.clubName.size() <= 120))
         && isValidDiscipline(data.disciplineId)
         && data.carrera is string && data.carrera.size() >= 2 && data.carrera.size() <= 140
         && data.facultad is string && data.facultad.size() >= 2 && data.facultad.size() <= 140
@@ -448,6 +516,14 @@ service cloud.firestore {
         && m.away is int && m.away >= 0 && m.away <= 200;
     }
 
+    function isValidPenaltyScore(ps) {
+      return ps is map
+        && ps.keys().hasAll(['home', 'away'])
+        && ps.keys().hasOnly(['home', 'away'])
+        && ps.home is int && ps.home >= 0 && ps.home <= 50
+        && ps.away is int && ps.away >= 0 && ps.away <= 50;
+    }
+
     function isValidMatchLiveState(ls) {
       return ls is map
         && ls.keys().hasAll(['onCourt'])
@@ -495,6 +571,7 @@ service cloud.firestore {
           'status',
           'homePresentIds',
           'awayPresentIds',
+          'matchDorsals',
           'recordedAt',
           'recordedByName',
           'notes'
@@ -502,6 +579,7 @@ service cloud.firestore {
         && att.status in ['NO_REGISTRADA', 'REGISTRADA', 'OMITIDA']
         && isValidAttendanceIdList(att.homePresentIds)
         && isValidAttendanceIdList(att.awayPresentIds)
+        && (!('matchDorsals' in att) || (att.matchDorsals is map && att.matchDorsals.size() <= 80))
         && (!('recordedAt' in att) || (att.recordedAt is string && att.recordedAt.size() <= 64))
         && (!('recordedByName' in att) || (att.recordedByName is string && att.recordedByName.size() <= 120))
         && (!('notes' in att) || (att.notes is string && att.notes.size() <= 240));
@@ -546,6 +624,7 @@ service cloud.firestore {
           'awayTeamId',
           'homeScore',
           'awayScore',
+          'penaltyScore',
           'status',
           'periodLabel',
           'clock',
@@ -556,6 +635,8 @@ service cloud.firestore {
           'liveState',
           'attendance',
           'refereeId',
+          'assignedRefereeUid',
+          'assignedRefereeName',
           'scoresheetValidation',
           'createdAt',
           'updatedAt'
@@ -574,16 +655,19 @@ service cloud.firestore {
         && data.homeTeamId != data.awayTeamId
         && data.homeScore is int && data.homeScore >= 0 && data.homeScore <= 300
         && data.awayScore is int && data.awayScore >= 0 && data.awayScore <= 300
+        && (!('penaltyScore' in data) || isValidPenaltyScore(data.penaltyScore))
         && data.status in ['PROGRAMADO', 'EN_VIVO', 'FINALIZADO']
         && data.periodLabel is string && data.periodLabel.size() <= 60
         && data.clock is string && data.clock.size() <= 24
         && data.periods is list && data.periods.size() <= 10
         && data.fouls is map && data.fouls.keys().hasOnly(['home', 'away'])
         && data.timeouts is map && data.timeouts.keys().hasOnly(['home', 'away'])
-        && data.events is list && data.events.size() <= 200
+        && data.events is list && data.events.size() <= 500
         && (!('liveState' in data) || isValidMatchLiveState(data.liveState))
         && (!('attendance' in data) || isValidMatchAttendance(data.attendance))
         && data.refereeId is string && data.refereeId.size() <= 128
+        && (!('assignedRefereeUid' in data) || (data.assignedRefereeUid is string && data.assignedRefereeUid.size() <= 128))
+        && (!('assignedRefereeName' in data) || (data.assignedRefereeName is string && data.assignedRefereeName.size() <= 120))
         && (!('scoresheetValidation' in data) || data.scoresheetValidation is map)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -778,7 +862,7 @@ service cloud.firestore {
         && (!('aiGenerated' in data) || data.aiGenerated is bool)
         && isValidId(data.authorUid)
         && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120
-        && data.authorRole in ['admin', 'prensa']
+        && data.authorRole in ['admin', 'moderador', 'prensa']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1012,10 +1096,10 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // --- Collection 1: /users/{userId} (PII isolated to owner or admin) ---
+    // --- Collection 1: /users/{userId} (PII isolated to owner, admin, or moderator) ---
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdminOrModerator());
+      allow list: if isAdminOrModerator();
 
       allow create: if isVerified()
         && isValidId(userId)
@@ -1045,6 +1129,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
+          // Tier 1A: Full Admin
           (
             isAdmin()
             && incoming().diff(existing()).affectedKeys().hasOnly([
@@ -1062,6 +1147,20 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
+          // Tier 1B: Moderator (cannot modify admins or grant admin role)
+          || (
+            isModerator()
+            && existing().role != 'admin'
+            && incoming().role != 'admin'
+            && existing().email.lower() != 'a.sotomillapan@gmail.com'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'role',
+              'linkedPlayerId',
+              'delegatedTeamId',
+              'updatedAt'
+            ])
+          )
+          // Tier 2: Owner self-edit (cannot escalate role or links)
           || (
             isOwner(userId)
             && incoming().role == existing().role
@@ -1108,7 +1207,7 @@ service cloud.firestore {
         && settingId == 'tournament'
         && isValidTournamentSettings(incoming())
         && incoming().updatedAt == request.time
-        && isAdmin();
+        && isAdminOrModerator();
       allow update: if isVerified()
         && settingId == 'tournament'
         && isValidTournamentSettings(incoming())
@@ -1125,7 +1224,7 @@ service cloud.firestore {
           'homeFeatured',
           'updatedAt'
         ])
-        && isAdmin();
+        && isAdminOrModerator();
       allow delete: if false;
     }
 
@@ -1139,7 +1238,7 @@ service cloud.firestore {
         && isValidDisciplineConfig(incoming())
         && incoming().disciplineId == disciplineId
         && incoming().updatedAt == request.time
-        && isAdmin();
+        && isAdminOrModerator();
 
       allow update: if isVerified()
         && isValidDiscipline(disciplineId)
@@ -1160,7 +1259,7 @@ service cloud.firestore {
           'faseActual',
           'updatedAt'
         ])
-        && isAdmin();
+        && isAdminOrModerator();
 
       allow delete: if isValidDiscipline(disciplineId) && isAdmin();
     }
@@ -1177,7 +1276,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
+          isAdminOrModerator()
           || (
             isDelegado()
             && incoming().createdByUid == request.auth.uid
@@ -1189,16 +1288,22 @@ service cloud.firestore {
       allow update: if isVerified()
         && isValidId(teamId)
         && isValidTeam(incoming())
-        && incoming().id == existing().id
+        && incoming().id == teamId
         && incoming().disciplineId == existing().disciplineId
-        && incoming().createdAt == existing().createdAt
+        && (
+          (!('createdAt' in existing()) && isAdminOrModerator() && incoming().createdAt == request.time)
+          || incoming().createdAt == existing().createdAt
+        )
         && incoming().updatedAt == request.time
         && (
           (
-            isAdmin()
+            isAdminOrModerator()
             && incoming().diff(existing()).affectedKeys().hasOnly([
+              'id',
+              'createdAt',
               'nombre',
               'sigla',
+              'clubName',
               'carrera',
               'facultad',
               'groupName',
@@ -1216,6 +1321,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'nombre',
               'sigla',
+              'clubName',
               'escudo',
               'anioFundacion',
               'logrosAnteriores',
@@ -1224,7 +1330,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isValidId(teamId) && isAdmin();
+      allow delete: if isValidId(teamId) && isAdminOrModerator();
     }
 
     // --- Collection 6: /players/{playerId} (Public Sports Profile - No Student PII) ---
@@ -1239,7 +1345,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
+          isAdminOrModerator()
           || (
             isDelegado()
             && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
@@ -1258,9 +1364,9 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Tier 1: Admin full edit
+          // Tier 1: Admin or Moderator full edit
           (
-            isAdmin()
+            isAdminOrModerator()
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'teamId',
               'dorsal',
@@ -1323,7 +1429,7 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          // Tier 4: Arbitro updating match statistics only
+          // Tier 4: Arbitro or Chief updating match statistics only
           || (
             isReferee()
             && incoming().teamId == existing().teamId
@@ -1331,7 +1437,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isValidId(playerId) && isAdmin();
+      allow delete: if isValidId(playerId) && isAdminOrModerator();
     }
 
     // --- Collection 7: /player_private/{playerId} (Isolated UFRO Student PII) ---
@@ -1339,11 +1445,11 @@ service cloud.firestore {
       allow get: if isVerified()
         && isValidId(playerId)
         && (
-          isAdmin()
+          isAdminOrModerator()
           || isLinkedPlayer(playerId)
           || isDelegadoOf(existing().teamId)
         );
-      allow list: if isAdmin();
+      allow list: if isAdminOrModerator();
 
       allow create: if isVerified()
         && isValidId(playerId)
@@ -1351,7 +1457,7 @@ service cloud.firestore {
         && incoming().playerId == playerId
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
+          isAdminOrModerator()
           || (
             isDelegado()
             && exists(/databases/$(database)/documents/teams/$(incoming().teamId))
@@ -1369,7 +1475,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (
-            isAdmin()
+            isAdminOrModerator()
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'teamId',
               'rut',
@@ -1409,10 +1515,10 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isValidId(playerId) && isAdmin();
+      allow delete: if isValidId(playerId) && isAdminOrModerator();
     }
 
-    // --- Collection 8: /matches/{matchId} (Matches with Terminal State Lock) ---
+    // --- Collection 8: /matches/{matchId} (Matches with Role-Scoped Referee Desk & Terminal State Lock) ---
     match /matches/{matchId} {
       allow get: if isValidId(matchId);
       allow list: if isValidDiscipline(resource.data.disciplineId);
@@ -1423,20 +1529,28 @@ service cloud.firestore {
         && incoming().id == matchId
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && isAdmin();
+        && (
+          isAdminOrModerator()
+          || isRefereeChiefForDiscipline(incoming().disciplineId)
+        );
 
       allow update: if isVerified()
         && isValidId(matchId)
         && isValidMatch(incoming())
-        && incoming().id == existing().id
+        && incoming().id == matchId
         && incoming().disciplineId == existing().disciplineId
-        && incoming().createdAt == existing().createdAt
+        && (
+          (!('createdAt' in existing()) && isAdminOrModerator() && incoming().createdAt == request.time)
+          || incoming().createdAt == existing().createdAt
+        )
         && incoming().updatedAt == request.time
         && (
-          // Tier 1: Admin override (can edit scheduled, live, or correct finalized matches)
+          // Tier 1: Admin or Moderator override (can edit scheduled, live, or correct finalized matches)
           (
-            isAdmin()
+            isAdminOrModerator()
             && incoming().diff(existing()).affectedKeys().hasOnly([
+              'id',
+              'createdAt',
               'groupName',
               'fase',
               'playoffLeg',
@@ -1448,6 +1562,7 @@ service cloud.firestore {
               'awayTeamId',
               'homeScore',
               'awayScore',
+              'penaltyScore',
               'status',
               'periodLabel',
               'clock',
@@ -1458,17 +1573,48 @@ service cloud.firestore {
               'liveState',
               'attendance',
               'refereeId',
+              'assignedRefereeUid',
+              'assignedRefereeName',
               'scoresheetValidation',
               'updatedAt'
             ])
           )
-          // Tier 2: Referee live scoreboard & finalization (Terminal State Locked once FINALIZADO)
+          // Tier 2: Referee Chief for this unified discipline (assign referees & operate live scoreboard; terminal lock once FINALIZADO)
           || (
-            isReferee()
+            isRefereeChiefForDiscipline(existing().disciplineId)
             && existing().status != 'FINALIZADO'
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'homeScore',
               'awayScore',
+              'penaltyScore',
+              'status',
+              'periodLabel',
+              'clock',
+              'periods',
+              'fouls',
+              'timeouts',
+              'events',
+              'liveState',
+              'attendance',
+              'refereeId',
+              'assignedRefereeUid',
+              'assignedRefereeName',
+              'scoresheetValidation',
+              'updatedAt'
+            ])
+          )
+          // Tier 3: Assigned Referee live scoreboard & finalization (only their assigned matches; Terminal State Locked once FINALIZADO)
+          || (
+            isReferee()
+            && existing().status != 'FINALIZADO'
+            && (
+              ('assignedRefereeUid' in existing() && existing().assignedRefereeUid == request.auth.uid)
+              || existing().refereeId == request.auth.uid
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'homeScore',
+              'awayScore',
+              'penaltyScore',
               'status',
               'periodLabel',
               'clock',
@@ -1484,7 +1630,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isValidId(matchId) && isAdmin();
+      allow delete: if isValidId(matchId) && isAdminOrModerator();
     }
 
     // --- Collection 9: /transfers/{transferId} (Delegate-Only Requests, Mutual Approval, Public Effected Feed) ---
@@ -1492,12 +1638,12 @@ service cloud.firestore {
       allow get: if isValidId(transferId)
         && (
           existing().estado == 'APROBADA'
-          || isAdmin()
+          || isAdminOrModerator()
           || isDelegadoOf(existing().fromTeamId)
           || isDelegadoOf(existing().toTeamId)
         );
       allow list: if resource.data.estado == 'APROBADA'
-        || isAdmin()
+        || isAdminOrModerator()
         || isDelegadoOf(resource.data.fromTeamId)
         || isDelegadoOf(resource.data.toTeamId);
 
@@ -1612,14 +1758,14 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          // Action 3: Admin editorial/status moderation
+          // Action 3: Admin or Moderator editorial/status moderation
           || (
-            isAdmin()
+            isAdminOrModerator()
             && incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'motivo', 'updatedAt'])
           )
         );
 
-      allow delete: if isValidId(transferId) && isAdmin();
+      allow delete: if isValidId(transferId) && isAdminOrModerator();
     }
 
     // --- Collection 10: /mvp_votes/{voteId} (Live-Hour MVP Voting for All Roles) ---
@@ -1648,10 +1794,10 @@ service cloud.firestore {
             existing().voterUid == request.auth.uid
             && incoming().diff(existing()).affectedKeys().hasOnly(['playerId', 'playerName', 'teamId', 'updatedAt'])
           )
-          || isAdmin()
+          || isAdminOrModerator()
         );
 
-      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+      allow delete: if isValidId(voteId) && (isAdminOrModerator() || (isVerified() && existing().voterUid == request.auth.uid));
     }
 
     // --- Collection 11: /photos/{photoId} (Official Photography Index + Drive Links) ---
@@ -1674,11 +1820,11 @@ service cloud.firestore {
         && incoming().photographerUid == existing().photographerUid
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'disciplineId', 'stageLabel', 'matchLabel', 'season'])
-        && (isAdmin() || (isPhotographer() && existing().photographerUid == request.auth.uid));
+        && (isAdminOrModerator() || (isPhotographer() && existing().photographerUid == request.auth.uid));
 
       allow delete: if isValidId(photoId)
         && isVerified()
-        && (isAdmin() || (isPhotographer() && existing().photographerUid == request.auth.uid));
+        && (isAdminOrModerator() || (isPhotographer() && existing().photographerUid == request.auth.uid));
     }
 
     // --- Collection 12: /news/{newsId} (Championship News & Featured Announcements - Press & Admin) ---
@@ -1728,14 +1874,14 @@ service cloud.firestore {
 
       allow create: if isVerified()
         && isValidDiscipline(disciplineId)
-        && isAdmin()
+        && isAdminOrModerator()
         && isValidAwardNominees(incoming())
         && incoming().disciplineId == disciplineId
         && incoming().updatedAt == request.time;
 
       allow update: if isVerified()
         && isValidDiscipline(disciplineId)
-        && isAdmin()
+        && isAdminOrModerator()
         && isValidAwardNominees(incoming())
         && incoming().disciplineId == existing().disciplineId
         && incoming().updatedAt == request.time
@@ -1745,7 +1891,7 @@ service cloud.firestore {
           'updatedAt'
         ]);
 
-      allow delete: if isValidDiscipline(disciplineId) && isAdmin();
+      allow delete: if isValidDiscipline(disciplineId) && isAdminOrModerator();
     }
 
     // --- Collection 14: /championship_mvp_votes/{voteId} (1 Verified Vote per User per Discipline) ---
@@ -1779,10 +1925,10 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          || isAdmin()
+          || isAdminOrModerator()
         );
 
-      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+      allow delete: if isValidId(voteId) && (isAdminOrModerator() || (isVerified() && existing().voterUid == request.auth.uid));
     }
 
     // --- Collection 15: /position_award_votes/{voteId} (1 Verified Vote per User per Sport Position) ---
@@ -1818,10 +1964,10 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          || isAdmin()
+          || isAdminOrModerator()
         );
 
-      allow delete: if isValidId(voteId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+      allow delete: if isValidId(voteId) && (isAdminOrModerator() || (isVerified() && existing().voterUid == request.auth.uid));
     }
 
     // --- Collection 16: /toty_ballots/{ballotId} (1 Verified TOTY Ballot per User per Discipline) ---
@@ -1853,10 +1999,10 @@ service cloud.firestore {
               'updatedAt'
             ])
           )
-          || isAdmin()
+          || isAdminOrModerator()
         );
 
-      allow delete: if isValidId(ballotId) && (isAdmin() || (isVerified() && existing().voterUid == request.auth.uid));
+      allow delete: if isValidId(ballotId) && (isAdminOrModerator() || (isVerified() && existing().voterUid == request.auth.uid));
     }
 
     // --- Collection 17: /toty_configs/{disciplineId} (Admin-Managed TOTY Formation per Discipline) ---
@@ -1866,14 +2012,14 @@ service cloud.firestore {
 
       allow create: if isVerified()
         && isValidDiscipline(disciplineId)
-        && isAdmin()
+        && isAdminOrModerator()
         && isValidTotyConfig(incoming())
         && incoming().disciplineId == disciplineId
         && incoming().updatedAt == request.time;
 
       allow update: if isVerified()
         && isValidDiscipline(disciplineId)
-        && isAdmin()
+        && isAdminOrModerator()
         && isValidTotyConfig(incoming())
         && incoming().disciplineId == existing().disciplineId
         && incoming().updatedAt == request.time
@@ -1884,7 +2030,7 @@ service cloud.firestore {
           'updatedAt'
         ]);
 
-      allow delete: if isValidDiscipline(disciplineId) && isAdmin();
+      allow delete: if isValidDiscipline(disciplineId) && isAdminOrModerator();
     }
 
     // --- Collection 18: /leyendas_leaderboard/{entryId} (LEYENDAS Weekly Global Ranking) ---
@@ -1901,7 +2047,40 @@ service cloud.firestore {
 
       allow update: if false;
 
-      allow delete: if isValidId(entryId) && (isAdmin() || (isVerified() && existing().uid == request.auth.uid));
+      allow delete: if isValidId(entryId) && (isAdminOrModerator() || (isVerified() && existing().uid == request.auth.uid));
+    }
+
+    // --- Collection 19: /referee_roster/{userId} (Zero-PII Directory of Referees & Chiefs for Match Assignment) ---
+    match /referee_roster/{userId} {
+      allow get: if isValidId(userId) && (isAdminOrModerator() || isAnyRefereeChief() || isOwner(userId));
+      allow list: if isVerified()
+        && resource.data.role in [
+          'arbitro',
+          'jefe_arbitros_futbol',
+          'jefe_arbitros_basquetbol',
+          'jefe_arbitros_voleibol'
+        ];
+
+      allow create: if isVerified()
+        && isValidId(userId)
+        && isValidRefereeRosterEntry(incoming())
+        && incoming().uid == userId
+        && incoming().updatedAt == request.time
+        && isAdminOrModerator();
+
+      allow update: if isVerified()
+        && isValidId(userId)
+        && isValidRefereeRosterEntry(incoming())
+        && incoming().uid == existing().uid
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'role',
+          'updatedAt'
+        ])
+        && isAdminOrModerator();
+
+      allow delete: if isValidId(userId) && isAdminOrModerator();
     }
   }
 }

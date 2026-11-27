@@ -27,7 +27,7 @@ import {
   type TableVirtuosoHandle,
 } from 'react-virtuoso';
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
-import { computePlayerAttendanceSummary } from '../domain/attendanceEngine';
+import { computePlayerAttendanceSummary, formatDorsalLabel } from '../domain/attendanceEngine';
 import {
   buildUnifiedPlayers,
   findPlayerParticipations,
@@ -349,7 +349,7 @@ export function PlayersView({
                     : ''}
                 </p>
                 <p className="text-xs text-zinc-500">
-                  #{player.dorsal} · {player.posicion}
+                  {formatDorsalLabel(player.dorsal)} · {player.posicion}
                   {isMulti && (
                     <span className="text-[#a5b0ff]">
                       {' '}· {profile.participations.length} equipos
@@ -377,7 +377,7 @@ export function PlayersView({
                         {part.team?.nombre ?? part.player.teamId}
                       </span>
                       <span className="text-xs text-zinc-500 ml-1.5">
-                        · {partDisc.nombreCorto} (#{part.player.dorsal})
+                        · {partDisc.nombreCorto} ({formatDorsalLabel(part.player.dorsal)})
                       </span>
                     </button>
                   </div>
@@ -614,7 +614,7 @@ export function PlayersView({
                         {getInitials(activeParticipationRecord)}
                       </span>
                       <span className="text-[11px] text-zinc-500 tabular-nums">
-                        #{activeParticipationRecord.dorsal}
+                        {formatDorsalLabel(activeParticipationRecord.dorsal)}
                       </span>
                     </div>
                   )}
@@ -646,7 +646,7 @@ export function PlayersView({
                       >
                         {teamMap.get(activeParticipationRecord.teamId)?.nombre}
                       </button>{' '}
-                      · {activeParticipationRecord.posicion} · #{activeParticipationRecord.dorsal}
+                      · {activeParticipationRecord.posicion} · {formatDorsalLabel(activeParticipationRecord.dorsal)}
                     </p>
                   </div>
                 </div>
@@ -686,7 +686,7 @@ export function PlayersView({
                             {part.team?.nombre ?? part.player.teamId}
                           </span>
                           <span className="block text-[10px] opacity-80">
-                            {pDisc.nombreCorto} · #{part.player.dorsal}
+                            {pDisc.nombreCorto} · {formatDorsalLabel(part.player.dorsal)}
                           </span>
                         </button>
                       );
@@ -784,7 +784,7 @@ export function PlayersView({
                                 {part.team?.nombre ?? part.player.teamId}
                               </button>
                               <p className="text-[11px] text-zinc-500 truncate">
-                                {pDisc.nombreCorto} · #{part.player.dorsal} · {part.player.posicion}
+                                {pDisc.nombreCorto} · {formatDorsalLabel(part.player.dorsal)} · {part.player.posicion}
                               </p>
                             </div>
                             {selectedPlayerParticipations.length > 1 && !isCurrent && (

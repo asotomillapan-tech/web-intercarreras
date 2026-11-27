@@ -7,6 +7,7 @@ import {
   History,
   Plus,
   Search,
+  Target,
   Trash2,
   X,
 } from 'lucide-react';
@@ -82,6 +83,7 @@ export function AdminMatchEditor({
       setEditingMatch({
         ...found,
         periods: found.periods.map((p) => ({ ...p })),
+        penaltyScore: found.penaltyScore ? { ...found.penaltyScore } : undefined,
       });
       setCorrectionNote('');
       setErrorMsg(null);
@@ -110,7 +112,16 @@ export function AdminMatchEditor({
       );
     });
     return sortMatchesChronologically(matched, sortOrder);
-  }, [state.matches, disciplineFilter, groupFilter, stageFilter, statusFilter, query, teamMap, sortOrder]);
+  }, [
+    state.matches,
+    disciplineFilter,
+    groupFilter,
+    stageFilter,
+    statusFilter,
+    query,
+    teamMap,
+    sortOrder,
+  ]);
 
   const groupedMatchSections = useMemo(
     () =>
@@ -135,6 +146,7 @@ export function AdminMatchEditor({
     setEditingMatch({
       ...match,
       periods: match.periods.map((p) => ({ ...p })),
+      penaltyScore: match.penaltyScore ? { ...match.penaltyScore } : undefined,
     });
     setCorrectionNote('');
     setErrorMsg(null);
@@ -208,6 +220,7 @@ export function AdminMatchEditor({
         cancha: discMeta.sedePrincipal,
         homeTeamId: discTeams[0]?.id ?? '',
         awayTeamId: discTeams[1]?.id ?? '',
+        penaltyScore: discMeta.sportType === 'futbol7' ? prev.penaltyScore : undefined,
         refereeId: defaultRef,
       };
     });
@@ -256,6 +269,7 @@ export function AdminMatchEditor({
 
     const homeName = teamMap.get(editingMatch.homeTeamId)?.nombre ?? editingMatch.homeTeamId;
     const awayName = teamMap.get(editingMatch.awayTeamId)?.nombre ?? editingMatch.awayTeamId;
+    const isFootball = DISCIPLINE_MAP[editingMatch.disciplineId]?.sportType === 'futbol7';
 
     const auditNote =
       correctionNote.trim() ||
@@ -266,6 +280,14 @@ export function AdminMatchEditor({
     const finalHomeScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.homeScore) || 0)));
     const finalAwayScore = Math.max(0, Math.min(300, Math.trunc(Number(editingMatch.awayScore) || 0)));
 
+    const normalizedPenalty =
+      isFootball && editingMatch.penaltyScore
+        ? {
+            home: Math.max(0, Math.min(50, Math.trunc(Number(editingMatch.penaltyScore.home) || 0))),
+            away: Math.max(0, Math.min(50, Math.trunc(Number(editingMatch.penaltyScore.away) || 0))),
+          }
+        : undefined;
+
     const normalizedLeg: MatchPlayoffLeg | undefined =
       editingMatch.fase === 'Grupos'
         ? undefined
@@ -275,9 +297,11 @@ export function AdminMatchEditor({
     const savedMatch: Match = {
       ...editingMatch,
       playoffLeg: normalizedLeg,
-      groupName: editingMatch.groupName.trim() || (editingMatch.fase === 'Grupos' ? 'Grupo A' : 'Playoffs'),
+      groupName:
+        editingMatch.groupName.trim() || (editingMatch.fase === 'Grupos' ? 'Grupo A' : 'Playoffs'),
       homeScore: finalHomeScore,
       awayScore: finalAwayScore,
+      penaltyScore: normalizedPenalty,
       jornada: Math.max(1, Math.min(50, Math.trunc(Number(editingMatch.jornada) || 1))),
       periodLabel:
         editingMatch.status === 'FINALIZADO'
@@ -289,7 +313,7 @@ export function AdminMatchEditor({
             scoresheetValidation: {
               ...(editingMatch.scoresheetValidation ?? {}),
               validatedAt: new Date().toISOString(),
-              refereeName: 'Administrador UFRO',
+              refereeName: 'Administración UFRO',
               method: 'MANUAL_ARBITRO',
               manualNotes: auditNote,
               finalHomeScore,
@@ -319,6 +343,7 @@ export function AdminMatchEditor({
           fecha: returnDate,
           homeScore: 0,
           awayScore: 0,
+          penaltyScore: undefined,
           status: 'PROGRAMADO',
           periodLabel: 'Por iniciar',
           clock: '00:00',
@@ -330,23 +355,19 @@ export function AdminMatchEditor({
         };
         onAddMatch(returnMatch);
         setSavedMsg(
-          `Llave Ida y Vuelta programada en Firestore (${savedMatch.fase}): Ida ${savedMatch.fecha} (${homeName} vs ${awayName}) y Vuelta ${returnDate} (${awayName} vs ${homeName}).`
+          `Llave Ida y Vuelta programada (${savedMatch.fase}): ${homeName} vs ${awayName}.`
         );
       } else {
-        const legSuffix =
-          savedMatch.playoffLeg === 'IDA'
-            ? ' · Ida'
-            : savedMatch.playoffLeg === 'VUELTA'
-            ? ' · Vuelta'
-            : '';
-        setSavedMsg(
-          `Encuentro programado en Firestore (${savedMatch.fase}${legSuffix}): ${homeName} vs ${awayName} · ${savedMatch.fecha} ${savedMatch.hora}.`
-        );
+        setSavedMsg(`Encuentro programado (${savedMatch.fase}): ${homeName} vs ${awayName}.`);
       }
     } else {
       onUpdateMatch(savedMatch);
       setSavedMsg(
-        `Partido actualizado en Firestore: ${homeName} ${savedMatch.homeScore} — ${savedMatch.awayScore} ${awayName} (${savedMatch.fase} · ${savedMatch.status}). Las tablas y el cuadro de playoffs se recalcularon automáticamente.`
+        `Partido actualizado: ${homeName} ${savedMatch.homeScore} — ${savedMatch.awayScore} ${awayName}${
+          savedMatch.penaltyScore
+            ? ` (Pen. ${savedMatch.penaltyScore.home}-${savedMatch.penaltyScore.away})`
+            : ''
+        }.`
       );
     }
     setEditingMatch(null);
@@ -359,22 +380,28 @@ export function AdminMatchEditor({
   const liveCount = state.matches.filter((m) => m.status === 'EN_VIVO').length;
   const scheduledCount = state.matches.filter((m) => m.status === 'PROGRAMADO').length;
 
+  const inputCls =
+    'w-full rounded-xl bg-[#050507] border border-white/[0.1] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]';
+
+  const isEditingFootball =
+    editingMatch && DISCIPLINE_MAP[editingMatch.disciplineId]?.sportType === 'futbol7';
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-neutral-200 pb-5">
-        <div className="flex items-start gap-3">
-          <History className="w-6 h-6 text-[#707ef9] shrink-0 mt-1" />
-          <div>
-            <h2 className="font-display text-3xl uppercase tracking-wide text-[#0d0d0d]">
-              Edición de Partidos Pasados y Programación
-            </h2>
-            <p className="text-xs text-neutral-600 mt-1 max-w-2xl">
-              Como Administrador UFRO puedes corregir marcadores, parciales, estado, fecha, horario,
-              cancha o equipos de partidos ya <strong>FINALIZADOS</strong> o programados. Cada
-              modificación actualiza Firestore, recalcula posiciones e historial de equipos y queda
-              auditada en la bitácora.
-            </p>
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff]">
+            <History className="w-3.5 h-3.5" />
+            <span>Fixture y Resultados Oficiales</span>
           </div>
+          <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
+            Gestión de{' '}
+            <span className="font-editorial italic font-normal text-[#c8ceff]">partidos</span>
+          </h2>
+          <p className="text-xs text-zinc-400 max-w-2xl">
+            Programa encuentros, corrige resultados pasados, parciales y definiciones por penales
+            con recálculo automático de tablas y llaves.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 shrink-0">
@@ -382,24 +409,24 @@ export function AdminMatchEditor({
             <button
               type="button"
               onClick={startCreatingMatch}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-white hover:bg-zinc-200 text-[#050507] text-xs font-medium transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Programar encuentro</span>
             </button>
           )}
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Pasados</p>
-              <p className="font-display text-2xl tabular-nums text-[#0d0d0d]">{pastCount}</p>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101016] px-3.5 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500">Pasados</p>
+              <p className="text-lg font-medium tabular-nums text-white">{pastCount}</p>
             </div>
-            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-neutral-500">En Vivo</p>
-              <p className="font-display text-2xl tabular-nums text-[#707ef9]">{liveCount}</p>
+            <div className="rounded-2xl border border-[#707ef9]/30 bg-[#707ef9]/10 px-3.5 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-[#c8ceff]">En Vivo</p>
+              <p className="text-lg font-medium tabular-nums text-[#a5b0ff]">{liveCount}</p>
             </div>
-            <div className="border border-neutral-200 bg-[#f5f6f8] px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Programados</p>
-              <p className="font-display text-2xl tabular-nums text-neutral-700">{scheduledCount}</p>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101016] px-3.5 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500">Prox.</p>
+              <p className="text-lg font-medium tabular-nums text-zinc-300">{scheduledCount}</p>
             </div>
           </div>
         </div>
@@ -408,17 +435,17 @@ export function AdminMatchEditor({
       {savedMsg && (
         <div
           role="status"
-          className="bg-emerald-50 border border-emerald-300 p-4 text-xs text-emerald-950 flex items-center justify-between gap-3"
+          className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200 flex items-center justify-between gap-3"
         >
           <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{savedMsg}</span>
           </span>
           <button
             type="button"
             onClick={() => setSavedMsg(null)}
             aria-label="Cerrar notificación"
-            className="text-emerald-800 hover:text-emerald-950 cursor-pointer"
+            className="text-emerald-300 hover:text-white cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -429,17 +456,17 @@ export function AdminMatchEditor({
       {editingMatch && (
         <form
           onSubmit={handleSave}
-          className="border-2 border-[#0d0d0d] bg-[#f5f6f8] p-6 space-y-6"
+          className="rounded-3xl border border-white/[0.12] bg-[#101016] p-6 space-y-6"
         >
-          <div className="flex items-center justify-between gap-3 border-b border-neutral-300 pb-4">
+          <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
             <div>
-              <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                {isCreatingMatch ? 'Programar Nuevo Encuentro' : 'Modificación Administrativa'} ·{' '}
+              <p className="text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff]">
+                {isCreatingMatch ? 'Nuevo Encuentro' : 'Edición de Partido'} ·{' '}
                 {DISCIPLINE_MAP[editingMatch.disciplineId].nombre}
               </p>
-              <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
+              <h3 className="text-xl font-medium text-white mt-0.5">
                 {isCreatingMatch
-                  ? `Nuevo encuentro (${editingMatch.fase})`
+                  ? `Programar (${editingMatch.fase})`
                   : `${teamMap.get(editingMatch.homeTeamId)?.nombre ?? editingMatch.homeTeamId} vs ${
                       teamMap.get(editingMatch.awayTeamId)?.nombre ?? editingMatch.awayTeamId
                     }`}
@@ -453,22 +480,22 @@ export function AdminMatchEditor({
                 setErrorMsg(null);
               }}
               aria-label="Cerrar editor de partido"
-              className="p-2 text-neutral-600 hover:text-[#0d0d0d] cursor-pointer"
+              className="w-8 h-8 rounded-full bg-white/[0.05] hover:bg-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
           {isCreatingMatch && (
             <div>
-              <label htmlFor="create-m-disc" className="block text-xs font-medium text-neutral-700 mb-1">
-                Disciplina del nuevo encuentro
+              <label htmlFor="create-m-disc" className="block text-xs text-zinc-400 mb-1.5">
+                Disciplina del encuentro
               </label>
               <select
                 id="create-m-disc"
                 value={editingMatch.disciplineId}
                 onChange={(e) => handleCreateDisciplineChange(e.target.value as DisciplineId)}
-                className="w-full sm:w-96 bg-white border border-neutral-300 px-3 py-2 text-sm"
+                className="w-full sm:w-96 rounded-xl bg-[#050507] border border-white/[0.1] px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#707ef9]"
               >
                 {DISCIPLINES.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -480,23 +507,26 @@ export function AdminMatchEditor({
           )}
 
           {errorMsg && (
-            <div role="alert" className="bg-red-50 border border-red-300 p-4 text-xs text-red-900 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <div
+              role="alert"
+              className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-200 flex items-center gap-2"
+            >
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {/* Teams & Official Score */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-[#0d0d0d] text-white p-5">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end rounded-2xl bg-[#050507] border border-white/[0.08] p-5">
             <div className="md:col-span-4">
-              <label htmlFor="edit-m-home-team" className="block text-xs text-neutral-400 mb-1">
+              <label htmlFor="edit-m-home-team" className="block text-xs text-zinc-400 mb-1.5">
                 Equipo Local
               </label>
               <select
                 id="edit-m-home-team"
                 value={editingMatch.homeTeamId}
                 onChange={(e) => setEditingMatch({ ...editingMatch, homeTeamId: e.target.value })}
-                className="w-full bg-[#18181f] border border-white/20 px-3 py-2 text-sm text-white"
+                className="w-full rounded-xl bg-[#101016] border border-white/[0.12] px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#707ef9]"
               >
                 {disciplineTeamsForEdit.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -507,8 +537,8 @@ export function AdminMatchEditor({
             </div>
 
             <div className="md:col-span-2">
-              <label htmlFor="edit-m-home-score" className="block text-xs text-[#707ef9] mb-1">
-                Marcador Local
+              <label htmlFor="edit-m-home-score" className="block text-xs text-[#a5b0ff] mb-1.5">
+                Local
               </label>
               <input
                 id="edit-m-home-score"
@@ -519,13 +549,13 @@ export function AdminMatchEditor({
                 onChange={(e) =>
                   setEditingMatch({ ...editingMatch, homeScore: Number(e.target.value) || 0 })
                 }
-                className="w-full bg-white text-[#0d0d0d] px-3 py-2 text-xl font-display tabular-nums text-center"
+                className="w-full rounded-xl bg-white text-[#050507] px-3 py-2 text-2xl font-medium tabular-nums text-center"
               />
             </div>
 
             <div className="md:col-span-2">
-              <label htmlFor="edit-m-away-score" className="block text-xs text-[#707ef9] mb-1">
-                Marcador Visita
+              <label htmlFor="edit-m-away-score" className="block text-xs text-[#a5b0ff] mb-1.5">
+                Visita
               </label>
               <input
                 id="edit-m-away-score"
@@ -536,19 +566,19 @@ export function AdminMatchEditor({
                 onChange={(e) =>
                   setEditingMatch({ ...editingMatch, awayScore: Number(e.target.value) || 0 })
                 }
-                className="w-full bg-white text-[#0d0d0d] px-3 py-2 text-xl font-display tabular-nums text-center"
+                className="w-full rounded-xl bg-white text-[#050507] px-3 py-2 text-2xl font-medium tabular-nums text-center"
               />
             </div>
 
             <div className="md:col-span-4">
-              <label htmlFor="edit-m-away-team" className="block text-xs text-neutral-400 mb-1">
+              <label htmlFor="edit-m-away-team" className="block text-xs text-zinc-400 mb-1.5">
                 Equipo Visitante
               </label>
               <select
                 id="edit-m-away-team"
                 value={editingMatch.awayTeamId}
                 onChange={(e) => setEditingMatch({ ...editingMatch, awayTeamId: e.target.value })}
-                className="w-full bg-[#18181f] border border-white/20 px-3 py-2 text-sm text-white"
+                className="w-full rounded-xl bg-[#101016] border border-white/[0.12] px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#707ef9]"
               >
                 {disciplineTeamsForEdit.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -559,11 +589,82 @@ export function AdminMatchEditor({
             </div>
           </div>
 
+          {/* Football 7 Penalty Shootout Config */}
+          {isEditingFootball && (
+            <div className="rounded-2xl border border-[#707ef9]/25 bg-[#707ef9]/[0.06] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <label className="inline-flex items-center gap-2.5 text-xs font-medium text-white cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingMatch.penaltyScore)}
+                  onChange={(e) =>
+                    setEditingMatch({
+                      ...editingMatch,
+                      penaltyScore: e.target.checked ? { home: 0, away: 0 } : undefined,
+                    })
+                  }
+                  className="accent-[#707ef9] w-4 h-4"
+                />
+                <Target className="w-4 h-4 text-[#a5b0ff]" />
+                <span>Definición por penales (Fútbol 7)</span>
+              </label>
+
+              {editingMatch.penaltyScore && (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="edit-pen-home" className="text-[11px] text-zinc-400">
+                      Pen. Local
+                    </label>
+                    <input
+                      id="edit-pen-home"
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={editingMatch.penaltyScore.home}
+                      onChange={(e) =>
+                        setEditingMatch({
+                          ...editingMatch,
+                          penaltyScore: {
+                            home: Math.max(0, Number(e.target.value) || 0),
+                            away: editingMatch.penaltyScore?.away ?? 0,
+                          },
+                        })
+                      }
+                      className="w-16 rounded-xl bg-[#050507] border border-white/[0.15] px-2.5 py-1.5 text-sm text-white text-center tabular-nums"
+                    />
+                  </div>
+                  <span className="text-zinc-500">—</span>
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="edit-pen-away" className="text-[11px] text-zinc-400">
+                      Pen. Visita
+                    </label>
+                    <input
+                      id="edit-pen-away"
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={editingMatch.penaltyScore.away}
+                      onChange={(e) =>
+                        setEditingMatch({
+                          ...editingMatch,
+                          penaltyScore: {
+                            home: editingMatch.penaltyScore?.home ?? 0,
+                            away: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        })
+                      }
+                      className="w-16 rounded-xl bg-[#050507] border border-white/[0.15] px-2.5 py-1.5 text-sm text-white text-center tabular-nums"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Match Metadata */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
-              <label htmlFor="edit-m-status" className="block text-xs font-medium text-neutral-700 mb-1">
-                Estado del Partido
+              <label htmlFor="edit-m-status" className="block text-xs text-zinc-400 mb-1.5">
+                Estado
               </label>
               <select
                 id="edit-m-status"
@@ -581,16 +682,16 @@ export function AdminMatchEditor({
                         : editingMatch.periodLabel,
                   });
                 }}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                className={inputCls}
               >
                 <option value="PROGRAMADO">PROGRAMADO</option>
                 <option value="EN_VIVO">EN VIVO</option>
-                <option value="FINALIZADO">FINALIZADO (Partido Pasado)</option>
+                <option value="FINALIZADO">FINALIZADO</option>
               </select>
             </div>
 
             <div>
-              <label htmlFor="edit-m-fase" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-fase" className="block text-xs text-zinc-400 mb-1.5">
                 Fase
               </label>
               <select
@@ -598,7 +699,9 @@ export function AdminMatchEditor({
                 value={editingMatch.fase}
                 onChange={(e) => {
                   const nextFase = e.target.value as Match['fase'];
-                  const isTwoLegged = Boolean(state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta);
+                  const isTwoLegged = Boolean(
+                    state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta
+                  );
                   setEditingMatch({
                     ...editingMatch,
                     fase: nextFase,
@@ -608,7 +711,7 @@ export function AdminMatchEditor({
                         : editingMatch.playoffLeg ?? (isTwoLegged ? 'IDA' : 'UNICO'),
                   });
                 }}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                className={inputCls}
               >
                 {MATCH_PHASES.map((f) => (
                   <option key={f} value={f}>
@@ -620,14 +723,16 @@ export function AdminMatchEditor({
 
             {editingMatch.fase !== 'Grupos' && (
               <div>
-                <label htmlFor="edit-m-leg" className="block text-xs font-medium text-neutral-700 mb-1">
-                  Instancia de Llave (Ida / Vuelta)
+                <label htmlFor="edit-m-leg" className="block text-xs text-zinc-400 mb-1.5">
+                  Instancia (Ida / Vuelta)
                 </label>
                 <select
                   id="edit-m-leg"
                   value={
                     editingMatch.playoffLeg ??
-                    (state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta ? 'IDA' : 'UNICO')
+                    (state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta
+                      ? 'IDA'
+                      : 'UNICO')
                   }
                   onChange={(e) =>
                     setEditingMatch({
@@ -635,7 +740,7 @@ export function AdminMatchEditor({
                       playoffLeg: e.target.value as MatchPlayoffLeg,
                     })
                   }
-                  className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                  className={inputCls}
                 >
                   <option value="IDA">Partido de Ida</option>
                   <option value="VUELTA">Partido de Vuelta</option>
@@ -648,23 +753,21 @@ export function AdminMatchEditor({
               editingMatch.fase !== 'Grupos' &&
               (editingMatch.playoffLeg ?? 'IDA') === 'IDA' &&
               Boolean(state.configs[editingMatch.disciplineId]?.playoffsIdaYVuelta) && (
-                <div className="sm:col-span-2 lg:col-span-3 bg-[#707ef9]/5 border border-[#707ef9]/30 px-3.5 py-2.5">
-                  <label className="inline-flex items-center gap-2.5 text-xs font-medium text-[#0d0d0d] cursor-pointer">
+                <div className="sm:col-span-2 lg:col-span-3 rounded-xl bg-[#707ef9]/10 border border-[#707ef9]/30 px-3.5 py-2.5">
+                  <label className="inline-flex items-center gap-2.5 text-xs text-zinc-200 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={createReturnLeg}
                       onChange={(e) => setCreateReturnLeg(e.target.checked)}
                       className="accent-[#707ef9] w-4 h-4"
                     />
-                    <span>
-                      Crear automáticamente también el partido de Vuelta con localía invertida (+7 días)
-                    </span>
+                    <span>Crear automáticamente el partido de Vuelta (+7 días)</span>
                   </label>
                 </div>
               )}
 
             <div>
-              <label htmlFor="edit-m-group" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-group" className="block text-xs text-zinc-400 mb-1.5">
                 Grupo / Llave
               </label>
               <input
@@ -672,12 +775,12 @@ export function AdminMatchEditor({
                 type="text"
                 value={editingMatch.groupName}
                 onChange={(e) => setEditingMatch({ ...editingMatch, groupName: e.target.value })}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                className={inputCls}
               />
             </div>
 
             <div>
-              <label htmlFor="edit-m-jornada" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-jornada" className="block text-xs text-zinc-400 mb-1.5">
                 Jornada
               </label>
               <input
@@ -689,12 +792,12 @@ export function AdminMatchEditor({
                 onChange={(e) =>
                   setEditingMatch({ ...editingMatch, jornada: Number(e.target.value) || 1 })
                 }
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                className={`${inputCls} tabular-nums`}
               />
             </div>
 
             <div>
-              <label htmlFor="edit-m-fecha" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-fecha" className="block text-xs text-zinc-400 mb-1.5">
                 Fecha
               </label>
               <input
@@ -702,12 +805,12 @@ export function AdminMatchEditor({
                 type="date"
                 value={editingMatch.fecha}
                 onChange={(e) => setEditingMatch({ ...editingMatch, fecha: e.target.value })}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                className={`${inputCls} tabular-nums`}
               />
             </div>
 
             <div>
-              <label htmlFor="edit-m-hora" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-hora" className="block text-xs text-zinc-400 mb-1.5">
                 Hora (HH:MM)
               </label>
               <input
@@ -715,12 +818,12 @@ export function AdminMatchEditor({
                 type="time"
                 value={editingMatch.hora}
                 onChange={(e) => setEditingMatch({ ...editingMatch, hora: e.target.value })}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                className={`${inputCls} tabular-nums`}
               />
             </div>
 
             <div className="sm:col-span-2">
-              <label htmlFor="edit-m-cancha" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="edit-m-cancha" className="block text-xs text-zinc-400 mb-1.5">
                 Recinto / Cancha
               </label>
               <input
@@ -728,22 +831,22 @@ export function AdminMatchEditor({
                 type="text"
                 value={editingMatch.cancha}
                 onChange={(e) => setEditingMatch({ ...editingMatch, cancha: e.target.value })}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm"
+                className={inputCls}
               />
             </div>
           </div>
 
           {/* Periods / Sets Editor */}
-          <div className="space-y-3 pt-4 border-t border-neutral-300">
+          <div className="space-y-3 pt-4 border-t border-white/[0.08]">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-bold uppercase tracking-wider text-neutral-600">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">
                 Parciales por Período / Set ({editingMatch.periods.length})
               </p>
               <button
                 type="button"
                 onClick={addPeriodRow}
                 disabled={editingMatch.periods.length >= 10}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-neutral-300 hover:border-[#707ef9] text-xs font-medium text-[#0d0d0d] cursor-pointer disabled:opacity-40"
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/[0.05] border border-white/[0.1] hover:border-[#707ef9] text-xs text-zinc-200 cursor-pointer disabled:opacity-40"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Agregar parcial</span>
@@ -755,9 +858,9 @@ export function AdminMatchEditor({
                 {editingMatch.periods.map((p, idx) => (
                   <div
                     key={idx}
-                    className="bg-white border border-neutral-300 p-3 flex items-center justify-between gap-2"
+                    className="rounded-xl bg-[#050507] border border-white/[0.08] p-3 flex items-center justify-between gap-2"
                   >
-                    <span className="text-xs font-bold text-neutral-500">P{idx + 1}</span>
+                    <span className="text-xs font-mono text-zinc-500">P{idx + 1}</span>
                     <div className="flex items-center gap-1.5">
                       <input
                         aria-label={`Parcial ${idx + 1} Local`}
@@ -765,23 +868,23 @@ export function AdminMatchEditor({
                         min={0}
                         value={p.home}
                         onChange={(e) => updatePeriod(idx, 'home', Number(e.target.value) || 0)}
-                        className="w-14 border border-neutral-300 px-2 py-1 text-xs text-center tabular-nums"
+                        className="w-14 rounded-lg bg-[#101016] border border-white/[0.12] px-2 py-1 text-xs text-white text-center tabular-nums"
                       />
-                      <span className="text-neutral-400">-</span>
+                      <span className="text-zinc-600">-</span>
                       <input
                         aria-label={`Parcial ${idx + 1} Visita`}
                         type="number"
                         min={0}
                         value={p.away}
                         onChange={(e) => updatePeriod(idx, 'away', Number(e.target.value) || 0)}
-                        className="w-14 border border-neutral-300 px-2 py-1 text-xs text-center tabular-nums"
+                        className="w-14 rounded-lg bg-[#101016] border border-white/[0.12] px-2 py-1 text-xs text-white text-center tabular-nums"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => removePeriodRow(idx)}
                       aria-label={`Eliminar parcial ${idx + 1}`}
-                      className="text-neutral-400 hover:text-red-600 cursor-pointer"
+                      className="text-zinc-500 hover:text-red-400 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -792,20 +895,20 @@ export function AdminMatchEditor({
           </div>
 
           <div>
-            <label htmlFor="edit-m-note" className="block text-xs font-medium text-neutral-700 mb-1">
-              Motivo de modificación administrativa (se registra en bitácora del partido)
+            <label htmlFor="edit-m-note" className="block text-xs text-zinc-400 mb-1.5">
+              Nota de bitácora (opcional)
             </label>
             <input
               id="edit-m-note"
               type="text"
               value={correctionNote}
               onChange={(e) => setCorrectionNote(e.target.value)}
-              placeholder="Ej: Corrección de marcador tras revisión de acta física oficial / fallo Tribunal de Disciplina."
-              className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs"
+              placeholder="Ej: Corrección tras revisión de acta física oficial."
+              className={inputCls}
             />
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-end gap-2.5 pt-2">
             <button
               type="button"
               onClick={() => {
@@ -813,31 +916,31 @@ export function AdminMatchEditor({
                 setIsCreatingMatch(false);
                 setErrorMsg(null);
               }}
-              className="px-4 py-2.5 border border-neutral-300 bg-white text-xs font-medium text-neutral-700 cursor-pointer"
+              className="px-4 py-2.5 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-zinc-300 cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display uppercase tracking-widest text-sm transition-colors cursor-pointer"
+              className="px-6 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] text-xs font-medium text-white transition-colors cursor-pointer"
             >
-              {isCreatingMatch ? 'Crear Encuentro en Firestore' : 'Guardar Corrección en Firestore'}
+              {isCreatingMatch ? 'Crear encuentro' : 'Guardar cambios'}
             </button>
           </div>
         </form>
       )}
 
-      {/* Unified Advanced Match Filter Bar */}
+      {/* Unified Match Filter Bar */}
       <div className="space-y-3">
         <div className="relative">
-          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por equipo, cancha, grupo, fase o fecha..."
             aria-label="Buscar partidos"
-            className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+            className="w-full rounded-xl bg-[#101016] border border-white/[0.1] pl-10 pr-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
           />
         </div>
 
@@ -873,19 +976,19 @@ export function AdminMatchEditor({
             <div className="min-w-[175px] flex-1">
               <label
                 htmlFor="admin-matches-status"
-                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+                className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1"
               >
-                <span>Estado</span>
+                Estado
               </label>
               <select
                 id="admin-matches-status"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as 'ALL' | MatchStatus)}
                 aria-label="Filtrar partidos por estado"
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+                className="w-full rounded-xl bg-[#050507] border border-white/[0.1] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#707ef9]"
               >
                 <option value="ALL">Todos los estados</option>
-                <option value="FINALIZADO">Finalizados — Partidos Pasados ({pastCount})</option>
+                <option value="FINALIZADO">Finalizados ({pastCount})</option>
                 <option value="EN_VIVO">En Vivo ({liveCount})</option>
                 <option value="PROGRAMADO">Programados ({scheduledCount})</option>
               </select>
@@ -896,31 +999,26 @@ export function AdminMatchEditor({
 
       {/* Matches List */}
       {filteredMatches.length === 0 ? (
-        <div className="border border-neutral-200 bg-[#f5f6f8] p-10 text-center space-y-2">
-          <p className="font-display text-2xl uppercase text-[#0d0d0d]">
-            Sin encuentros registrados con estos filtros
-          </p>
-          <p className="text-xs text-neutral-600">
-            Cuando existan partidos programados o finalizados podrás modificarlos aquí en cualquier
-            momento.
+        <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-10 text-center space-y-2">
+          <p className="text-base font-medium text-white">Sin encuentros con estos filtros</p>
+          <p className="text-xs text-zinc-400">
+            Ajusta los filtros o programa un nuevo partido.
           </p>
         </div>
       ) : (
         <div className="space-y-6">
           {groupedMatchSections.map((section) => (
-            <div key={section.key} className="space-y-2">
+            <div key={section.key} className="space-y-2.5">
               {groupBy !== 'none' && (
-                <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
-                  <h3 className="font-display text-xl uppercase tracking-wide text-[#0d0d0d]">
-                    {section.label}
-                  </h3>
-                  <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
+                  <h3 className="text-base font-medium text-white">{section.label}</h3>
+                  <span className="text-xs font-mono text-zinc-500 tabular-nums">
                     {section.matches.length}{' '}
                     {section.matches.length === 1 ? 'partido' : 'partidos'}
                   </span>
                 </div>
               )}
-              <div className="border border-neutral-200 divide-y divide-neutral-200">
+              <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c10] divide-y divide-white/[0.06] overflow-hidden">
                 {section.matches.map((m) => {
                   const home = teamMap.get(m.homeTeamId);
                   const away = teamMap.get(m.awayTeamId);
@@ -928,57 +1026,66 @@ export function AdminMatchEditor({
                   return (
                     <div
                       key={m.id}
-                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#f9fafb]"
+                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors"
                     >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
                           <span
-                            className={`px-2 py-0.5 font-display uppercase tracking-wider text-[11px] ${
+                            className={`px-2.5 py-0.5 rounded-full font-medium uppercase tracking-wider ${
                               m.status === 'FINALIZADO'
-                                ? 'bg-[#0d0d0d] text-white'
+                                ? 'bg-white/[0.08] text-zinc-200'
                                 : m.status === 'EN_VIVO'
-                                ? 'bg-[#707ef9] text-white'
-                                : 'bg-[#f5f6f8] text-neutral-600 border border-neutral-300'
+                                ? 'bg-[#707ef9]/20 text-[#c8ceff] border border-[#707ef9]/40'
+                                : 'bg-white/[0.03] text-zinc-400 border border-white/[0.08]'
                             }`}
                           >
                             {m.status === 'FINALIZADO'
-                              ? 'FINALIZADO'
+                              ? 'Finalizado'
                               : m.status === 'EN_VIVO'
-                              ? 'EN VIVO'
-                              : 'PROGRAMADO'}
+                              ? 'En vivo'
+                              : 'Programado'}
                           </span>
-                          <span className="font-medium text-[#707ef9]">{disc.nombreCorto}</span>
-                          <span className="text-neutral-500">
+                          <span className="font-medium text-[#a5b0ff]">{disc.nombreCorto}</span>
+                          <span className="text-zinc-500">
                             {m.fase} · J{m.jornada} · {m.groupName}
                           </span>
-                          {m.fase !== 'Grupos' && (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA') && (
-                            <span className="px-1.5 py-0.5 bg-[#707ef9]/15 text-[#4250d6] font-display font-bold uppercase tracking-wider text-[10px]">
-                              {m.playoffLeg === 'IDA' ? 'IDA' : 'VUELTA'}
-                            </span>
-                          )}
-                          <span className="text-neutral-400 inline-flex items-center gap-1 tabular-nums">
+                          {m.fase !== 'Grupos' &&
+                            (m.playoffLeg === 'IDA' || m.playoffLeg === 'VUELTA') && (
+                              <span className="px-2 py-0.5 rounded-full bg-[#707ef9]/15 text-[#c8ceff] text-[10px] font-medium">
+                                {m.playoffLeg}
+                              </span>
+                            )}
+                          <span className="text-zinc-500 inline-flex items-center gap-1 tabular-nums">
                             <Calendar className="w-3 h-3" />
                             {m.fecha} {m.hora}
                           </span>
                         </div>
 
-                        <p className="text-sm font-bold text-[#0d0d0d]">
-                          {home?.nombre ?? m.homeTeamId}{' '}
-                          <span className="font-display text-xl px-2 py-0.5 mx-1 bg-[#f5f6f8] border border-neutral-200 tabular-nums">
+                        <p className="text-sm font-medium text-white flex flex-wrap items-center gap-2">
+                          <span>{home?.nombre ?? m.homeTeamId}</span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-sm font-mono tabular-nums text-white">
                             {m.homeScore} — {m.awayScore}
-                          </span>{' '}
-                          {away?.nombre ?? m.awayTeamId}
+                          </span>
+                          {m.penaltyScore && (
+                            <span className="px-2 py-0.5 rounded-full bg-[#707ef9]/15 border border-[#707ef9]/35 text-[11px] text-[#c8ceff] tabular-nums">
+                              Pen. {m.penaltyScore.home} — {m.penaltyScore.away}
+                            </span>
+                          )}
+                          <span>{away?.nombre ?? m.awayTeamId}</span>
                         </p>
-                        <p className="text-xs text-neutral-500">{m.cancha}</p>
+                        <p className="text-[11px] text-zinc-500">
+                          {m.cancha}
+                          {m.assignedRefereeName ? ` · Árbitro: ${m.assignedRefereeName}` : ''}
+                        </p>
                       </div>
 
                       <button
                         type="button"
                         onClick={() => startEditing(m)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display uppercase tracking-widest text-xs transition-colors cursor-pointer self-start md:self-auto shrink-0"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/[0.06] hover:bg-white hover:text-[#050507] text-xs font-medium text-zinc-200 transition-colors cursor-pointer self-start md:self-auto shrink-0"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
-                        <span>{m.status === 'FINALIZADO' ? 'Modificar partido pasado' : 'Editar partido'}</span>
+                        <span>{m.status === 'FINALIZADO' ? 'Corregir' : 'Editar'}</span>
                       </button>
                     </div>
                   );

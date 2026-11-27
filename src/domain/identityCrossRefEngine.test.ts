@@ -278,3 +278,22 @@ test('buildUnifiedPlayers scales linearly: 3,000 players unify in under 250ms', 
   );
 });
 
+test('explicit Team.clubName unifies distinct squad names under the assigned club', () => {
+  const teams: Team[] = [
+    makeTeam({ id: 't-a', nombre: 'Informática FC', clubName: 'Club Atlético FICA', disciplineId: 'f7-h-1' }),
+    makeTeam({ id: 't-b', nombre: 'Las Panteras FICA', clubName: 'Club Atlético FICA', disciplineId: 'voley-m' }),
+    makeTeam({ id: 't-c', nombre: 'Derecho FC', disciplineId: 'f7-h-1' }),
+  ];
+
+  const clubs = buildUnifiedClubs(teams, [], [] as Match[]);
+  assert.equal(clubs.length, 2);
+  const fica = clubs.find((c) => c.teams.length === 2);
+  assert.ok(fica);
+  assert.equal(fica.displayName, 'Club Atlético FICA');
+
+  const res = findClubSquadsForTeam(teams[0], teams);
+  assert.equal(res.displayName, 'Club Atlético FICA');
+  assert.equal(res.squads.length, 2);
+});
+
+

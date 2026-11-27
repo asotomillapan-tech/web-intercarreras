@@ -516,6 +516,11 @@ export function StandingsView({
                                 )}
                               </span>
                             </div>
+                            {reveal && m.penaltyScore && (
+                              <p className="text-[10px] font-mono text-[#a5b0ff] tabular-nums mt-1.5 text-right">
+                                Pen. {m.penaltyScore.home} — {m.penaltyScore.away}
+                              </p>
+                            )}
                           </button>
                         );
                       })}
@@ -659,6 +664,11 @@ export function StandingsView({
                                   )}
                                 </span>
                               </div>
+                              {reveal && m.penaltyScore && (
+                                <p className="text-[10px] font-mono text-[#a5b0ff] tabular-nums text-right pt-0.5">
+                                  Pen. {m.penaltyScore.home} — {m.penaltyScore.away}
+                                </p>
+                              )}
                             </div>
 
                             <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2.5 border-t border-white/[0.06] tabular-nums">

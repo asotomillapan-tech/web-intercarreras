@@ -15,7 +15,11 @@ import {
   X,
 } from 'lucide-react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
-import { getNormalizedMatchAttendance } from '../domain/attendanceEngine';
+import {
+  formatDorsalLabel,
+  getEffectiveMatchDorsal,
+  getNormalizedMatchAttendance,
+} from '../domain/attendanceEngine';
 import {
   canRefereeMatches,
   canVoteMatchMvp,
@@ -75,7 +79,9 @@ export function MatchMvpModal({
     .trim();
   const matchesRosterSearch = (p: Player) => {
     if (!normQuery) return true;
-    const text = `${p.nombre} ${p.apellidoPaterno} #${p.dorsal} ${p.dorsal} ${p.posicion}`
+    const effDorsal = getEffectiveMatchDorsal(match, p);
+    const dorsalLabel = formatDorsalLabel(effDorsal);
+    const text = `${p.nombre} ${p.apellidoPaterno} ${dorsalLabel} ${effDorsal} ${p.posicion}`
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
@@ -386,8 +392,8 @@ export function MatchMvpModal({
                             >
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium text-white truncate">
-                                  <span className="text-zinc-500 font-mono mr-1">
-                                    #{player.dorsal}
+                                  <span className="text-zinc-500 font-mono mr-1.5">
+                                    {formatDorsalLabel(getEffectiveMatchDorsal(match, player))}
                                   </span>
                                   {player.nombre} {player.apellidoPaterno}
                                 </p>
@@ -551,8 +557,8 @@ export function MatchMvpModal({
                             <ul className="space-y-1 text-xs text-zinc-300">
                               {list.map((p) => (
                                 <li key={p.id} className="flex items-center gap-2">
-                                  <span className="font-mono text-[#9aa5ff] w-7 shrink-0">
-                                    #{p.dorsal}
+                                  <span className="font-mono text-[#9aa5ff] w-8 shrink-0">
+                                    {formatDorsalLabel(getEffectiveMatchDorsal(match, p))}
                                   </span>
                                   <span className="truncate">
                                     {p.nombre} {p.apellidoPaterno}

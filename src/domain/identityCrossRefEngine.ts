@@ -240,6 +240,25 @@ export function areClubNamesEquivalent(nameA: string, nameB: string): boolean {
  */
 export function formatUnifiedClubDisplayName(teams: Team[]): string {
   if (teams.length === 0) return '';
+
+  // Prefer explicit clubName when assigned by an administrator
+  const explicitCounts = new Map<string, { label: string; count: number }>();
+  for (const t of teams) {
+    const rawClub = (t.clubName ?? '').trim();
+    if (!rawClub) continue;
+    const key = normalizeTextToken(rawClub);
+    if (!key) continue;
+    const existing = explicitCounts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      explicitCounts.set(key, { label: rawClub, count: 1 });
+    }
+  }
+  if (explicitCounts.size > 0) {
+    return Array.from(explicitCounts.values()).sort((a, b) => b.count - a.count)[0].label;
+  }
+
   if (teams.length === 1) return teams[0].nombre.trim();
 
   const cleanedCandidates = teams.map((t) => {
@@ -597,10 +616,29 @@ export function findPlayerParticipations(
 }
 
 /**
- * Consolidates teams with the same or very similar club name across multiple disciplines
- * into unified clubs (e.g. "Real Efineza FEM", "Real Efineza FC", "Real Efineza Básquetbol"
- * -> single club "Real Efineza"). Teams with genuinely different names remain separate even
- * if they belong to the same career.
+ * Determines whether two Team records belong to the same unified club.
+ * If both specify an explicit `clubName`, compares those directly; if only one
+ * specifies `clubName`, compares it against the other's name; otherwise falls
+ * back to normalized team-name equivalence.
+ */
+export function areTeamsInSameClub(a: Team, b: Team): boolean {
+  const clubA = (a.clubName ?? '').trim();
+  const clubB = (b.clubName ?? '').trim();
+  if (clubA && clubB) {
+    return normalizeTextToken(clubA) === normalizeTextToken(clubB);
+  }
+  if (clubA && !clubB) {
+    return areClubNamesEquivalent(clubA, b.nombre);
+  }
+  if (!clubA && clubB) {
+    return areClubNamesEquivalent(a.nombre, clubB);
+  }
+  return areClubNamesEquivalent(a.nombre, b.nombre);
+}
+
+/**
+ * Consolidates teams with the same explicit clubName or equivalent club name
+ * across multiple disciplines into unified clubs.
  */
 export function buildUnifiedClubs(
   teams: Team[],
@@ -611,7 +649,7 @@ export function buildUnifiedClubs(
 
   for (const team of teams) {
     const existingGroup = groups.find((grp) =>
-      grp.some((member) => areClubNamesEquivalent(member.nombre, team.nombre))
+      grp.some((member) => areTeamsInSameClub(member, team))
     );
     if (existingGroup) {
       existingGroup.push(team);
@@ -714,7 +752,7 @@ export function findClubSquadsForTeam(
   targetTeam: Team,
   allTeams: Team[]
 ): { displayName: string; squads: Team[] } {
-  const squads = allTeams.filter((t) => areClubNamesEquivalent(t.nombre, targetTeam.nombre));
+  const squads = allTeams.filter((t) => areTeamsInSameClub(t, targetTeam));
   const resolved = squads.length > 0 ? squads : [targetTeam];
   const sorted = [...resolved].sort((a, b) => a.disciplineId.localeCompare(b.disciplineId));
   return {

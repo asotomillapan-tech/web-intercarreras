@@ -12,6 +12,7 @@ import {
   buildFavoriteNotifications,
   canAccessAdminPanel,
   canAccessDelegateTransfers,
+  getOfficialPanelButtonLabel,
   ROLE_META,
 } from '../domain/rbacEngine';
 import { getDelegateTransferActionRole } from '../domain/transfersEngine';
@@ -63,22 +64,29 @@ export function Navbar({
   };
 
   const hasOfficialAccess = canAccessAdminPanel(currentUser);
+  const officialPanelLabel = getOfficialPanelButtonLabel(currentUser);
   const isDelegadoUser = canAccessDelegateTransfers(currentUser);
-
-  const visibleNavItems = useMemo(
-    () =>
-      isDelegadoUser
-        ? [
-            ...HEADER_NAV_ITEMS,
-            {
-              id: 'transferencias' as NavSection,
-              label: 'Transferencias',
-              href: getSectionPath('transferencias'),
-            },
-          ]
-        : HEADER_NAV_ITEMS,
-    [isDelegadoUser]
+  const hasOpenRegistrations = useMemo(
+    () => Object.values(state.configs).some((cfg) => cfg.inscripcionesAbiertas),
+    [state.configs]
   );
+
+  const visibleNavItems = useMemo(() => {
+    const baseItems = hasOpenRegistrations
+      ? HEADER_NAV_ITEMS
+      : HEADER_NAV_ITEMS.filter((item) => item.id !== 'inscripciones');
+
+    return isDelegadoUser
+      ? [
+          ...baseItems,
+          {
+            id: 'transferencias' as NavSection,
+            label: 'Transferencias',
+            href: getSectionPath('transferencias'),
+          },
+        ]
+      : baseItems;
+  }, [hasOpenRegistrations, isDelegadoUser]);
 
   const pendingDelegateTransferCount = useMemo(() => {
     if (!isDelegadoUser) return 0;
@@ -258,7 +266,7 @@ export function Navbar({
                   }`}
                 >
                   <Shield className="w-3.5 h-3.5" />
-                  <span>{currentUser.role === 'prensa' ? 'Prensa' : 'Panel'}</span>
+                  <span>{officialPanelLabel}</span>
                 </a>
               )}
             </>
@@ -364,7 +372,11 @@ export function Navbar({
                     onClick={(e) => handleLinkClick(e, 'panel')}
                     className="block w-full py-3 rounded-full bg-[#707ef9] text-white text-center font-medium text-sm"
                   >
-                    {currentUser?.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}
+                    {officialPanelLabel === 'Prensa'
+                      ? 'Panel de Prensa'
+                      : officialPanelLabel === 'Arbitraje'
+                      ? 'Panel de Arbitraje'
+                      : 'Panel Oficial'}
                   </a>
                 )}
               </div>

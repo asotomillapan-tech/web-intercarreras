@@ -42,7 +42,19 @@
         },
         "role": {
           "type": "string",
-          "enum": ["tradicional", "jugador", "delegado", "arbitro", "fotografo", "prensa", "admin"]
+          "enum": [
+            "tradicional",
+            "jugador",
+            "delegado",
+            "arbitro",
+            "jefe_arbitros_futbol",
+            "jefe_arbitros_basquetbol",
+            "jefe_arbitros_voleibol",
+            "fotografo",
+            "prensa",
+            "moderador",
+            "admin"
+          ]
         },
         "favoriteTeamIds": {
           "type": "array",
@@ -252,6 +264,10 @@
         "escudo": {
           "type": "string",
           "maxLength": 160000
+        },
+        "clubName": {
+          "type": "string",
+          "maxLength": 120
         },
         "anioFundacion": {
           "type": "integer"
@@ -473,6 +489,10 @@
         "awayScore": {
           "type": "integer"
         },
+        "penaltyScore": {
+          "type": "object",
+          "description": "Marcador opcional de definición por penales en Fútbol 7 ({ home: 0..50, away: 0..50 })."
+        },
         "status": {
           "type": "string",
           "enum": ["PROGRAMADO", "EN_VIVO", "FINALIZADO"]
@@ -503,11 +523,19 @@
         },
         "attendance": {
           "type": "object",
-          "description": "Registro opcional de asistencia de jugadores presentes en el partido gestionado desde el panel arbitral (status: NO_REGISTRADA | REGISTRADA | OMITIDA, homePresentIds y awayPresentIds hasta 40 IDs por equipo, recordedAt <= 64, recordedByName <= 120, notes <= 240)."
+          "description": "Registro opcional de asistencia y dorsales rotativos por partido (status, homePresentIds, awayPresentIds, matchDorsals, recordedAt, recordedByName, notes)."
         },
         "refereeId": {
           "type": "string",
           "maxLength": 128
+        },
+        "assignedRefereeUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "assignedRefereeName": {
+          "type": "string",
+          "maxLength": 120
         },
         "scoresheetValidation": {
           "type": "object"
@@ -848,7 +876,7 @@
         },
         "authorRole": {
           "type": "string",
-          "enum": ["admin", "prensa"]
+          "enum": ["admin", "moderador", "prensa"]
         },
         "createdAt": {
           "type": "string",
@@ -1120,6 +1148,37 @@
         "weekKey",
         "createdAt"
       ]
+    },
+    "RefereeRosterEntry": {
+      "title": "RefereeRosterEntry",
+      "description": "Padrón arbitral sin PII (solo UID, nombre visible y rol) para que los Jefes de Árbitros designen partidos sin acceder a datos personales de usuarios.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "arbitro",
+            "jefe_arbitros_futbol",
+            "jefe_arbitros_basquetbol",
+            "jefe_arbitros_voleibol"
+          ]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "role", "updatedAt"]
     }
   },
   "firestore": {
@@ -1130,6 +1189,10 @@
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminRecord" },
       "description": "Lista confiable de administradores con privilegios exclusivos de cambio de rol y designación de otros admins."
+    },
+    "/referee_roster/{userId}": {
+      "schema": { "$ref": "#/entities/RefereeRosterEntry" },
+      "description": "Padrón arbitral sin PII para la designación de partidos por Jefes de Árbitros y Administradores."
     },
     "/settings/{settingId}": {
       "schema": { "$ref": "#/entities/TournamentSettings" },

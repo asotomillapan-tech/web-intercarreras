@@ -72,7 +72,6 @@ export function AdminNewsManager({
 }: AdminNewsManagerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Editor form state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
@@ -86,14 +85,12 @@ export function AdminNewsManager({
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
 
-  // Automatic Brief Generator state
   const [aiMode, setAiMode] = useState<'recap' | 'topic'>('recap');
   const [aiTopic, setAiTopic] = useState('');
   const [aiTone, setAiTone] = useState<'oficial' | 'cronica' | 'urgente'>('oficial');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // Feedback & list filtering state
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
@@ -197,7 +194,7 @@ export function AdminNewsManager({
       const idToken = await getFirebaseIdToken();
       if (!idToken) {
         throw new Error(
-          'Tu sesión de Google no está activa. Vuelve a iniciar sesión para generar noticias automáticas.'
+          'Tu sesión de Google no está activa. Vuelve a iniciar sesión para generar borradores.'
         );
       }
 
@@ -244,12 +241,10 @@ export function AdminNewsManager({
       }
       setAiGenerated(true);
       setEditorMode('edit');
-      setStatusBanner(
-        'Noticia breve generada automáticamente en el editor. Revisa el texto, ajusta si lo deseas y presiona "Publicar noticia".'
-      );
+      setStatusBanner('Borrador generado en el editor. Revísalo y publica cuando estés listo.');
     } catch (err: unknown) {
       setAiError(
-        err instanceof Error ? err.message : 'No se pudo generar la noticia automática.'
+        err instanceof Error ? err.message : 'No se pudo generar el borrador automático.'
       );
     } finally {
       setAiLoading(false);
@@ -279,13 +274,18 @@ export function AdminNewsManager({
       return;
     }
     if (rawCover && !sanitizeSafeNewsUrl(rawCover)) {
-      setFormError('La URL de imagen de portada debe comenzar con https:// o ser una foto de la galería.');
+      setFormError('La URL de imagen de portada debe comenzar con https:// o ser una foto de galería.');
       return;
     }
 
     const nowIso = new Date().toISOString();
     const existing = editingId ? state.news.find((n) => n.id === editingId) : undefined;
-    const authorRole: 'admin' | 'prensa' = currentUser.role === 'prensa' ? 'prensa' : 'admin';
+    const authorRole: 'admin' | 'moderador' | 'prensa' =
+      currentUser.role === 'prensa'
+        ? 'prensa'
+        : currentUser.role === 'moderador'
+        ? 'moderador'
+        : 'admin';
 
     const payload: NewsArticle = {
       id: existing ? existing.id : `news-${Date.now()}`,
@@ -311,15 +311,15 @@ export function AdminNewsManager({
         await onUpdateNews(payload);
         setStatusBanner(
           payload.published
-            ? `Noticia "${payload.title}" actualizada y visible en la página de inicio.`
-            : `Borrador "${payload.title}" guardado correctamente.`
+            ? `Noticia "${payload.title}" actualizada y publicada.`
+            : `Borrador "${payload.title}" guardado.`
         );
       } else {
         await onAddNews(payload);
         setStatusBanner(
           payload.published
-            ? `Anuncio "${payload.title}" publicado en la página de inicio.`
-            : `Borrador "${payload.title}" creado y guardado en la sala de prensa.`
+            ? `Anuncio "${payload.title}" publicado en portada.`
+            : `Borrador "${payload.title}" guardado.`
         );
         resetForm();
       }
@@ -340,11 +340,11 @@ export function AdminNewsManager({
     setStatusBanner(
       field === 'published'
         ? updated.published
-          ? `"${updated.title}" ahora está publicada en Inicio.`
-          : `"${updated.title}" se movió a borrador (oculta en Inicio).`
+          ? `"${updated.title}" publicada en Inicio.`
+          : `"${updated.title}" movida a borrador.`
         : updated.featured
-        ? `"${updated.title}" marcada como anuncio destacado en portada.`
-        : `"${updated.title}" quitada de destacados principales.`
+        ? `"${updated.title}" marcada como destacada.`
+        : `"${updated.title}" quitada de destacados.`
     );
   };
 
@@ -352,53 +352,61 @@ export function AdminNewsManager({
   const featuredCount = state.news.filter((n) => n.published && n.featured).length;
   const draftCount = state.news.filter((n) => !n.published).length;
 
+  const inputCls =
+    'w-full rounded-xl bg-[#050507] border border-white/[0.1] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]';
+
   return (
-    <div className="space-y-8">
-      {/* KPI Header Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="border border-neutral-200 bg-[#f5f6f8] p-5">
-          <p className="text-xs uppercase tracking-widest text-neutral-500">Publicadas en Inicio</p>
-          <p className="font-display text-3xl font-bold tabular-nums text-[#0d0d0d] mt-1">
-            {publishedCount}
-          </p>
+    <div className="space-y-6">
+      {/* Header & KPI Strip */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff]">
+            <Newspaper className="w-3.5 h-3.5" />
+            <span>Panel de Prensa · Sala Editorial</span>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
+            Noticias y{' '}
+            <span className="font-editorial italic font-normal text-[#c8ceff]">comunicados</span>
+          </h2>
         </div>
-        <div className="border border-neutral-200 bg-[#f5f6f8] p-5">
-          <p className="text-xs uppercase tracking-widest text-neutral-500">Anuncios Destacados</p>
-          <p className="font-display text-3xl font-bold tabular-nums text-[#707ef9] mt-1">
-            {featuredCount}
-          </p>
-        </div>
-        <div className="border border-neutral-200 bg-[#f5f6f8] p-5">
-          <p className="text-xs uppercase tracking-widest text-neutral-500">Borradores Privados</p>
-          <p className="font-display text-3xl font-bold tabular-nums text-neutral-700 mt-1">
-            {draftCount}
-          </p>
+
+        <div className="grid grid-cols-3 gap-2 shrink-0">
+          <div className="rounded-2xl border border-white/[0.08] bg-[#101016] px-4 py-2.5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Publicadas</p>
+            <p className="text-xl font-medium tabular-nums text-white mt-0.5">{publishedCount}</p>
+          </div>
+          <div className="rounded-2xl border border-[#707ef9]/30 bg-[#707ef9]/10 px-4 py-2.5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-[#c8ceff]">Destacadas</p>
+            <p className="text-xl font-medium tabular-nums text-[#a5b0ff] mt-0.5">
+              {featuredCount}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/[0.08] bg-[#101016] px-4 py-2.5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Borradores</p>
+            <p className="text-xl font-medium tabular-nums text-zinc-300 mt-0.5">{draftCount}</p>
+          </div>
         </div>
       </div>
 
-      {/* Automatic Brief Generator Card */}
-      <section className="bg-[#0d0d0d] text-white border border-neutral-800 p-6 space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+      {/* Automatic Brief Generator */}
+      <section className="rounded-3xl border border-white/[0.08] bg-[#101016] p-6 space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
           <div className="space-y-1">
-            <p className="text-xs font-bold uppercase tracking-widest text-[#707ef9] flex items-center gap-1.5">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff] flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Redacción Automática · Sala de Prensa UFRO</span>
+              <span>Redacción rápida</span>
             </p>
-            <h2 className="font-display text-2xl font-bold uppercase tracking-wide">
-              Generar noticia breve automáticamente
-            </h2>
-            <p className="text-xs text-neutral-400">
-              Crea un borrador periodístico listo para revisar en el editor a partir de los resultados
-              reales del campeonato o de una pauta rápida.
-            </p>
+            <h3 className="text-lg font-medium text-white">Generar borrador de jornada</h3>
           </div>
 
-          <div className="flex items-center gap-1 bg-white/5 p-1 self-start">
+          <div className="inline-flex rounded-full bg-[#050507] border border-white/[0.08] p-1 self-start">
             <button
               type="button"
               onClick={() => setAiMode('recap')}
-              className={`px-3 py-1.5 text-xs font-display font-bold uppercase tracking-widest cursor-pointer ${
-                aiMode === 'recap' ? 'bg-[#707ef9] text-white' : 'text-neutral-300 hover:text-white'
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                aiMode === 'recap'
+                  ? 'bg-white text-[#050507]'
+                  : 'text-zinc-400 hover:text-white'
               }`}
             >
               Resumen de jornada
@@ -406,11 +414,13 @@ export function AdminNewsManager({
             <button
               type="button"
               onClick={() => setAiMode('topic')}
-              className={`px-3 py-1.5 text-xs font-display font-bold uppercase tracking-widest cursor-pointer ${
-                aiMode === 'topic' ? 'bg-[#707ef9] text-white' : 'text-neutral-300 hover:text-white'
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                aiMode === 'topic'
+                  ? 'bg-white text-[#050507]'
+                  : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Desde pauta o tema
+              Desde pauta
             </button>
           </div>
         </div>
@@ -418,43 +428,47 @@ export function AdminNewsManager({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
           {aiMode === 'topic' ? (
             <div className="lg:col-span-6">
-              <label htmlFor="ai-news-topic" className="block text-xs text-neutral-300 mb-1.5">
-                ¿Qué anuncio o noticia quieres redactar?
+              <label htmlFor="ai-news-topic" className="block text-xs text-zinc-400 mb-1.5">
+                Pauta o tema del comunicado
               </label>
               <input
                 id="ai-news-topic"
                 type="text"
                 value={aiTopic}
                 onChange={(e) => setAiTopic(e.target.value)}
-                placeholder="Ej. Cierre de inscripciones de Fútbol 7 Damas este viernes a las 18:00..."
-                className="w-full bg-[#18181f] border border-white/15 px-3.5 py-2.5 text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:border-[#707ef9]"
+                placeholder="Ej. Cierre de inscripciones Fútbol 7 este viernes..."
+                className={inputCls}
               />
             </div>
           ) : (
-            <div className="lg:col-span-6 bg-white/5 border border-white/10 px-4 py-2.5 text-xs text-neutral-300 leading-relaxed">
-              Se tomarán automáticamente los{' '}
-              <strong className="text-white">{state.matches.filter((m) => m.status === 'FINALIZADO').length}</strong>{' '}
-              partidos finalizados, próximos encuentros, líderes y ventanas abiertas de{' '}
+            <div className="lg:col-span-6 rounded-xl bg-[#050507] border border-white/[0.08] px-4 py-2.5 text-xs text-zinc-400 leading-relaxed">
+              Resume automáticamente los{' '}
               <strong className="text-white">
-                {disciplineId === 'general' ? 'todas las disciplinas' : DISCIPLINE_MAP[disciplineId].nombreCorto}
+                {state.matches.filter((m) => m.status === 'FINALIZADO').length}
               </strong>{' '}
-              sin inventar marcadores.
+              partidos finalizados de{' '}
+              <strong className="text-white">
+                {disciplineId === 'general'
+                  ? 'todas las disciplinas'
+                  : DISCIPLINE_MAP[disciplineId].nombreCorto}
+              </strong>
+              .
             </div>
           )}
 
           <div className="lg:col-span-3">
-            <label htmlFor="ai-news-tone" className="block text-xs text-neutral-300 mb-1.5">
-              Estilo editorial
+            <label htmlFor="ai-news-tone" className="block text-xs text-zinc-400 mb-1.5">
+              Tono editorial
             </label>
             <select
               id="ai-news-tone"
               value={aiTone}
               onChange={(e) => setAiTone(e.target.value as 'oficial' | 'cronica' | 'urgente')}
-              className="w-full bg-[#18181f] border border-white/15 px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#707ef9]"
+              className={inputCls}
             >
-              <option value="oficial">Comunicado Oficial UFRO</option>
-              <option value="cronica">Crónica Deportiva Breve</option>
-              <option value="urgente">Anuncio Urgente / Aviso</option>
+              <option value="oficial">Comunicado Oficial</option>
+              <option value="cronica">Crónica Breve</option>
+              <option value="urgente">Aviso Urgente</option>
             </select>
           </div>
 
@@ -463,17 +477,20 @@ export function AdminNewsManager({
               type="button"
               disabled={aiLoading}
               onClick={handleGenerateBriefWithAI}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] disabled:opacity-50 text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] disabled:opacity-50 text-xs font-medium text-white transition-colors cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{aiLoading ? 'Redactando breve...' : 'Generar borrador breve'}</span>
+              <span>{aiLoading ? 'Redactando...' : 'Generar borrador'}</span>
             </button>
           </div>
         </div>
 
         {aiError && (
-          <div role="alert" className="bg-red-950/70 border border-red-400/50 text-red-100 px-4 py-3 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-300" />
+          <div
+            role="alert"
+            className="rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 px-4 py-3 text-xs flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
             <span>{aiError}</span>
           </div>
         )}
@@ -482,39 +499,29 @@ export function AdminNewsManager({
       {statusBanner && (
         <div
           role="status"
-          className="bg-emerald-50 border border-emerald-300 px-4 py-3 text-sm text-emerald-950 flex items-center gap-2"
+          className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200 flex items-center gap-2"
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{statusBanner}</span>
         </div>
       )}
 
-      {/* Main Split: Simple Text Editor (Left 7 cols) + Published/Draft List (Right 5 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left: Simple Rich Text News Editor */}
+      {/* Main Split: Editor + Archive */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <form
           onSubmit={handleSubmit}
-          className="lg:col-span-7 border border-neutral-200 bg-white p-6 space-y-5"
+          className="lg:col-span-7 rounded-3xl border border-white/[0.08] bg-[#101016] p-6 space-y-5"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-4">
-            <div className="flex items-center gap-2.5">
-              <Newspaper className="w-5 h-5 text-[#707ef9]" />
-              <div>
-                <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                  {editingId ? 'Editar noticia publicada o borrador' : 'Nueva noticia o anuncio destacado'}
-                </h2>
-                <p className="text-xs text-neutral-500">
-                  Redacta con formato simple (negritas, cursivas, subtítulos, listas y citas) y
-                  previsualiza antes de publicar.
-                </p>
-              </div>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+            <h3 className="text-lg font-medium text-white">
+              {editingId ? 'Editar noticia' : 'Nueva noticia o anuncio'}
+            </h3>
 
             {editingId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-neutral-300 text-xs font-medium text-neutral-700 hover:border-[#0d0d0d] cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.1] text-xs text-zinc-200 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Crear nueva</span>
@@ -523,22 +530,25 @@ export function AdminNewsManager({
           </div>
 
           {formError && (
-            <div role="alert" className="bg-red-50 border border-red-300 text-red-900 px-4 py-3 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <div
+              role="alert"
+              className="rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 px-4 py-3 text-xs flex items-center gap-2"
+            >
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
               <span>{formError}</span>
             </div>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="news-category" className="block text-xs font-medium text-neutral-700 mb-1">
-                Categoría editorial
+              <label htmlFor="news-category" className="block text-xs text-zinc-400 mb-1.5">
+                Categoría
               </label>
               <select
                 id="news-category"
                 value={category}
                 onChange={(e) => setCategory(e.target.value as NewsCategory)}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                className={inputCls}
               >
                 {NEWS_CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>
@@ -549,16 +559,16 @@ export function AdminNewsManager({
             </div>
 
             <div>
-              <label htmlFor="news-discipline" className="block text-xs font-medium text-neutral-700 mb-1">
+              <label htmlFor="news-discipline" className="block text-xs text-zinc-400 mb-1.5">
                 Disciplina asociada
               </label>
               <select
                 id="news-discipline"
                 value={disciplineId}
                 onChange={(e) => setDisciplineId(e.target.value as DisciplineId | 'general')}
-                className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                className={inputCls}
               >
-                <option value="general">Campeonato General (Todas)</option>
+                <option value="general">Campeonato General</option>
                 {DISCIPLINES.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.nombre}
@@ -569,11 +579,11 @@ export function AdminNewsManager({
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label htmlFor="news-title" className="text-xs font-medium text-neutral-700">
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="news-title" className="text-xs text-zinc-400">
                 Titular *
               </label>
-              <span className="text-[11px] text-neutral-400 tabular-nums">{title.length}/160</span>
+              <span className="text-[11px] text-zinc-500 tabular-nums">{title.length}/160</span>
             </div>
             <input
               id="news-title"
@@ -582,17 +592,17 @@ export function AdminNewsManager({
               maxLength={160}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ej. Comienzan los Playoffs de Fútbol 7 Primera División en Complejo UFRO"
-              className="w-full border border-neutral-300 px-3.5 py-2.5 text-sm font-medium text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+              placeholder="Ej. Comienzan los Playoffs de Fútbol 7 Primera División"
+              className={inputCls}
             />
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label htmlFor="news-summary" className="text-xs font-medium text-neutral-700">
-                Bajada / resumen breve en portada *
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="news-summary" className="text-xs text-zinc-400">
+                Resumen breve en portada *
               </label>
-              <span className="text-[11px] text-neutral-400 tabular-nums">{summary.length}/360</span>
+              <span className="text-[11px] text-zinc-500 tabular-nums">{summary.length}/360</span>
             </div>
             <textarea
               id="news-summary"
@@ -601,25 +611,24 @@ export function AdminNewsManager({
               maxLength={360}
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              placeholder="Resumen en 1 o 2 frases que aparece en la tarjeta destacada de la página de inicio..."
-              className="w-full border border-neutral-300 px-3.5 py-2 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+              placeholder="Resumen en 1 o 2 frases para la portada..."
+              className={inputCls}
             />
           </div>
 
-          {/* Cover Image URL + Quick Gallery 2025 Picker */}
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <label htmlFor="news-cover" className="text-xs font-medium text-neutral-700">
-                Fotografía de portada (opcional)
+              <label htmlFor="news-cover" className="text-xs text-zinc-400">
+                Imagen de portada (opcional)
               </label>
               {galleryPhotoChoices.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowPhotoPicker((v) => !v)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[#707ef9] hover:text-[#5766eb] cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs text-[#a5b0ff] hover:text-white cursor-pointer"
                 >
                   <ImageIcon className="w-3.5 h-3.5" />
-                  <span>{showPhotoPicker ? 'Ocultar Galería 2025' : 'Elegir foto de Galería 2025'}</span>
+                  <span>{showPhotoPicker ? 'Ocultar galería' : 'Elegir de galería'}</span>
                 </button>
               )}
             </div>
@@ -629,11 +638,11 @@ export function AdminNewsManager({
               maxLength={1000}
               value={coverImageUrl}
               onChange={(e) => setCoverImageUrl(e.target.value)}
-              placeholder="https://... o selecciona una fotografía oficial abajo"
-              className="w-full border border-neutral-300 px-3.5 py-2 text-xs text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+              placeholder="https://..."
+              className={`${inputCls} text-xs`}
             />
             {showPhotoPicker && galleryPhotoChoices.length > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 p-2.5 bg-[#f5f6f8] border border-neutral-200">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 p-2.5 rounded-2xl bg-[#050507] border border-white/[0.08]">
                 {galleryPhotoChoices.map((item) => (
                   <button
                     key={item.url}
@@ -642,8 +651,10 @@ export function AdminNewsManager({
                       setCoverImageUrl(item.url);
                       setShowPhotoPicker(false);
                     }}
-                    className={`group relative h-16 overflow-hidden border text-left cursor-pointer ${
-                      coverImageUrl === item.url ? 'border-[#707ef9] ring-2 ring-[#707ef9]' : 'border-neutral-300'
+                    className={`relative h-16 rounded-xl overflow-hidden border text-left cursor-pointer ${
+                      coverImageUrl === item.url
+                        ? 'border-[#707ef9] ring-2 ring-[#707ef9]'
+                        : 'border-white/[0.12]'
                     }`}
                     title={item.label}
                   >
@@ -653,7 +664,7 @@ export function AdminNewsManager({
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
                     />
-                    <span className="absolute inset-x-0 bottom-0 bg-black/70 text-white text-[10px] px-1.5 py-0.5 truncate">
+                    <span className="absolute inset-x-0 bottom-0 bg-black/75 text-white text-[10px] px-1.5 py-0.5 truncate">
                       {item.label}
                     </span>
                   </button>
@@ -662,18 +673,17 @@ export function AdminNewsManager({
             )}
           </div>
 
-          {/* Simple Text Editor with Toolbar & Live Preview */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <label htmlFor="news-content" className="text-xs font-medium text-neutral-700">
-                Cuerpo de la noticia (Editor de texto simple) *
+              <label htmlFor="news-content" className="text-xs text-zinc-400">
+                Cuerpo de la noticia *
               </label>
-              <div className="flex items-center gap-1 bg-[#f5f6f8] p-0.5 border border-neutral-200">
+              <div className="inline-flex rounded-full bg-[#050507] border border-white/[0.08] p-0.5">
                 <button
                   type="button"
                   onClick={() => setEditorMode('edit')}
-                  className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider cursor-pointer ${
-                    editorMode === 'edit' ? 'bg-[#0d0d0d] text-white' : 'text-neutral-600 hover:text-[#0d0d0d]'
+                  className={`px-3 py-1 rounded-full text-[11px] font-medium cursor-pointer ${
+                    editorMode === 'edit' ? 'bg-white text-[#050507]' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   Editar
@@ -681,8 +691,10 @@ export function AdminNewsManager({
                 <button
                   type="button"
                   onClick={() => setEditorMode('preview')}
-                  className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider cursor-pointer ${
-                    editorMode === 'preview' ? 'bg-[#707ef9] text-white' : 'text-neutral-600 hover:text-[#0d0d0d]'
+                  className={`px-3 py-1 rounded-full text-[11px] font-medium cursor-pointer ${
+                    editorMode === 'preview'
+                      ? 'bg-[#707ef9] text-white'
+                      : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   Vista previa
@@ -690,69 +702,29 @@ export function AdminNewsManager({
               </div>
             </div>
 
-            <div className="border border-neutral-300">
-              {/* Formatting Toolbar */}
-              <div className="flex flex-wrap items-center gap-1 px-2.5 py-2 bg-[#f5f6f8] border-b border-neutral-200">
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('bold')}
-                  aria-label="Aplicar negrita"
-                  title="Negrita (**texto**)"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <Bold className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Negrita</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('italic')}
-                  aria-label="Aplicar cursiva"
-                  title="Cursiva (*texto*)"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <Italic className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Cursiva</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('heading')}
-                  aria-label="Insertar subtítulo"
-                  title="Subtítulo (## Título)"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <Heading2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Subtítulo</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('list')}
-                  aria-label="Insertar lista"
-                  title="Lista con viñetas (- elemento)"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <List className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Lista</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('quote')}
-                  aria-label="Insertar cita"
-                  title="Cita destacada (> texto)"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <Quote className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Cita</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToolbarAction('link')}
-                  aria-label="Insertar enlace"
-                  title="Enlace ([texto](https://...))"
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-700 hover:bg-white hover:text-[#0d0d0d] border border-transparent hover:border-neutral-300 cursor-pointer"
-                >
-                  <Link2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Enlace</span>
-                </button>
+            <div className="rounded-2xl border border-white/[0.1] bg-[#050507] overflow-hidden">
+              <div className="flex flex-wrap items-center gap-1 px-2.5 py-2 bg-white/[0.02] border-b border-white/[0.08]">
+                {(
+                  [
+                    { action: 'bold', icon: Bold, label: 'Negrita' },
+                    { action: 'italic', icon: Italic, label: 'Cursiva' },
+                    { action: 'heading', icon: Heading2, label: 'Subtítulo' },
+                    { action: 'list', icon: List, label: 'Lista' },
+                    { action: 'quote', icon: Quote, label: 'Cita' },
+                    { action: 'link', icon: Link2, label: 'Enlace' },
+                  ] as const
+                ).map(({ action, icon: Icon, label }) => (
+                  <button
+                    key={action}
+                    type="button"
+                    onClick={() => handleToolbarAction(action)}
+                    aria-label={label}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-400 hover:bg-white/[0.08] hover:text-white cursor-pointer"
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                ))}
               </div>
 
               {editorMode === 'edit' ? (
@@ -760,91 +732,88 @@ export function AdminNewsManager({
                   ref={textareaRef}
                   id="news-content"
                   required
-                  rows={9}
+                  rows={8}
                   maxLength={12000}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  placeholder="Escribe aquí el comunicado o crónica... Usa la barra superior para añadir **negritas**, ## subtítulos, listas o citas."
-                  className="w-full px-3.5 py-3 text-sm text-[#0d0d0d] leading-relaxed focus:outline-none resize-y"
+                  placeholder="Escribe aquí el comunicado o crónica..."
+                  className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder:text-zinc-600 leading-relaxed focus:outline-none resize-y"
                 />
               ) : (
-                <div className="p-4 min-h-[210px] bg-white">
+                <div className="p-4 min-h-[200px] text-zinc-200">
                   <RichTextRenderer content={content} compact />
                 </div>
               )}
             </div>
           </div>
 
-          {/* Publication Controls */}
-          <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-neutral-200">
-            <label className="inline-flex items-center gap-2 text-sm font-medium text-[#0d0d0d] cursor-pointer">
+          <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-white/[0.08]">
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-200 cursor-pointer">
               <input
                 type="checkbox"
                 checked={featured}
                 onChange={(e) => setFeatured(e.target.checked)}
                 className="accent-[#707ef9] w-4 h-4"
               />
-              <span>Anuncio destacado en portada</span>
+              <span>Destacar en portada</span>
             </label>
 
-            <label className="inline-flex items-center gap-2 text-sm font-medium text-[#0d0d0d] cursor-pointer">
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-200 cursor-pointer">
               <input
                 type="checkbox"
                 checked={published}
                 onChange={(e) => setPublished(e.target.checked)}
                 className="accent-[#707ef9] w-4 h-4"
               />
-              <span>Publicar inmediatamente en Inicio</span>
+              <span>Publicar inmediatamente</span>
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-2.5 pt-2">
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-3 bg-[#707ef9] hover:bg-[#5766eb] disabled:opacity-50 text-white font-display font-bold uppercase tracking-widest text-xs transition-colors cursor-pointer"
+              className="px-6 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] disabled:opacity-50 text-xs font-medium text-white transition-colors cursor-pointer"
             >
               {saving
                 ? 'Guardando...'
                 : editingId
-                ? 'Guardar cambios de noticia'
+                ? 'Guardar cambios'
                 : published
-                ? 'Publicar noticia en Inicio'
-                : 'Guardar como borrador'}
+                ? 'Publicar noticia'
+                : 'Guardar borrador'}
             </button>
 
             <button
               type="button"
               onClick={resetForm}
-              className="px-4 py-3 border border-neutral-300 hover:border-[#0d0d0d] text-xs font-medium text-neutral-700 cursor-pointer"
+              className="px-4 py-2.5 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.08] text-xs text-zinc-300 cursor-pointer"
             >
-              Limpiar editor
+              Limpiar
             </button>
           </div>
         </form>
 
-        {/* Right: Existing News Management Directory */}
-        <div className="lg:col-span-5 border border-neutral-200 bg-white">
-          <div className="p-5 border-b border-neutral-200 space-y-3 bg-[#f5f6f8]">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                Archivo de noticias ({state.news.length})
-              </h3>
-            </div>
+        {/* Right: News Directory */}
+        <div className="lg:col-span-5 rounded-3xl border border-white/[0.08] bg-[#0c0c10] overflow-hidden">
+          <div className="p-5 border-b border-white/[0.08] space-y-3 bg-[#101016]">
+            <h3 className="text-base font-medium text-white">
+              Archivo de noticias ({state.news.length})
+            </h3>
 
             <div className="relative">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar por titular o autor..."
                 aria-label="Buscar noticias"
-                className="w-full bg-white border border-neutral-300 pl-9 pr-3 py-2 text-xs text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
+                className="w-full rounded-xl bg-[#050507] border border-white/[0.1] pl-10 pr-3 py-2 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
               />
             </div>
 
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1.5">
               {(
                 [
                   { id: 'ALL', label: 'Todas' },
@@ -857,10 +826,10 @@ export function AdminNewsManager({
                   key={f.id}
                   type="button"
                   onClick={() => setStatusFilter(f.id)}
-                  className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider cursor-pointer ${
+                  className={`px-3 py-1 rounded-full text-[11px] font-medium cursor-pointer transition-colors ${
                     statusFilter === f.id
-                      ? 'bg-[#0d0d0d] text-white'
-                      : 'bg-white border border-neutral-200 text-neutral-600 hover:text-[#0d0d0d]'
+                      ? 'bg-white text-[#050507]'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
                   }`}
                 >
                   {f.label}
@@ -869,15 +838,12 @@ export function AdminNewsManager({
             </div>
           </div>
 
-          <div className="divide-y divide-neutral-200 max-h-[680px] overflow-y-auto">
+          <div className="divide-y divide-white/[0.06] max-h-[680px] overflow-y-auto">
             {filteredNews.length === 0 ? (
-              <div className="p-8 text-center space-y-2">
-                <p className="font-display text-lg font-bold uppercase text-[#0d0d0d]">
-                  Sin noticias en esta vista
-                </p>
-                <p className="text-xs text-neutral-500">
-                  Usa el generador automático arriba o redacta tu primer anuncio destacado en el
-                  editor de la izquierda.
+              <div className="p-8 text-center space-y-1.5">
+                <p className="text-sm font-medium text-white">Sin noticias en esta vista</p>
+                <p className="text-xs text-zinc-500">
+                  Redacta una nueva noticia o genera un borrador arriba.
                 </p>
               </div>
             ) : (
@@ -888,44 +854,46 @@ export function AdminNewsManager({
                   <div
                     key={article.id}
                     className={`p-4 space-y-2.5 transition-colors ${
-                      isSelected ? 'bg-[#707ef9]/5 border-l-4 border-[#707ef9]' : 'hover:bg-[#f9fafb]'
+                      isSelected ? 'bg-[#707ef9]/[0.09]' : 'hover:bg-white/[0.02]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 text-[11px]">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`px-2 py-0.5 font-display font-bold uppercase tracking-wider ${cat.badgeClass}`}>
+                        <span className="px-2 py-0.5 rounded-full bg-white/[0.08] text-zinc-200 font-medium">
                           {cat.label}
                         </span>
                         {article.featured && (
-                          <span className="px-2 py-0.5 bg-[#707ef9]/15 text-[#707ef9] font-bold uppercase">
+                          <span className="px-2 py-0.5 rounded-full bg-[#707ef9]/20 text-[#c8ceff] font-medium">
                             Destacada
                           </span>
                         )}
                         {!article.published && (
-                          <span className="px-2 py-0.5 bg-neutral-200 text-neutral-700 font-bold uppercase">
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-medium">
                             Borrador
                           </span>
                         )}
                       </div>
-                      <span className="text-neutral-400 tabular-nums shrink-0">
+                      <span className="text-zinc-500 tabular-nums shrink-0">
                         {formatShortDate(article.createdAt)}
                       </span>
                     </div>
 
-                    <p className="font-display text-lg font-bold uppercase tracking-wide text-[#0d0d0d] leading-snug">
-                      {article.title}
-                    </p>
-                    <p className="text-xs text-neutral-600 line-clamp-2">{article.summary}</p>
-                    <p className="text-[11px] text-neutral-400">
-                      Por {article.authorName} · {article.authorRole === 'prensa' ? 'Prensa' : 'Admin'}
-                      {article.aiGenerated ? ' · Breve IA' : ''}
+                    <p className="text-sm font-medium text-white leading-snug">{article.title}</p>
+                    <p className="text-xs text-zinc-400 line-clamp-2">{article.summary}</p>
+                    <p className="text-[11px] text-zinc-500">
+                      Por {article.authorName} ·{' '}
+                      {article.authorRole === 'prensa'
+                        ? 'Prensa'
+                        : article.authorRole === 'moderador'
+                        ? 'Moderador'
+                        : 'Admin'}
                     </p>
 
-                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-neutral-100">
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/[0.06]">
                       <button
                         type="button"
                         onClick={() => loadForEdit(article)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 border border-neutral-300 hover:border-[#0d0d0d] text-[11px] font-medium text-[#0d0d0d] cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white hover:text-[#050507] text-[11px] text-zinc-200 cursor-pointer"
                       >
                         <Edit3 className="w-3 h-3" />
                         <span>Editar</span>
@@ -934,18 +902,26 @@ export function AdminNewsManager({
                       <button
                         type="button"
                         onClick={() => handleQuickToggle(article, 'featured')}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 border border-neutral-300 hover:border-[#707ef9] text-[11px] font-medium text-neutral-700 cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-white/[0.1] hover:border-[#707ef9] text-[11px] text-zinc-300 cursor-pointer"
                       >
-                        <Star className={`w-3 h-3 ${article.featured ? 'fill-[#707ef9] text-[#707ef9]' : ''}`} />
-                        <span>{article.featured ? 'Quitar destacado' : 'Destacar'}</span>
+                        <Star
+                          className={`w-3 h-3 ${
+                            article.featured ? 'fill-[#707ef9] text-[#707ef9]' : ''
+                          }`}
+                        />
+                        <span>{article.featured ? 'Quitar' : 'Destacar'}</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleQuickToggle(article, 'published')}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 border border-neutral-300 hover:border-[#0d0d0d] text-[11px] font-medium text-neutral-700 cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-white/[0.1] hover:border-white/30 text-[11px] text-zinc-300 cursor-pointer"
                       >
-                        {article.published ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        {article.published ? (
+                          <EyeOff className="w-3 h-3" />
+                        ) : (
+                          <Eye className="w-3 h-3" />
+                        )}
                         <span>{article.published ? 'Ocultar' : 'Publicar'}</span>
                       </button>
 
@@ -953,10 +929,9 @@ export function AdminNewsManager({
                         type="button"
                         onClick={() => setPendingDelete(article)}
                         aria-label={`Eliminar noticia ${article.title}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 border border-red-200 hover:border-red-600 text-[11px] font-medium text-red-700 ml-auto cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-red-500/30 bg-red-500/10 hover:bg-red-500/25 text-[11px] text-red-300 ml-auto cursor-pointer"
                       >
                         <Trash2 className="w-3 h-3" />
-                        <span>Eliminar</span>
                       </button>
                     </div>
                   </div>
@@ -969,23 +944,21 @@ export function AdminNewsManager({
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title="Eliminar noticia del campeonato"
+        title="Eliminar noticia"
         description={
           pendingDelete
-            ? `¿Seguro que deseas eliminar permanentemente "${pendingDelete.title}"? Dejará de mostrarse en la portada y se borrará de Firestore.`
+            ? `¿Seguro que deseas eliminar permanentemente "${pendingDelete.title}"?`
             : ''
         }
-        confirmLabel="Eliminar definitivamente"
+        confirmLabel="Eliminar"
         onCancel={() => setPendingDelete(null)}
         onConfirm={async () => {
           if (!pendingDelete) return;
           const target = pendingDelete;
           setPendingDelete(null);
           await onDeleteNews(target);
-          if (editingId === target.id) {
-            resetForm();
-          }
-          setStatusBanner(`Noticia "${target.title}" eliminada correctamente.`);
+          if (editingId === target.id) resetForm();
+          setStatusBanner(`Noticia "${target.title}" eliminada.`);
         }}
       />
     </div>

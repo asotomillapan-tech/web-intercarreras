@@ -6,7 +6,8 @@ import {
   LOGO_LIGHT_SVG,
   UFRO_CAREERS,
 } from '../data/ufroSeed';
-import { canManageRegistrationsAndTransfers } from '../domain/rbacEngine';
+import { formatDorsalLabel } from '../domain/attendanceEngine';
+import { canManageRegistrationsAndTransfers, isAdminOrModerator } from '../domain/rbacEngine';
 import { formatRut, validateRut, validateUfroEmail } from '../domain/tournamentEngine';
 import type {
   AcademicLevel,
@@ -46,6 +47,7 @@ interface DraftPlayer {
   fotografia: string;
   esSeleccionadoUfro: boolean;
   dorsal: string;
+  sinNumeroDefinido: boolean;
   posicion: string;
 }
 
@@ -65,6 +67,7 @@ function createEmptyPlayer(defaultCarrera: string, defaultFacultad: string, inde
     fotografia: '',
     esSeleccionadoUfro: false,
     dorsal: String(index + 1),
+    sinNumeroDefinido: false,
     posicion: 'Titular',
   };
 }
@@ -102,7 +105,7 @@ export function RegistrationView({
   const canManage = canManageRegistrationsAndTransfers(currentUser);
   const managedTeams = useMemo(() => {
     if (!currentUser) return [];
-    if (currentUser.role === 'admin') {
+    if (isAdminOrModerator(currentUser)) {
       return [...state.teams].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     }
     if (currentUser.role === 'delegado') {
@@ -321,7 +324,7 @@ export function RegistrationView({
       id: `PL-REG-${Date.now().toString().slice(-4)}-${idx + 1}`,
       teamId: newTeamId,
       disciplineId,
-      dorsal: Number(p.dorsal) || idx + 1,
+      dorsal: p.sinNumeroDefinido ? 0 : Math.min(99, Math.max(0, Number(p.dorsal) || 0)),
       posicion: p.posicion.trim() || 'Titular',
       nombre: p.nombre.trim(),
       apellidoPaterno: p.apellidoPaterno.trim(),
@@ -440,7 +443,9 @@ export function RegistrationView({
       id: `PL-ADD-${Date.now().toString().slice(-5)}`,
       teamId: effectiveManagedTeam.id,
       disciplineId: effectiveManagedTeam.disciplineId,
-      dorsal: Number(newMemberDraft.dorsal) || managedTeamPlayers.length + 1,
+      dorsal: newMemberDraft.sinNumeroDefinido
+        ? 0
+        : Math.min(99, Math.max(0, Number(newMemberDraft.dorsal) || 0)),
       posicion: newMemberDraft.posicion.trim() || 'Titular',
       nombre: newMemberDraft.nombre.trim(),
       apellidoPaterno: newMemberDraft.apellidoPaterno.trim(),
@@ -889,6 +894,44 @@ export function RegistrationView({
                         }
                         className={`${INPUT_CLASS} tabular-nums`}
                       />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          disabled={newMemberDraft.sinNumeroDefinido}
+                          placeholder={newMemberDraft.sinNumeroDefinido ? 'S/N' : 'Dorsal (1-99)'}
+                          value={newMemberDraft.sinNumeroDefinido ? '' : newMemberDraft.dorsal}
+                          onChange={(e) =>
+                            setNewMemberDraft({ ...newMemberDraft, dorsal: e.target.value })
+                          }
+                          className={`${INPUT_CLASS} tabular-nums disabled:opacity-40`}
+                        />
+                      </div>
+                      <label className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#111117] px-3.5 py-2.5 text-xs text-zinc-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newMemberDraft.sinNumeroDefinido}
+                          onChange={(e) =>
+                            setNewMemberDraft({
+                              ...newMemberDraft,
+                              sinNumeroDefinido: e.target.checked,
+                              dorsal: e.target.checked ? '' : newMemberDraft.dorsal || '1',
+                            })
+                          }
+                          className="accent-[#707ef9] w-4 h-4"
+                        />
+                        <span>Sin número definido</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Posición (ej: Titular)"
+                        value={newMemberDraft.posicion}
+                        onChange={(e) =>
+                          setNewMemberDraft({ ...newMemberDraft, posicion: e.target.value })
+                        }
+                        className={INPUT_CLASS}
+                      />
                     </div>
                     <div className="flex items-center justify-between gap-4 pt-2">
                       <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
@@ -1018,6 +1061,36 @@ export function RegistrationView({
                         }
                         className={`${INPUT_CLASS} tabular-nums`}
                       />
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        aria-label="Dorsal"
+                        disabled={editingPlayer.dorsal === 0}
+                        placeholder={editingPlayer.dorsal === 0 ? 'S/N' : 'Dorsal'}
+                        value={editingPlayer.dorsal === 0 ? '' : editingPlayer.dorsal}
+                        onChange={(e) =>
+                          setEditingPlayer({
+                            ...editingPlayer,
+                            dorsal: Math.min(99, Math.max(1, Number(e.target.value) || 1)),
+                          })
+                        }
+                        className={`${INPUT_CLASS} tabular-nums disabled:opacity-40`}
+                      />
+                      <label className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#111117] px-3.5 py-2.5 text-xs text-zinc-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={editingPlayer.dorsal === 0}
+                          onChange={(e) =>
+                            setEditingPlayer({
+                              ...editingPlayer,
+                              dorsal: e.target.checked ? 0 : 1,
+                            })
+                          }
+                          className="accent-[#707ef9] w-4 h-4"
+                        />
+                        <span>Sin número definido</span>
+                      </label>
                     </div>
                     <div className="flex items-center justify-between pt-2">
                       <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
@@ -1062,7 +1135,15 @@ export function RegistrationView({
                           <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
                             <td className="py-3.5 px-5">
                               <p className="font-medium text-white">
-                                <span className="text-zinc-500 tabular-nums mr-1.5">#{p.dorsal}</span>
+                                <span
+                                  className={`tabular-nums mr-1.5 ${
+                                    p.dorsal === 0
+                                      ? 'inline-block px-1.5 py-0.5 rounded bg-white/[0.06] text-[10px] text-zinc-300'
+                                      : 'text-zinc-500'
+                                  }`}
+                                >
+                                  {formatDorsalLabel(p.dorsal)}
+                                </span>
                                 {p.nombre} {p.apellidoPaterno} {p.apellidoMaterno}
                               </p>
                               <p className="text-xs text-zinc-400 mt-0.5">
@@ -1553,6 +1634,62 @@ export function RegistrationView({
                           />
                           <span>12. Seleccionado UFRO</span>
                         </label>
+                      </div>
+
+                      <div>
+                        <label htmlFor={`p-dorsal-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          Dorsal (opcional si es rotativo)
+                        </label>
+                        <input
+                          id={`p-dorsal-${idx}`}
+                          type="number"
+                          min={1}
+                          max={99}
+                          disabled={player.sinNumeroDefinido}
+                          value={player.sinNumeroDefinido ? '' : player.dorsal}
+                          onChange={(e) => updateDraftPlayer(player.tempId, 'dorsal', e.target.value)}
+                          placeholder={player.sinNumeroDefinido ? 'S/N (rotativo)' : 'Ej: 10'}
+                          className={`${INPUT_CLASS} tabular-nums disabled:opacity-40`}
+                        />
+                      </div>
+
+                      <div className="flex items-end pb-2">
+                        <label className="inline-flex items-center gap-2.5 text-xs text-zinc-200 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={player.sinNumeroDefinido}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setRoster((prev) =>
+                                prev.map((item) =>
+                                  item.tempId === player.tempId
+                                    ? {
+                                        ...item,
+                                        sinNumeroDefinido: checked,
+                                        dorsal: checked ? '' : item.dorsal || String(idx + 1),
+                                      }
+                                    : item
+                                )
+                              );
+                            }}
+                            className="accent-[#707ef9] w-4 h-4"
+                          />
+                          <span>Sin número definido</span>
+                        </label>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label htmlFor={`p-pos-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          Posición en cancha
+                        </label>
+                        <input
+                          id={`p-pos-${idx}`}
+                          type="text"
+                          value={player.posicion}
+                          onChange={(e) => updateDraftPlayer(player.tempId, 'posicion', e.target.value)}
+                          placeholder="Ej: Delantero, Base, Armador..."
+                          className={INPUT_CLASS}
+                        />
                       </div>
                     </div>
                   </div>

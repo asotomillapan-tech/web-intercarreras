@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DISCIPLINE_MAP, UFRO_CAREERS } from '../data/ufroSeed';
 import { findPlayerParticipations } from '../domain/identityCrossRefEngine';
+import { formatDorsalLabel } from '../domain/attendanceEngine';
 import {
   buildFavoriteNotifications,
   ROLE_META,
@@ -646,7 +647,7 @@ export function AccountView({
                         {part.team?.nombre ?? part.player.teamId}
                       </p>
                       <p className="text-xs text-zinc-400 mt-1 tabular-nums">
-                        Dorsal #{part.player.dorsal} · {part.player.posicion} ·{' '}
+                        Dorsal {formatDorsalLabel(part.player.dorsal)} · {part.player.posicion} ·{' '}
                         {part.player.stats.partidosJugados} PJ
                       </p>
                     </div>

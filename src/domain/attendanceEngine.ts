@@ -59,6 +59,46 @@ function sanitizeNotes(notes?: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function sanitizeMatchDorsalsMap(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, number> = {};
+  let count = 0;
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    const cleanKey = key.trim().slice(0, 128);
+    if (!cleanKey) continue;
+    const num = typeof val === 'number' ? val : Number(val);
+    if (!Number.isFinite(num)) continue;
+    const intVal = Math.trunc(num);
+    if (intVal < 1 || intVal > 99) continue;
+    out[cleanKey] = intVal;
+    count += 1;
+    if (count >= 80) break;
+  }
+  return count > 0 ? out : undefined;
+}
+
+/**
+ * Returns the effective jersey number for a player in a specific match:
+ * prefers the per-match override recorded during attendance (`matchDorsals`),
+ * falling back to the player's permanent registered dorsal (0 = "Sin número definido").
+ */
+export function getEffectiveMatchDorsal(
+  match: Pick<Match, 'attendance'> | null | undefined,
+  player: Pick<Player, 'id' | 'dorsal'>
+): number {
+  const override = match?.attendance?.matchDorsals?.[player.id];
+  if (typeof override === 'number' && Number.isFinite(override) && override >= 1 && override <= 99) {
+    return Math.trunc(override);
+  }
+  return typeof player.dorsal === 'number' && Number.isFinite(player.dorsal) && player.dorsal > 0
+    ? Math.trunc(player.dorsal)
+    : 0;
+}
+
+export function formatDorsalLabel(dorsal: number): string {
+  return dorsal > 0 ? `#${dorsal}` : 'S/N';
+}
+
 export function getNormalizedMatchAttendance(match: Match): MatchAttendanceRecord {
   const raw = match.attendance;
   const status: MatchAttendanceStatus =
@@ -72,6 +112,9 @@ export function getNormalizedMatchAttendance(match: Match): MatchAttendanceRecor
     awayPresentIds: status === 'OMITIDA' ? [] : sanitizeIdList(raw?.awayPresentIds),
   };
 
+  const matchDorsals = sanitizeMatchDorsalsMap(raw?.matchDorsals);
+  if (matchDorsals) normalized.matchDorsals = matchDorsals;
+
   if (typeof raw?.recordedAt === 'string' && raw.recordedAt.trim().length > 0) {
     normalized.recordedAt = raw.recordedAt.trim().slice(0, 64);
   }
@@ -81,6 +124,45 @@ export function getNormalizedMatchAttendance(match: Match): MatchAttendanceRecor
   if (notes) normalized.notes = notes;
 
   return normalized;
+}
+
+export function setPlayerMatchDorsal(params: {
+  match: Match;
+  playerId: string;
+  dorsal: number | null;
+  recorderName?: string;
+  nowIso?: string;
+}): Match {
+  const { match, playerId, dorsal, recorderName, nowIso } = params;
+  const trimmedId = playerId.trim().slice(0, 128);
+  if (!trimmedId) return match;
+
+  const current = getNormalizedMatchAttendance(match);
+  const nextDorsals: Record<string, number> = { ...(current.matchDorsals ?? {}) };
+
+  if (dorsal === null || !Number.isFinite(dorsal) || Math.trunc(dorsal) < 1) {
+    delete nextDorsals[trimmedId];
+  } else {
+    nextDorsals[trimmedId] = Math.max(1, Math.min(99, Math.trunc(dorsal)));
+  }
+
+  const sanitizedDorsals = sanitizeMatchDorsalsMap(nextDorsals);
+  const nextAttendance: MatchAttendanceRecord = {
+    status: current.status,
+    homePresentIds: current.homePresentIds,
+    awayPresentIds: current.awayPresentIds,
+    recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
+  };
+
+  if (sanitizedDorsals) nextAttendance.matchDorsals = sanitizedDorsals;
+  const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
+  if (recorder) nextAttendance.recordedByName = recorder;
+  if (current.notes) nextAttendance.notes = current.notes;
+
+  return {
+    ...match,
+    attendance: nextAttendance,
+  };
 }
 
 export function togglePlayerAttendance(params: {
@@ -108,6 +190,7 @@ export function togglePlayerAttendance(params: {
     recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
   };
 
+  if (current.matchDorsals) nextAttendance.matchDorsals = current.matchDorsals;
   const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
   if (recorder) nextAttendance.recordedByName = recorder;
   if (current.notes) nextAttendance.notes = current.notes;
@@ -137,6 +220,7 @@ export function setTeamAttendanceAll(params: {
     recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
   };
 
+  if (current.matchDorsals) nextAttendance.matchDorsals = current.matchDorsals;
   const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
   if (recorder) nextAttendance.recordedByName = recorder;
   if (current.notes) nextAttendance.notes = current.notes;
@@ -162,6 +246,7 @@ export function markMatchAttendanceOmitted(params: {
     recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
   };
 
+  if (current.matchDorsals) nextAttendance.matchDorsals = current.matchDorsals;
   const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
   if (recorder) nextAttendance.recordedByName = recorder;
   const cleanedNotes = sanitizeNotes(notes);
@@ -187,6 +272,7 @@ export function resumeMatchAttendance(params: {
     recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
   };
 
+  if (current.matchDorsals) nextAttendance.matchDorsals = current.matchDorsals;
   const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
   if (recorder) nextAttendance.recordedByName = recorder;
 
@@ -215,6 +301,7 @@ export function syncOnCourtPlayersIntoAttendance(params: {
     recordedAt: (nowIso ?? new Date().toISOString()).slice(0, 64),
   };
 
+  if (current.matchDorsals) nextAttendance.matchDorsals = current.matchDorsals;
   const recorder = sanitizeRecorderName(recorderName ?? current.recordedByName);
   if (recorder) nextAttendance.recordedByName = recorder;
   if (current.notes) nextAttendance.notes = current.notes;

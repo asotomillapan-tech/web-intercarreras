@@ -4,9 +4,10 @@ import { getSectionPath, isPrimarySpaNavigationClick, type NavSection } from '..
 
 interface FooterProps {
   onNavigate: (section: NavSection) => void;
+  hasOpenRegistrations?: boolean;
 }
 
-export function Footer({ onNavigate }: FooterProps) {
+export function Footer({ onNavigate, hasOpenRegistrations = true }: FooterProps) {
   const handleLinkClick = (event: MouseEvent<HTMLAnchorElement>, section: NavSection) => {
     if (!isPrimarySpaNavigationClick(event)) return;
     event.preventDefault();
@@ -119,15 +120,17 @@ export function Footer({ onNavigate }: FooterProps) {
                   Mi Cuenta
                 </a>
               </li>
-              <li>
-                <a
-                  href={getSectionPath('inscripciones')}
-                  onClick={(e) => handleLinkClick(e, 'inscripciones')}
-                  className="hover:text-white transition-colors cursor-pointer"
-                >
-                  Inscripciones
-                </a>
-              </li>
+              {hasOpenRegistrations && (
+                <li>
+                  <a
+                    href={getSectionPath('inscripciones')}
+                    onClick={(e) => handleLinkClick(e, 'inscripciones')}
+                    className="hover:text-white transition-colors cursor-pointer"
+                  >
+                    Inscripciones
+                  </a>
+                </li>
+              )}
               <li>
                 <a
                   href={getSectionPath('transferencias-publicas')}

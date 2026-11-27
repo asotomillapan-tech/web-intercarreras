@@ -562,9 +562,16 @@ export function HomeMatchCalendar({
 
                             <div className="flex sm:flex-col items-center sm:items-end justify-between gap-2 shrink-0">
                               {revealData ? (
-                                <span className="px-3 py-1 rounded-full bg-white/[0.08] border border-white/[0.1] text-white text-sm font-semibold tabular-nums">
-                                  {match.homeScore} — {match.awayScore}
-                                </span>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className="px-3 py-1 rounded-full bg-white/[0.08] border border-white/[0.1] text-white text-sm font-semibold tabular-nums">
+                                    {match.homeScore} — {match.awayScore}
+                                  </span>
+                                  {match.penaltyScore && (
+                                    <span className="text-[10px] font-mono text-[#a5b0ff] tabular-nums">
+                                      Pen. {match.penaltyScore.home} — {match.penaltyScore.away}
+                                    </span>
+                                  )}
+                                </div>
                               ) : votingOpen ? (
                                 <span className="px-2.5 py-1 rounded-full bg-[#707ef9]/20 border border-[#707ef9]/35 text-[#c7ceff] text-[11px] font-medium inline-flex items-center gap-1">
                                   <Lock className="w-3 h-3" />

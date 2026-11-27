@@ -9,7 +9,15 @@ import {
   normalizePathname,
   resolveSectionFromPath,
 } from './domain/navigationRoutes';
-import { validateRoleChange } from './domain/rbacEngine';
+import {
+  canAssignReferees,
+  canManageFormatAndSheets,
+  canManageNews,
+  canManageRoles,
+  isAdminOrModerator,
+  isRefereeOrChiefRole,
+  validateRoleChange,
+} from './domain/rbacEngine';
 import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tournamentEngine';
 import { applyStatDeltaClamped, type PlayerStatDelta } from './domain/liveMatchEngine';
 import {
@@ -40,6 +48,7 @@ import {
 import {
   adminUpdateFirestoreUserRole,
   approveFirestoreTransferRequest,
+  bulkUpdateFirestoreTeams,
   createFirestoreTransferRequest,
   deleteFirestoreMatchesForDiscipline,
   deleteFirestoreNewsArticle,
@@ -51,6 +60,7 @@ import {
   listAllFirestoreNews,
   listAllFirestoreTransfers,
   listDelegateFirestoreTransfers,
+  listFirestoreRefereeRoster,
   listFirestoreUsers,
   loadAuthorizedPlayerPrivateMap,
   rejectFirestoreTransferRequest,
@@ -72,6 +82,7 @@ import {
   subscribeToTotyBallots,
   subscribeToTotyConfigs,
   syncGoogleUserToFirestore,
+  syncRefereeRosterFromUsers,
   updateFirestorePlayerStats,
   updateFirestoreUserPreferences,
 } from './services/firestoreService';
@@ -322,7 +333,9 @@ function AppContent() {
       },
       onNews: (publishedNews) => {
         const keepDrafts =
-          currentUserRoleRef.current === 'admin' || currentUserRoleRef.current === 'prensa';
+          currentUserRoleRef.current === 'admin' ||
+          currentUserRoleRef.current === 'moderador' ||
+          currentUserRoleRef.current === 'prensa';
         setState((prev) => ({
           ...prev,
           news: mergePublicNewsPreservingDrafts(prev.news, publishedNews, keepDrafts),
@@ -331,7 +344,9 @@ function AppContent() {
       },
       onTransfers: (approvedTransfers) => {
         const keepPrivate =
-          currentUserRoleRef.current === 'admin' || currentUserRoleRef.current === 'delegado';
+          currentUserRoleRef.current === 'admin' ||
+          currentUserRoleRef.current === 'moderador' ||
+          currentUserRoleRef.current === 'delegado';
         setState((prev) => ({
           ...prev,
           transfers: mergePublicTransfersPreservingPrivate(
@@ -436,7 +451,7 @@ function AppContent() {
     async (profile: AppUserProfile, currentPlayers: Player[], currentConfigs: Record<DisciplineId, DisciplineFormatConfig>) => {
       // Hydrate authorized isolated student PII (/player_private)
       if (
-        profile.role === 'admin' ||
+        isAdminOrModerator(profile) ||
         profile.role === 'delegado' ||
         profile.role === 'jugador'
       ) {
@@ -456,13 +471,23 @@ function AppContent() {
         }
       }
 
-      // If signed-in user is Admin or Prensa Oficial, load all news (including unpublished drafts)
-      if (profile.role === 'admin' || profile.role === 'prensa') {
+      // Load all news (including unpublished drafts) for Admin, Moderador & Prensa
+      if (canManageNews(profile)) {
         try {
           const allNews = await listAllFirestoreNews();
           setState((prev) => ({ ...prev, news: allNews }));
         } catch (err) {
           console.error('Error cargando borradores de noticias:', err);
+        }
+      }
+
+      // Load zero-PII referee roster for Referee Chiefs & Admins
+      if (canAssignReferees(profile)) {
+        try {
+          const roster = await listFirestoreRefereeRoster();
+          setState((prev) => ({ ...prev, refereeRoster: roster }));
+        } catch (err) {
+          console.error('Error cargando padrón arbitral:', err);
         }
       }
 
@@ -480,14 +505,15 @@ function AppContent() {
         }
       }
 
-      // If signed-in user is an Admin, load all Firestore users, all transfers & ensure 8 discipline configs exist
-      if (profile.role === 'admin') {
+      // If signed-in user is Admin or Moderador, load all Firestore users, transfers & sync referee roster
+      if (isAdminOrModerator(profile)) {
         try {
           const [cloudUsers, allTransfers] = await Promise.all([
             listFirestoreUsers(),
             listAllFirestoreTransfers().catch(() => null),
             ensureAllConfigsInFirestore(currentConfigs).catch(() => undefined),
           ]);
+          void syncRefereeRosterFromUsers(cloudUsers);
           setState((prev) => {
             const byUid = new Map(prev.users.map((u) => [u.uid, u]));
             cloudUsers.forEach((cu) => byUid.set(cu.uid, cu));
@@ -604,7 +630,7 @@ function AppContent() {
       return;
     }
     if (
-      currentUser.role !== 'admin' &&
+      !isAdminOrModerator(currentUser) &&
       currentUser.role !== 'delegado' &&
       currentUser.role !== 'jugador'
     ) {
@@ -713,7 +739,7 @@ function AppContent() {
       pendingSyncKeys.length === 0 ||
       !autoSyncSessionApproved ||
       !state.autoSyncSheetsEnabled ||
-      currentUser?.role !== 'admin'
+      !canManageFormatAndSheets(currentUser)
     ) {
       return;
     }
@@ -906,9 +932,10 @@ function AppContent() {
   };
 
   const handleRefreshUsers = async () => {
-    if (currentUser?.role !== 'admin') return;
+    if (!canManageRoles(currentUser)) return;
     try {
       const cloudUsers = await listFirestoreUsers();
+      void syncRefereeRosterFromUsers(cloudUsers);
       setState((prev) => ({ ...prev, users: cloudUsers }));
     } catch (err) {
       reportCloudError('No se pudo actualizar la lista de usuarios', err);
@@ -1027,7 +1054,7 @@ function AppContent() {
   };
 
   const handleSaveAwardNominees = async (disciplineId: DisciplineId, nomineeIds: string[]) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!isAdminOrModerator(currentUser)) return;
     const cleaned = Array.from(new Set(nomineeIds.map((id) => id.trim()).filter(Boolean))).slice(0, 5);
     setState((prev) => ({
       ...prev,
@@ -1045,7 +1072,7 @@ function AppContent() {
   };
 
   const handleSaveTotyConfig = async (config: DisciplineTotyConfig) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!isAdminOrModerator(currentUser)) return;
     const normalized: DisciplineTotyConfig = {
       ...config,
       temporada: config.temporada || stateRef.current.temporada,
@@ -1068,7 +1095,7 @@ function AppContent() {
   };
 
   const handleResetTotyConfig = async (disciplineId: DisciplineId) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!isAdminOrModerator(currentUser)) return;
     setState((prev) => {
       const nextConfigs = { ...prev.totyConfigs };
       delete nextConfigs[disciplineId];
@@ -1235,7 +1262,7 @@ function AppContent() {
   };
 
   const handleDeletePlayer = (player: Player) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!isAdminOrModerator(currentUser)) return;
     setState((prev) => ({
       ...prev,
       players: prev.players.filter((p) => p.id !== player.id),
@@ -1251,25 +1278,25 @@ function AppContent() {
   };
 
   const handleAdminAddTeam = (team: Team) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || !isAdminOrModerator(currentUser)) return;
     const enriched: Team = { ...team, createdByUid: currentUser.uid };
     setState((prev) => ({
       ...prev,
       teams: [...prev.teams, enriched],
     }));
     queueMasterSyncForDiscipline(enriched.disciplineId);
-    void saveFirestoreTeam(enriched, currentUser.uid, true).catch((err) =>
+    void saveFirestoreTeam(enriched, currentUser.uid, true, currentUser.role).catch((err) =>
       reportCloudError('Error agregando equipo en Firestore', err)
     );
   };
 
   const handleUpdateTeam = (team: Team) => {
     if (!currentUser) return;
-    const isAdmin = currentUser.role === 'admin';
+    const isStaff = isAdminOrModerator(currentUser);
     const isAuthorizedDelegado =
       currentUser.role === 'delegado' &&
       (currentUser.delegatedTeamId === team.id || team.createdByUid === currentUser.uid);
-    if (!isAdmin && !isAuthorizedDelegado) return;
+    if (!isStaff && !isAuthorizedDelegado) return;
 
     setState((prev) => ({
       ...prev,
@@ -1281,8 +1308,40 @@ function AppContent() {
     );
   };
 
+  const handleBulkUpdateTeams = async (
+    updates: Array<{ team: Team; clearAnioFundacion?: boolean }>
+  ) => {
+    if (!currentUser || !isAdminOrModerator(currentUser) || updates.length === 0) return;
+    const updateMap = new Map(updates.map((u) => [u.team.id, u]));
+    setState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) => {
+        const match = updateMap.get(t.id);
+        if (!match) return t;
+        const merged: Team = { ...t, ...match.team };
+        if (match.clearAnioFundacion) {
+          merged.anioFundacion = undefined;
+        }
+        return merged;
+      }),
+    }));
+    const affectedDisciplines = new Set(updates.map((u) => u.team.disciplineId));
+    affectedDisciplines.forEach((d) => queueMasterSyncForDiscipline(d));
+    try {
+      await bulkUpdateFirestoreTeams({
+        teams: updates.map((u) => u.team),
+        actorUid: currentUser.uid,
+        actorRole: currentUser.role,
+        clearAnioFundacion: updates.some((u) => u.clearAnioFundacion),
+      });
+    } catch (err) {
+      reportCloudError('Error aplicando edición masiva de equipos en Firestore', err);
+      throw err;
+    }
+  };
+
   const handleAdminDeleteTeam = (team: Team) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!isAdminOrModerator(currentUser)) return;
     const affectedPlayerIds = stateRef.current.players
       .filter((p) => p.teamId === team.id)
       .map((p) => p.id);
@@ -1325,7 +1384,7 @@ function AppContent() {
   };
 
   const handleAddNews = async (article: NewsArticle) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    if (!canManageNews(currentUser)) return;
     await saveFirestoreNewsArticle(article, true);
     setState((prev) => ({
       ...prev,
@@ -1334,7 +1393,7 @@ function AppContent() {
   };
 
   const handleUpdateNews = async (article: NewsArticle) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    if (!canManageNews(currentUser)) return;
     await saveFirestoreNewsArticle(article, false);
     setState((prev) => ({
       ...prev,
@@ -1346,7 +1405,7 @@ function AppContent() {
   };
 
   const handleDeleteNews = async (article: NewsArticle) => {
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'prensa')) return;
+    if (!canManageNews(currentUser)) return;
     await deleteFirestoreNewsArticle(article.id);
     setState((prev) => ({
       ...prev,
@@ -1391,6 +1450,7 @@ function AppContent() {
       actorUid: currentUser.uid,
       targetUid: targetUser.uid,
       targetEmail: targetUser.email,
+      targetDisplayName: targetUser.displayName,
       nextRole,
       delegatedTeamId: nextRole === 'delegado' ? delegatedTeamId : undefined,
       linkedPlayerId: nextRole === 'jugador' ? linkedPlayerId : undefined,
@@ -1404,10 +1464,23 @@ function AppContent() {
       updatedAt: new Date().toISOString(),
     };
 
-    setState((prev) => ({
-      ...prev,
-      users: prev.users.map((u) => (u.uid === targetUid ? updatedTarget : u)),
-    }));
+    setState((prev) => {
+      const nextRoster = (prev.refereeRoster ?? []).filter((r) => r.uid !== targetUid);
+      if (isRefereeOrChiefRole(nextRole)) {
+        nextRoster.push({
+          uid: targetUid,
+          displayName: targetUser.displayName,
+          role: nextRole as 'arbitro' | 'jefe_arbitros_futbol' | 'jefe_arbitros_basquetbol' | 'jefe_arbitros_voleibol',
+          updatedAt: new Date().toISOString(),
+        });
+        nextRoster.sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+      }
+      return {
+        ...prev,
+        users: prev.users.map((u) => (u.uid === targetUid ? updatedTarget : u)),
+        refereeRoster: nextRoster,
+      };
+    });
   };
 
   const handleInspectPlayerFromHome = (player: Player) => {
@@ -1498,13 +1571,13 @@ function AppContent() {
   };
 
   const handleAdminAddMatch = (newMatch: Match) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || !isAdminOrModerator(currentUser)) return;
     setState((prev) => ({
       ...prev,
       matches: [newMatch, ...prev.matches],
     }));
     queueMasterSyncForDiscipline(newMatch.disciplineId);
-    void saveFirestoreMatch(newMatch, true, 'admin').catch((err) =>
+    void saveFirestoreMatch(newMatch, true, currentUser.role).catch((err) =>
       reportCloudError('Error programando nuevo encuentro en Firestore', err)
     );
   };
@@ -1913,12 +1986,16 @@ function AppContent() {
                 onAddTeam={handleAdminAddTeam}
                 onUpdateTeam={handleUpdateTeam}
                 onDeleteTeam={handleAdminDeleteTeam}
+                onBulkUpdateTeams={handleBulkUpdateTeams}
                 onAddPlayer={handleAddPlayerToTeam}
                 onUpdatePlayer={handleUpdatePlayer}
                 onDeletePlayer={handleDeletePlayer}
                 onAddNews={handleAddNews}
                 onUpdateNews={handleUpdateNews}
                 onDeleteNews={handleDeleteNews}
+                onAddPhoto={handleAddPhoto}
+                onDeletePhoto={handleDeletePhoto}
+                onSaveDriveRootFolder={handleSaveDriveRootFolder}
                 onUpdateConfig={handleUpdateConfig}
                 onSaveMasterSheets={handleSaveMasterSheets}
                 onApproveAutoSyncSession={setAutoSyncSessionApproved}
@@ -1946,7 +2023,12 @@ function AppContent() {
         )}
       </main>
 
-      <Footer onNavigate={handleNavigate} />
+      <Footer
+        onNavigate={handleNavigate}
+        hasOpenRegistrations={Object.values(state.configs).some(
+          (c) => c.inscripcionesAbiertas
+        )}
+      />
 
       <NewsArticleModal
         article={activeNewsArticle}

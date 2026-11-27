@@ -291,3 +291,59 @@ test('favorite team notifications prioritize active MVP polls without leaking li
   assert.equal(notifs[1].type, 'RESULTADO');
   assert.equal(notifs[1].detail.includes('3 - 1'), true);
 });
+
+test('3-panel RBAC scopes General Admin, Press, and Referee panels accurately', async () => {
+  const rbac = await import('./rbacEngine');
+
+  const admin = makeUser({ uid: 'adm-1', role: 'admin', email: BOOTSTRAPPED_ADMIN_EMAIL });
+  const mod = makeUser({ uid: 'mod-1', role: 'moderador', email: 'mod@ufromail.cl' });
+  const prensa = makeUser({ uid: 'prs-1', role: 'prensa' });
+  const fotografo = makeUser({ uid: 'pho-1', role: 'fotografo' });
+  const jefeFutbol = makeUser({ uid: 'jf-1', role: 'jefe_arbitros_futbol' });
+  const jefeBasket = makeUser({ uid: 'jb-1', role: 'jefe_arbitros_basquetbol' });
+  const jefeVoley = makeUser({ uid: 'jv-1', role: 'jefe_arbitros_voleibol' });
+  const arbitro = makeUser({ uid: 'arb-1', role: 'arbitro' });
+  const trad = makeUser({ uid: 'tr-1', role: 'tradicional' });
+
+  // Panel access matrix
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(admin), ['general', 'prensa', 'arbitraje']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(mod), ['general', 'prensa']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(prensa), ['prensa']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(fotografo), ['prensa']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(jefeFutbol), ['arbitraje']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(arbitro), ['arbitraje']);
+  assert.deepEqual(rbac.getAccessibleOfficialPanels(trad), []);
+
+  // Moderator can assign non-admin roles, but NEVER admin or edit an existing admin
+  assert.equal(rbac.validateRoleChange(mod, trad, 'prensa').allowed, true);
+  assert.equal(rbac.validateRoleChange(mod, trad, 'jefe_arbitros_voleibol').allowed, true);
+  assert.equal(rbac.validateRoleChange(mod, trad, 'admin').allowed, false);
+  assert.equal(rbac.validateRoleChange(mod, admin, 'tradicional').allowed, false);
+
+  // Unified discipline scoping for Referee Chiefs
+  assert.deepEqual(rbac.getRefereeChiefDisciplines(jefeFutbol), ['f7-h-1', 'f7-h-2', 'f7-h-3', 'f7-m']);
+  assert.deepEqual(rbac.getRefereeChiefDisciplines(jefeBasket), ['basquet-h', 'basquet-3x3-m']);
+  assert.deepEqual(rbac.getRefereeChiefDisciplines(jefeVoley), ['voley-m', 'voley-h']);
+  assert.equal(rbac.canAssignRefereesForDiscipline(jefeFutbol, 'f7-m'), true);
+  assert.equal(rbac.canAssignRefereesForDiscipline(jefeFutbol, 'voley-m'), false);
+  assert.equal(rbac.canAssignRefereesForDiscipline(jefeVoley, 'voley-m'), true);
+  assert.equal(rbac.canAssignRefereesForDiscipline(jefeVoley, 'voley-h'), true);
+  assert.equal(rbac.canAssignRefereesForDiscipline(arbitro, 'f7-h-1'), false);
+
+  // Referee Desk visibility: Chiefs see all matches in their sport; Arbitro sees ONLY assigned matches
+  const mFutbolAssigned = { disciplineId: 'f7-m' as const, assignedRefereeUid: 'arb-1', refereeId: 'arb-1', status: 'PROGRAMADO' as const };
+  const mFutbolOther = { disciplineId: 'f7-h-2' as const, assignedRefereeUid: 'arb-2', refereeId: 'arb-2', status: 'PROGRAMADO' as const };
+  const mVoleyAssigned = { disciplineId: 'voley-m' as const, assignedRefereeUid: 'arb-1', refereeId: 'arb-1', status: 'EN_VIVO' as const };
+
+  assert.equal(rbac.canViewMatchInRefereeDesk(jefeFutbol, mFutbolAssigned), true);
+  assert.equal(rbac.canViewMatchInRefereeDesk(jefeFutbol, mFutbolOther), true);
+  assert.equal(rbac.canViewMatchInRefereeDesk(jefeFutbol, mVoleyAssigned), false);
+
+  assert.equal(rbac.canViewMatchInRefereeDesk(arbitro, mFutbolAssigned), true);
+  assert.equal(rbac.canViewMatchInRefereeDesk(arbitro, mFutbolOther), false);
+  assert.equal(rbac.canViewMatchInRefereeDesk(arbitro, mVoleyAssigned), true);
+  assert.equal(rbac.canEditMatchInRefereeDesk(arbitro, mFutbolOther), false);
+  assert.equal(rbac.canEditMatchInRefereeDesk(arbitro, { ...mFutbolAssigned, status: 'FINALIZADO' }), false);
+  assert.equal(rbac.canEditMatchInRefereeDesk(admin, { ...mFutbolAssigned, status: 'FINALIZADO' }), true);
+});
+

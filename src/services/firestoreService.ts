@@ -2,6 +2,7 @@ import type { User } from 'firebase/auth';
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -25,10 +26,11 @@ import {
   clampSafeInt,
   sanitizeMatchAttendanceRecord,
   sanitizeMatchLiveStateRecord,
+  sanitizePenaltyScoreRecord,
   sanitizePlayerStatsRecord,
   stripUndefinedDeep,
 } from '../domain/firestoreSanitizer';
-import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
+import { BOOTSTRAPPED_ADMIN_EMAIL, isRefereeOrChiefRole } from '../domain/rbacEngine';
 import type { PublicRealtimeStreamKey } from '../domain/realtimeSyncEngine';
 import type {
   AcademicLevel,
@@ -50,6 +52,7 @@ import type {
   Player,
   PlayerStats,
   PositionAwardVoteRecord,
+  RefereeRosterEntry,
   Team,
   TotyBallotRecord,
   TournamentState,
@@ -246,6 +249,8 @@ function mapTeamDoc(d: QueryDocumentSnapshot): Team {
     facultad: String(data.facultad || ''),
     groupName: String(data.groupName || 'Grupo A'),
     escudo: typeof data.escudo === 'string' && data.escudo ? data.escudo : undefined,
+    clubName:
+      typeof data.clubName === 'string' && data.clubName.trim() ? data.clubName.trim() : undefined,
     anioFundacion:
       typeof data.anioFundacion === 'number' && Number.isFinite(data.anioFundacion)
         ? Math.trunc(data.anioFundacion)
@@ -299,6 +304,7 @@ function mapMatchDoc(d: QueryDocumentSnapshot): Match {
     awayTeamId: String(data.awayTeamId || ''),
     homeScore: Number(data.homeScore) || 0,
     awayScore: Number(data.awayScore) || 0,
+    penaltyScore: sanitizePenaltyScoreRecord(data.penaltyScore),
     status: (data.status as Match['status']) || 'PROGRAMADO',
     periodLabel: String(data.periodLabel || 'Programado'),
     clock: String(data.clock || 'Por iniciar'),
@@ -315,6 +321,14 @@ function mapMatchDoc(d: QueryDocumentSnapshot): Match {
     liveState: sanitizeMatchLiveState(data.liveState),
     attendance: sanitizeMatchAttendance(data.attendance),
     refereeId: String(data.refereeId || ''),
+    assignedRefereeUid:
+      typeof data.assignedRefereeUid === 'string' && data.assignedRefereeUid.trim()
+        ? data.assignedRefereeUid.trim()
+        : undefined,
+    assignedRefereeName:
+      typeof data.assignedRefereeName === 'string' && data.assignedRefereeName.trim()
+        ? data.assignedRefereeName.trim()
+        : undefined,
     scoresheetValidation:
       data.scoresheetValidation && typeof data.scoresheetValidation === 'object'
         ? data.scoresheetValidation
@@ -871,7 +885,12 @@ function mapNewsDoc(docId: string, data: Record<string, unknown>): NewsArticle {
     aiGenerated: Boolean(data.aiGenerated),
     authorUid: String(data.authorUid || ''),
     authorName: String(data.authorName || 'Prensa Oficial UFRO'),
-    authorRole: data.authorRole === 'prensa' ? 'prensa' : 'admin',
+    authorRole:
+      data.authorRole === 'prensa'
+        ? 'prensa'
+        : data.authorRole === 'moderador'
+        ? 'moderador'
+        : 'admin',
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -894,7 +913,7 @@ export async function loadAuthorizedPlayerPrivateMap(
     { rut: string; numeroMatricula: string; correoInstitucional: string; fechaNacimiento: string }
   > = {};
 
-  if (user.role === 'admin') {
+  if (user.role === 'admin' || user.role === 'moderador') {
     const path = 'player_private';
     try {
       const snap = await getDocs(collection(db, path));
@@ -1135,6 +1154,7 @@ export async function adminUpdateFirestoreUserRole(params: {
   actorUid: string;
   targetUid: string;
   targetEmail: string;
+  targetDisplayName?: string;
   nextRole: UserRole;
   delegatedTeamId?: string;
   linkedPlayerId?: string;
@@ -1154,8 +1174,9 @@ export async function adminUpdateFirestoreUserRole(params: {
     }
     await updateDoc(userRef, updatePayload);
 
-    const adminDocRef = doc(db, 'admins', params.targetUid);
+    // Sync /admins registry (only Admin can write /admins; moderators cannot grant/revoke admin)
     if (params.nextRole === 'admin') {
+      const adminDocRef = doc(db, 'admins', params.targetUid);
       await setDoc(adminDocRef, {
         uid: params.targetUid,
         email: params.targetEmail.slice(0, 160),
@@ -1163,14 +1184,92 @@ export async function adminUpdateFirestoreUserRole(params: {
         createdAt: serverTimestamp(),
       });
     } else if (params.targetEmail.toLowerCase() !== BOOTSTRAPPED_ADMIN_EMAIL) {
-      // Revoke from /admins registry if previously an admin
-      const existingAdmin = await getDoc(adminDocRef);
-      if (existingAdmin.exists()) {
-        await deleteDoc(adminDocRef);
+      try {
+        const adminDocRef = doc(db, 'admins', params.targetUid);
+        const existingAdmin = await getDoc(adminDocRef);
+        if (existingAdmin.exists()) {
+          await deleteDoc(adminDocRef);
+        }
+      } catch {
+        // Moderators do not have /admins write permission and never touch admin accounts
       }
+    }
+
+    // Sync zero-PII /referee_roster registry so Referee Chiefs can assign matches safely
+    try {
+      const rosterRef = doc(db, 'referee_roster', params.targetUid);
+      if (isRefereeOrChiefRole(params.nextRole)) {
+        const safeName =
+          (params.targetDisplayName || params.targetEmail.split('@')[0] || 'Árbitro UFRO')
+            .trim()
+            .slice(0, 120) || 'Árbitro UFRO';
+        await setDoc(rosterRef, {
+          uid: params.targetUid,
+          displayName: safeName,
+          role: params.nextRole,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const existingRoster = await getDoc(rosterRef);
+        if (existingRoster.exists()) {
+          await deleteDoc(rosterRef);
+        }
+      }
+    } catch {
+      // Non-fatal if roster sync skipped
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function listFirestoreRefereeRoster(): Promise<RefereeRosterEntry[]> {
+  const path = 'referee_roster';
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, path),
+        where('role', 'in', [
+          'arbitro',
+          'jefe_arbitros_futbol',
+          'jefe_arbitros_basquetbol',
+          'jefe_arbitros_voleibol',
+        ])
+      )
+    );
+    return snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          uid: String(data.uid || d.id),
+          displayName: String(data.displayName || 'Árbitro UFRO'),
+          role: (data.role as RefereeRosterEntry['role']) || 'arbitro',
+          updatedAt: toIso(data.updatedAt),
+        };
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+  } catch (error) {
+    console.warn('No se pudo cargar el padrón arbitral:', error);
+    return [];
+  }
+}
+
+export async function syncRefereeRosterFromUsers(users: AppUserProfile[]): Promise<void> {
+  const refUsers = users.filter((u) => isRefereeOrChiefRole(u.role));
+  if (refUsers.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    for (const u of refUsers.slice(0, 300)) {
+      batch.set(doc(db, 'referee_roster', u.uid), {
+        uid: u.uid,
+        displayName: (u.displayName || 'Árbitro UFRO').trim().slice(0, 120) || 'Árbitro UFRO',
+        role: u.role,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  } catch {
+    // Non-fatal background sync
   }
 }
 
@@ -1314,15 +1413,20 @@ export async function saveFirestoreTeam(
   actorUid: string,
   isNew: boolean,
   actorRole?: UserRole,
-  upsertFromSync = false
+  _upsertFromSync = false
 ): Promise<void> {
   const path = `teams/${team.id}`;
   let effectiveIsNew = isNew;
   try {
     const ref = doc(db, 'teams', team.id);
-    if (upsertFromSync) {
+    let existingData: Record<string, unknown> | undefined;
+    if (!isNew) {
       const existing = await getDoc(ref);
-      effectiveIsNew = !existing.exists();
+      if (!existing.exists()) {
+        effectiveIsNew = true;
+      } else {
+        existingData = existing.data() as Record<string, unknown>;
+      }
     }
 
     const basePayload = buildSanitizedTeamPayload(team, actorUid, effectiveIsNew, actorRole);
@@ -1333,14 +1437,67 @@ export async function saveFirestoreTeam(
         updatedAt: serverTimestamp(),
       });
     } else {
-      await updateDoc(ref, {
+      const finalUpdate: Record<string, unknown> = {
         ...basePayload,
         updatedAt: serverTimestamp(),
-      });
+      };
+      // Allow explicitly clearing anioFundacion when admin clears the field
+      if (
+        team.anioFundacion === undefined &&
+        existingData &&
+        existingData.anioFundacion !== undefined
+      ) {
+        finalUpdate.anioFundacion = deleteField();
+      }
+      await updateDoc(ref, finalUpdate);
     }
   } catch (error) {
     handleFirestoreError(error, effectiveIsNew ? OperationType.CREATE : OperationType.UPDATE, path);
   }
+}
+
+export async function bulkUpdateFirestoreTeams(params: {
+  teams: Team[];
+  actorUid: string;
+  actorRole: UserRole;
+  clearLogros?: boolean;
+  clearAnioFundacion?: boolean;
+  clubName?: string;
+}): Promise<number> {
+  const { teams, actorUid, actorRole, clearLogros, clearAnioFundacion, clubName } = params;
+  if (teams.length === 0) return 0;
+
+  let updatedCount = 0;
+  const CHUNK_SIZE = 350;
+  for (let i = 0; i < teams.length; i += CHUNK_SIZE) {
+    const chunk = teams.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const team of chunk) {
+      const ref = doc(db, 'teams', team.id);
+      const nextTeam: Team = {
+        ...team,
+        ...(clearLogros ? { logrosAnteriores: '' } : {}),
+        ...(clearAnioFundacion ? { anioFundacion: undefined } : {}),
+        ...(clubName !== undefined ? { clubName: clubName.trim().slice(0, 120) } : {}),
+      };
+      const payload = buildSanitizedTeamPayload(nextTeam, actorUid, false, actorRole);
+      const updateObj: Record<string, unknown> = {
+        ...payload,
+        updatedAt: serverTimestamp(),
+      };
+      if (clearAnioFundacion) {
+        updateObj.anioFundacion = deleteField();
+      }
+      batch.update(ref, updateObj);
+      updatedCount += 1;
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'teams (bulk)');
+    }
+  }
+  return updatedCount;
 }
 
 export async function saveFirestorePlayer(
@@ -1487,15 +1644,24 @@ export async function saveFirestoreMatch(
   match: Match,
   isNew: boolean,
   actorRole: UserRole,
-  upsertFromSync = false
+  _upsertFromSync = false
 ): Promise<void> {
   const path = `matches/${match.id}`;
   let effectiveIsNew = isNew;
   try {
     const ref = doc(db, 'matches', match.id);
-    if (upsertFromSync) {
+    let existingData: Record<string, unknown> | undefined;
+
+    // Always verify existence before updateDoc: prevents Firestore returning
+    // "Missing or insufficient permissions" when a sheet-imported/cached match
+    // does not yet exist in Firestore (e.g., matches/PVOLM037).
+    if (!isNew) {
       const existing = await getDoc(ref);
-      effectiveIsNew = !existing.exists();
+      if (!existing.exists()) {
+        effectiveIsNew = true;
+      } else {
+        existingData = existing.data() as Record<string, unknown>;
+      }
     }
 
     const basePayload = buildSanitizedMatchPayload(match, effectiveIsNew, actorRole);
@@ -1506,10 +1672,29 @@ export async function saveFirestoreMatch(
         updatedAt: serverTimestamp(),
       });
     } else {
-      await updateDoc(ref, {
+      const updateObj: Record<string, unknown> = {
         ...basePayload,
         updatedAt: serverTimestamp(),
-      });
+      };
+      // Explicitly remove penaltyScore when user clears it
+      if (
+        match.penaltyScore === undefined &&
+        existingData &&
+        existingData.penaltyScore !== undefined
+      ) {
+        updateObj.penaltyScore = deleteField();
+      }
+      // Repair legacy/sheet-imported match docs that lacked required fields
+      const isGeneralAdmin = actorRole === 'admin' || actorRole === 'moderador';
+      if (isGeneralAdmin && existingData) {
+        if (!existingData.createdAt) {
+          updateObj.createdAt = serverTimestamp();
+        }
+        if (existingData.id !== match.id) {
+          updateObj.id = match.id;
+        }
+      }
+      await updateDoc(ref, updateObj);
     }
   } catch (error) {
     handleFirestoreError(error, effectiveIsNew ? OperationType.CREATE : OperationType.UPDATE, path);
@@ -1810,6 +1995,12 @@ export async function saveFirestoreNewsArticle(
     const sanitizedCover = article.coverImageUrl ? article.coverImageUrl.trim().slice(0, 1000) : '';
 
     if (isNew) {
+      const resolvedAuthorRole =
+        article.authorRole === 'prensa'
+          ? 'prensa'
+          : article.authorRole === 'moderador'
+          ? 'moderador'
+          : 'admin';
       const payload: Record<string, unknown> = {
         id: article.id,
         title: sanitizedTitle,
@@ -1822,7 +2013,7 @@ export async function saveFirestoreNewsArticle(
         aiGenerated: Boolean(article.aiGenerated),
         authorUid: article.authorUid,
         authorName: article.authorName.trim().slice(0, 120) || 'Prensa Oficial UFRO',
-        authorRole: article.authorRole === 'prensa' ? 'prensa' : 'admin',
+        authorRole: resolvedAuthorRole,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -1831,6 +2022,12 @@ export async function saveFirestoreNewsArticle(
       }
       await setDoc(ref, payload);
     } else {
+      const resolvedAuthorRole =
+        article.authorRole === 'prensa'
+          ? 'prensa'
+          : article.authorRole === 'moderador'
+          ? 'moderador'
+          : 'admin';
       const updatePayload: Record<string, unknown> = {
         title: sanitizedTitle,
         summary: sanitizedSummary,
@@ -1842,7 +2039,7 @@ export async function saveFirestoreNewsArticle(
         published: Boolean(article.published),
         aiGenerated: Boolean(article.aiGenerated),
         authorName: article.authorName.trim().slice(0, 120) || 'Prensa Oficial UFRO',
-        authorRole: article.authorRole === 'prensa' ? 'prensa' : 'admin',
+        authorRole: resolvedAuthorRole,
         updatedAt: serverTimestamp(),
       };
       await updateDoc(ref, updatePayload);

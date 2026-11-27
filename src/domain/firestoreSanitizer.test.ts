@@ -242,4 +242,71 @@ describe('firestoreSanitizer', () => {
     assert.equal('anioFundacion' in payload, false);
     assert.equal('logrosAnteriores' in payload, false);
   });
+
+  it('sanitizes penaltyScore, matchDorsals, assignedReferee fields, 500-event volleyball cap, and team clubName', () => {
+    const events300 = Array.from({ length: 300 }, (_, i) => ({
+      id: `ev-${i}`,
+      minuteOrPeriod: 'Set 2',
+      teamId: 'team-1',
+      type: 'PUNTO_VOLEY' as const,
+      detail: `Punto ${i}`,
+      pointsDelta: 1,
+    }));
+
+    const match: Match = {
+      id: 'PVOLM037',
+      disciplineId: 'voley-m',
+      groupName: 'Grupo A',
+      fase: 'Final',
+      jornada: 7,
+      fecha: '2026-06-15',
+      hora: '19:30',
+      cancha: 'Gimnasio Olímpico',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-2',
+      homeScore: 2,
+      awayScore: 2,
+      penaltyScore: { home: 5, away: 4 },
+      status: 'EN_VIVO',
+      periodLabel: 'Set 3',
+      clock: '14 - 14',
+      periods: [{ home: 25, away: 20 }],
+      fouls: { home: 0, away: 0 },
+      timeouts: { home: 1, away: 1 },
+      events: events300,
+      attendance: {
+        status: 'REGISTRADA',
+        homePresentIds: ['p-1'],
+        awayPresentIds: ['p-2'],
+        matchDorsals: { 'p-1': 9, 'p-bad': 999 },
+      },
+      refereeId: 'uid-ref-1',
+      assignedRefereeUid: 'uid-ref-1',
+      assignedRefereeName: 'Árbitro Oficial',
+    };
+
+    const payload = buildSanitizedMatchPayload(match, false, 'admin');
+    assertNoUndefinedOrNaN(payload);
+    assert.deepEqual(payload.penaltyScore, { home: 5, away: 4 });
+    assert.equal((payload.events as unknown[]).length, 300);
+    assert.equal(payload.assignedRefereeUid, 'uid-ref-1');
+    assert.equal(payload.assignedRefereeName, 'Árbitro Oficial');
+    const att = payload.attendance as { matchDorsals?: Record<string, number> };
+    assert.deepEqual(att.matchDorsals, { 'p-1': 9 });
+
+    const teamWithClub: Team = {
+      id: 't-club-1',
+      nombre: 'Ingeniería FC',
+      sigla: 'ING',
+      clubName: 'Club Deportivo Ingeniería',
+      disciplineId: 'f7-h-1',
+      carrera: 'Ingeniería Civil',
+      facultad: 'FICA',
+      groupName: 'Grupo A',
+    };
+    const teamPayload = buildSanitizedTeamPayload(teamWithClub, 'uid-admin', false, 'admin');
+    assertNoUndefinedOrNaN(teamPayload);
+    assert.equal(teamPayload.clubName, 'Club Deportivo Ingeniería');
+  });
 });
+

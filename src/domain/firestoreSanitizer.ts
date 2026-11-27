@@ -126,6 +126,16 @@ export function ensureBoundedString(
   return fallback.slice(0, maxLen);
 }
 
+/**
+ * Ensures an ID string matches Firestore rules `isValidId` (`^[a-zA-Z0-9_-]{1,128}$`).
+ */
+export function sanitizeValidFirestoreId(value: unknown, fallback: string): string {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 128);
+  if (cleaned.length >= 1) return cleaned;
+  return fallback.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 128) || 'id';
+}
+
 export function sanitizePlayerStatsRecord(raw: Partial<PlayerStats> | undefined): PlayerStats {
   return {
     partidosJugados: clampSafeInt(raw?.partidosJugados, 0, 200, 0),
@@ -192,7 +202,7 @@ export function sanitizeMatchEvents(events: MatchEvent[] | undefined): MatchEven
   if (!Array.isArray(events)) return [];
   return events
     .filter((e): e is MatchEvent => Boolean(e && typeof e === 'object'))
-    .slice(0, 200)
+    .slice(0, 500)
     .map((e, idx) => sanitizeMatchEvent(e, idx));
 }
 
@@ -348,6 +358,25 @@ export function sanitizeMatchAttendanceRecord(raw: unknown): Match['attendance']
     awayPresentIds: status === 'OMITIDA' ? [] : sanitizeAttendanceList(obj.awayPresentIds),
   };
 
+  if (obj.matchDorsals && typeof obj.matchDorsals === 'object' && !Array.isArray(obj.matchDorsals)) {
+    const cleanDorsals: Record<string, number> = {};
+    let count = 0;
+    for (const [key, val] of Object.entries(obj.matchDorsals as Record<string, unknown>)) {
+      const cleanKey = key.trim().slice(0, 128);
+      if (!cleanKey) continue;
+      const num = typeof val === 'number' ? val : Number(val);
+      if (!Number.isFinite(num)) continue;
+      const intVal = Math.trunc(num);
+      if (intVal < 1 || intVal > 99) continue;
+      cleanDorsals[cleanKey] = intVal;
+      count += 1;
+      if (count >= 80) break;
+    }
+    if (count > 0) {
+      out.matchDorsals = cleanDorsals;
+    }
+  }
+
   if (typeof obj.recordedAt === 'string' && obj.recordedAt.trim().length > 0) {
     out.recordedAt = obj.recordedAt.trim().slice(0, 64);
   }
@@ -359,6 +388,16 @@ export function sanitizeMatchAttendanceRecord(raw: unknown): Match['attendance']
   }
 
   return out;
+}
+
+export function sanitizePenaltyScoreRecord(raw: unknown): PeriodScore | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const obj = raw as Record<string, unknown>;
+  if (obj.home === undefined && obj.away === undefined) return undefined;
+  return {
+    home: clampSafeInt(obj.home, 0, 50, 0),
+    away: clampSafeInt(obj.away, 0, 50, 0),
+  };
 }
 
 /**
@@ -393,12 +432,25 @@ export function buildSanitizedMatchPayload(
   const safeEvents = sanitizeMatchEvents(match.events);
   const safeLiveState = sanitizeMatchLiveStateRecord(match.liveState);
   const safeAttendance = sanitizeMatchAttendanceRecord(match.attendance);
+  const safePenaltyScore = sanitizePenaltyScoreRecord(match.penaltyScore);
   const safeScoresheetValidation = sanitizeScoresheetValidation(match.scoresheetValidation);
   const safeRefereeId = typeof match.refereeId === 'string' ? match.refereeId.trim().slice(0, 128) : '';
+  const safeAssignedRefereeUid =
+    typeof match.assignedRefereeUid === 'string' ? match.assignedRefereeUid.trim().slice(0, 128) : '';
+  const safeAssignedRefereeName =
+    typeof match.assignedRefereeName === 'string' ? match.assignedRefereeName.trim().slice(0, 120) : '';
+  const safeId = sanitizeValidFirestoreId(match.id, 'match');
+  const safeHomeTeamId = sanitizeValidFirestoreId(match.homeTeamId, 'team-home');
+  const safeAwayTeamId = sanitizeValidFirestoreId(match.awayTeamId, 'team-away');
+  const isGeneralAdmin = actorRole === 'admin' || actorRole === 'moderador';
+  const isChiefRole =
+    actorRole === 'jefe_arbitros_futbol' ||
+    actorRole === 'jefe_arbitros_basquetbol' ||
+    actorRole === 'jefe_arbitros_voleibol';
 
   if (isNew) {
     const payload: Record<string, unknown> = {
-      id: match.id,
+      id: safeId,
       disciplineId: match.disciplineId,
       groupName: safeGroupName,
       fase: safeFase,
@@ -406,8 +458,8 @@ export function buildSanitizedMatchPayload(
       fecha: safeFecha,
       hora: safeHora,
       cancha: safeCancha,
-      homeTeamId: match.homeTeamId,
-      awayTeamId: match.awayTeamId,
+      homeTeamId: safeHomeTeamId,
+      awayTeamId: safeAwayTeamId,
       homeScore: safeHomeScore,
       awayScore: safeAwayScore,
       status: safeStatus,
@@ -419,6 +471,15 @@ export function buildSanitizedMatchPayload(
       events: safeEvents,
       refereeId: safeRefereeId,
     };
+    if (safePenaltyScore) {
+      payload.penaltyScore = safePenaltyScore;
+    }
+    if (safeAssignedRefereeUid) {
+      payload.assignedRefereeUid = safeAssignedRefereeUid;
+    }
+    if (safeAssignedRefereeName) {
+      payload.assignedRefereeName = safeAssignedRefereeName;
+    }
     if (safeLiveState) {
       payload.liveState = safeLiveState;
     }
@@ -449,6 +510,9 @@ export function buildSanitizedMatchPayload(
     timeouts: safeTimeouts,
     events: safeEvents,
   };
+  if (safePenaltyScore) {
+    updatePayload.penaltyScore = safePenaltyScore;
+  }
   if (safeLiveState) {
     updatePayload.liveState = safeLiveState;
   }
@@ -458,7 +522,16 @@ export function buildSanitizedMatchPayload(
   if (safeScoresheetValidation) {
     updatePayload.scoresheetValidation = safeScoresheetValidation;
   }
-  if (actorRole === 'admin') {
+  if (isGeneralAdmin || isChiefRole) {
+    updatePayload.refereeId = safeRefereeId;
+    if (match.assignedRefereeUid !== undefined) {
+      updatePayload.assignedRefereeUid = safeAssignedRefereeUid;
+    }
+    if (match.assignedRefereeName !== undefined) {
+      updatePayload.assignedRefereeName = safeAssignedRefereeName;
+    }
+  }
+  if (isGeneralAdmin) {
     updatePayload.groupName = safeGroupName;
     updatePayload.fase = safeFase;
     if (
@@ -472,9 +545,8 @@ export function buildSanitizedMatchPayload(
     updatePayload.fecha = safeFecha;
     updatePayload.hora = safeHora;
     updatePayload.cancha = safeCancha;
-    updatePayload.homeTeamId = match.homeTeamId;
-    updatePayload.awayTeamId = match.awayTeamId;
-    updatePayload.refereeId = safeRefereeId;
+    updatePayload.homeTeamId = safeHomeTeamId;
+    updatePayload.awayTeamId = safeAwayTeamId;
   }
   return stripUndefinedDeep(updatePayload);
 }
@@ -538,10 +610,10 @@ export function buildSanitizedPlayerPayload(
     nivelAcademico: safeNivel,
     fotografia: safeFoto,
   };
-  if (actorRole === 'admin' || actorRole === 'delegado') {
+  if (actorRole === 'admin' || actorRole === 'moderador' || actorRole === 'delegado') {
     pubUpdate.esSeleccionadoUfro = Boolean(player.esSeleccionadoUfro);
   }
-  if (actorRole === 'admin') {
+  if (actorRole === 'admin' || actorRole === 'moderador') {
     pubUpdate.teamId = player.teamId;
     pubUpdate.stats = safeStats;
   }
@@ -620,6 +692,9 @@ export function buildSanitizedTeamPayload(
     if (typeof team.escudo === 'string' && team.escudo.length > 0 && team.escudo.length <= 160000) {
       payload.escudo = team.escudo;
     }
+    if (typeof team.clubName === 'string' && team.clubName.trim().length > 0) {
+      payload.clubName = team.clubName.trim().slice(0, 120);
+    }
     if (validYear !== undefined) {
       payload.anioFundacion = validYear;
     }
@@ -637,6 +712,9 @@ export function buildSanitizedTeamPayload(
     updatePayload.carrera = carrera;
     updatePayload.facultad = facultad;
     updatePayload.groupName = groupName;
+    if (typeof team.clubName === 'string') {
+      updatePayload.clubName = team.clubName.trim().slice(0, 120);
+    }
   }
   if (typeof team.escudo === 'string' && team.escudo.length <= 160000) {
     updatePayload.escudo = team.escudo;

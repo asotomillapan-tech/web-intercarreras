@@ -281,3 +281,32 @@ test('computePlayerAttendanceSummary excludes omitted and unregistered matches f
     unregisteredCount: 1,
   });
 });
+
+test('setPlayerMatchDorsal overrides jersey number per match, supports S/N (0), and preserves overrides across toggles', async () => {
+  const att = await import('./attendanceEngine');
+  const pNoNum = createPlayer('p-sn', 'team-home', 0);
+  const pTen = createPlayer('p-10', 'team-home', 10);
+
+  assert.equal(att.formatDorsalLabel(0), 'S/N');
+  assert.equal(att.formatDorsalLabel(14), '#14');
+
+  const m0 = createMatch();
+  assert.equal(att.getEffectiveMatchDorsal(m0, pNoNum), 0);
+  assert.equal(att.getEffectiveMatchDorsal(m0, pTen), 10);
+
+  // Assign #7 to player with S/N and #23 to player registered as #10
+  const m1 = att.setPlayerMatchDorsal({ match: m0, playerId: 'p-sn', dorsal: 7, recorderName: 'Árbitro 1' });
+  const m2 = att.setPlayerMatchDorsal({ match: m1, playerId: 'p-10', dorsal: 23, recorderName: 'Árbitro 1' });
+  assert.equal(att.getEffectiveMatchDorsal(m2, pNoNum), 7);
+  assert.equal(att.getEffectiveMatchDorsal(m2, pTen), 23);
+
+  // Attendance toggle preserves matchDorsals
+  const m3 = togglePlayerAttendance({ match: m2, side: 'home', playerId: 'p-sn', recorderName: 'Árbitro 1' });
+  assert.equal(att.getEffectiveMatchDorsal(m3, pNoNum), 7);
+  assert.equal(att.getEffectiveMatchDorsal(m3, pTen), 23);
+
+  // Clearing override reverts to registered dorsal
+  const m4 = att.setPlayerMatchDorsal({ match: m3, playerId: 'p-10', dorsal: null });
+  assert.equal(att.getEffectiveMatchDorsal(m4, pTen), 10);
+});
+

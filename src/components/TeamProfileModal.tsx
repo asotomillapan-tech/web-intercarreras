@@ -16,6 +16,7 @@ import {
   findClubSquadsForTeam,
   formatUnifiedClubDisplayName,
 } from '../domain/identityCrossRefEngine';
+import { formatDorsalLabel } from '../domain/attendanceEngine';
 import { canRefereeMatches, shouldRevealPublicMatchData } from '../domain/rbacEngine';
 import {
   computeTeamHistoricalStats,
@@ -639,8 +640,8 @@ export function TeamProfileModal({
                       className="text-left rounded-2xl border border-white/[0.08] bg-[#101016] hover:border-white/[0.2] p-3.5 transition-colors flex items-center justify-between gap-3 cursor-pointer"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="w-8 h-8 rounded-xl bg-white/[0.08] text-white text-sm font-medium flex items-center justify-center shrink-0 tabular-nums">
-                          {player.dorsal}
+                        <span className="w-8 h-8 rounded-xl bg-white/[0.08] text-white text-xs font-medium flex items-center justify-center shrink-0 tabular-nums">
+                          {formatDorsalLabel(player.dorsal)}
                         </span>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-white truncate">
