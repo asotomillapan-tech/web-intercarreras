@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, X } from 'lucide-react';
 import { createInitialTournamentState, DISCIPLINE_MAP } from './data/ufroSeed';
+import {
+  getSectionPath,
+  getSectionTitle,
+  normalizePathname,
+  resolveSectionFromPath,
+} from './domain/navigationRoutes';
 import { validateRoleChange } from './domain/rbacEngine';
 import { generateEquitableGroups, generateRoundRobinMatches } from './domain/tournamentEngine';
 import { applyStatDeltaClamped, type PlayerStatDelta } from './domain/liveMatchEngine';
@@ -122,16 +128,6 @@ import type {
 } from './types/tournament';
 import type { AutoSyncStatusInfo } from './components/MasterSheetsPanel';
 
-function isPrivacyPath(pathname: string): boolean {
-  const clean = pathname.replace(/\/+$/, '').toLowerCase();
-  return (
-    clean === '/privacidad' ||
-    clean === '/politica-de-privacidad' ||
-    clean === '/privacy' ||
-    clean === '/privacy-policy'
-  );
-}
-
 function AppContent() {
   const [initialBoot] = useState<{ state: TournamentState; hasCachedSnapshot: boolean }>(() => {
     const base = createInitialTournamentState();
@@ -168,9 +164,7 @@ function AppContent() {
   });
   const [state, setState] = useState<TournamentState>(() => initialBoot.state);
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
-    typeof window !== 'undefined' && isPrivacyPath(window.location.pathname)
-      ? 'privacidad'
-      : 'inicio'
+    typeof window !== 'undefined' ? resolveSectionFromPath(window.location.pathname) : 'inicio'
   );
   const [selectedDiscipline, setSelectedDiscipline] = useState<DisciplineId>('f7-h-1');
   const [inspectedPlayer, setInspectedPlayer] = useState<Player | null>(null);
@@ -819,32 +813,58 @@ function AppContent() {
     return state.teams.find((t) => t.id === inspectedTeamId) ?? null;
   }, [inspectedTeamId, state.teams]);
 
-  useEffect(() => {
-    const onPopState = () => {
-      if (isPrivacyPath(window.location.pathname)) {
-        setActiveSection('privacidad');
+  const syncBrowserUrlForSection = useCallback((section: NavSection, replace = false) => {
+    if (typeof window === 'undefined') return;
+    const targetPath = getSectionPath(section);
+    const currentPath = normalizePathname(window.location.pathname);
+    if (currentPath !== targetPath || window.location.pathname !== targetPath) {
+      if (replace) {
+        window.history.replaceState({ section }, '', targetPath);
       } else {
-        setActiveSection((prev) => (prev === 'privacidad' ? 'inicio' : prev));
+        window.history.pushState({ section }, '', targetPath);
       }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Normalize aliases (e.g. /posiciones -> /tabla-posiciones, /inicio -> /) without adding extra history entry
+    const resolved = resolveSectionFromPath(window.location.pathname);
+    const canonicalPath = getSectionPath(resolved);
+    if (window.location.pathname !== canonicalPath) {
+      const searchAndHash = `${window.location.search}${window.location.hash}`;
+      window.history.replaceState({ section: resolved }, '', `${canonicalPath}${searchAndHash}`);
+    }
+
+    const onPopState = () => {
+      const nextSection = resolveSectionFromPath(window.location.pathname);
+      setActiveSection(nextSection);
+      if (nextSection !== 'jugadores') {
+        setInspectedPlayer(null);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const handleNavigate = (section: NavSection) => {
-    setActiveSection(section);
-    if (section !== 'jugadores') {
-      setInspectedPlayer(null);
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.title = getSectionTitle(activeSection);
     }
-    if (typeof window !== 'undefined') {
-      if (section === 'privacidad' && !isPrivacyPath(window.location.pathname)) {
-        window.history.pushState({}, '', '/privacidad');
-      } else if (section !== 'privacidad' && isPrivacyPath(window.location.pathname)) {
-        window.history.pushState({}, '', '/');
+  }, [activeSection]);
+
+  const handleNavigate = useCallback(
+    (section: NavSection) => {
+      setActiveSection(section);
+      if (section !== 'jugadores') {
+        setInspectedPlayer(null);
       }
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+      syncBrowserUrlForSection(section);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [syncBrowserUrlForSection]
+  );
 
   const handleGoogleSignIn = async () => {
     setGoogleAuthLoading(true);
@@ -1391,6 +1411,7 @@ function AppContent() {
   const handleInspectPlayerFromHome = (player: Player) => {
     setInspectedPlayer(player);
     setActiveSection('jugadores');
+    syncBrowserUrlForSection('jugadores');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -1398,6 +1419,7 @@ function AppContent() {
     setFocusedMatchId(matchId);
     setPanelInitialSubTab('arbitro');
     setActiveSection('panel');
+    syncBrowserUrlForSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -1405,24 +1427,28 @@ function AppContent() {
     setFocusedMatchId(matchId);
     setPanelInitialSubTab('partidos');
     setActiveSection('panel');
+    syncBrowserUrlForSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenSheetsSync = () => {
     setPanelInitialSubTab('sheets');
     setActiveSection('panel');
+    syncBrowserUrlForSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenNewsManager = () => {
     setPanelInitialSubTab('noticias');
     setActiveSection('panel');
+    syncBrowserUrlForSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenFeaturedManager = () => {
     setPanelInitialSubTab('portada');
     setActiveSection('panel');
+    syncBrowserUrlForSection('panel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 

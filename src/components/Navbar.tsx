@@ -1,6 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { Bell, LogIn, Menu, Shield, User, X } from 'lucide-react';
 import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
+import {
+  getSectionPath,
+  HEADER_NAV_ITEMS,
+  isPrimarySpaNavigationClick,
+  type NavSection,
+} from '../domain/navigationRoutes';
 import {
   buildFavoriteNotifications,
   canAccessAdminPanel,
@@ -10,20 +16,7 @@ import {
 import { getDelegateTransferActionRole } from '../domain/transfersEngine';
 import type { AppUserProfile, Match, TournamentState } from '../types/tournament';
 
-export type NavSection =
-  | 'inicio'
-  | 'posiciones'
-  | 'equipos'
-  | 'jugadores'
-  | 'votaciones'
-  | 'minijuegos'
-  | 'galeria'
-  | 'inscripciones'
-  | 'transferencias'
-  | 'transferencias-publicas'
-  | 'cuenta'
-  | 'panel'
-  | 'privacidad';
+export type { NavSection };
 
 interface NavbarProps {
   activeSection: NavSection;
@@ -33,17 +26,6 @@ interface NavbarProps {
   onOpenAuth: () => void;
   onOpenMatchModal: (match: Match) => void;
 }
-
-const BASE_NAV_ITEMS: Array<{ id: NavSection; label: string }> = [
-  { id: 'inicio', label: 'Inicio' },
-  { id: 'posiciones', label: 'Posiciones' },
-  { id: 'equipos', label: 'Equipos' },
-  { id: 'jugadores', label: 'Jugadores' },
-  { id: 'votaciones', label: 'Votaciones' },
-  { id: 'minijuegos', label: 'Minijuegos' },
-  { id: 'galeria', label: 'Galería' },
-  { id: 'inscripciones', label: 'Inscripciones' },
-];
 
 export function Navbar({
   activeSection,
@@ -72,14 +54,27 @@ export function Navbar({
     setNotifOpen(false);
   };
 
+  const handleLinkClick = (event: MouseEvent<HTMLAnchorElement>, section: NavSection) => {
+    if (!isPrimarySpaNavigationClick(event)) return;
+    event.preventDefault();
+    handleSelect(section);
+  };
+
   const hasOfficialAccess = canAccessAdminPanel(currentUser);
   const isDelegadoUser = canAccessDelegateTransfers(currentUser);
 
   const visibleNavItems = useMemo(
     () =>
       isDelegadoUser
-        ? [...BASE_NAV_ITEMS, { id: 'transferencias' as NavSection, label: 'Transferencias' }]
-        : BASE_NAV_ITEMS,
+        ? [
+            ...HEADER_NAV_ITEMS,
+            {
+              id: 'transferencias' as NavSection,
+              label: 'Transferencias',
+              href: getSectionPath('transferencias'),
+            },
+          ]
+        : HEADER_NAV_ITEMS,
     [isDelegadoUser]
   );
 
@@ -93,10 +88,11 @@ export function Navbar({
   return (
     <header className="sticky top-0 z-40 bg-[#0d0d0d] text-white border-b border-white/10">
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 lg:gap-6">
-        {/* Zone 1: Single-line Brand Lockup */}
-        <button
-          type="button"
-          onClick={() => handleSelect('inicio')}
+        {/* Zone 1: Single-line Brand Lockup (Primary route: /) */}
+        <a
+          href={getSectionPath('inicio')}
+          aria-current={activeSection === 'inicio' ? 'page' : undefined}
+          onClick={(e) => handleLinkClick(e, 'inicio')}
           className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#707ef9]"
         >
           <img
@@ -108,7 +104,7 @@ export function Navbar({
           <span className="font-display text-base lg:text-lg font-bold tracking-wider uppercase text-white">
             Intercarreras
           </span>
-        </button>
+        </a>
 
         {/* Zone 2: Concise single-line nav links (Transferencias visible exclusively to Delegados) */}
         <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-4">
@@ -117,10 +113,11 @@ export function Navbar({
             const showPendingCount =
               item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
-              <button
+              <a
                 key={item.id}
-                type="button"
-                onClick={() => handleSelect(item.id)}
+                href={item.href}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={(e) => handleLinkClick(e, item.id)}
                 className={`relative h-16 flex items-center gap-1.5 text-[13px] font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
@@ -137,7 +134,7 @@ export function Navbar({
                     className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
                   />
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -149,10 +146,11 @@ export function Navbar({
             const showPendingCount =
               item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
-              <button
+              <a
                 key={item.id}
-                type="button"
-                onClick={() => handleSelect(item.id)}
+                href={item.href}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={(e) => handleLinkClick(e, item.id)}
                 className={`relative h-16 flex items-center gap-1 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
                 }`}
@@ -169,7 +167,7 @@ export function Navbar({
                     className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
                   />
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -200,13 +198,13 @@ export function Navbar({
                     <span className="font-display text-xs font-bold uppercase tracking-widest">
                       Notificaciones Favoritos ({notifications.length})
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect('cuenta')}
+                    <a
+                      href={getSectionPath('cuenta')}
+                      onClick={(e) => handleLinkClick(e, 'cuenta')}
                       className="text-[11px] text-[#707ef9] hover:underline cursor-pointer"
                     >
                       Gestionar
-                    </button>
+                    </a>
                   </div>
                   <div className="max-h-80 overflow-y-auto divide-y divide-neutral-200">
                     {notifications.length === 0 ? (
@@ -247,9 +245,10 @@ export function Navbar({
           {/* Account / Login & Official Panel CTAs */}
           {currentUser ? (
             <>
-              <button
-                type="button"
-                onClick={() => handleSelect('cuenta')}
+              <a
+                href={getSectionPath('cuenta')}
+                aria-current={activeSection === 'cuenta' ? 'page' : undefined}
+                onClick={(e) => handleLinkClick(e, 'cuenta')}
                 className={`hidden sm:inline-flex items-center gap-2 px-3 py-2 border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   activeSection === 'cuenta'
                     ? 'bg-white text-[#0d0d0d] border-white'
@@ -263,12 +262,13 @@ export function Navbar({
                 <span className="text-[10px] uppercase tracking-wider text-[#707ef9] font-display font-bold">
                   {ROLE_META[currentUser.role].shortLabel}
                 </span>
-              </button>
+              </a>
 
               {hasOfficialAccess && (
-                <button
-                  type="button"
-                  onClick={() => handleSelect('panel')}
+                <a
+                  href={getSectionPath('panel')}
+                  aria-current={activeSection === 'panel' ? 'page' : undefined}
+                  onClick={(e) => handleLinkClick(e, 'panel')}
                   className={`hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     activeSection === 'panel'
                       ? 'bg-white text-[#0d0d0d]'
@@ -277,7 +277,7 @@ export function Navbar({
                 >
                   <Shield className="w-3.5 h-3.5" />
                   <span>{currentUser.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}</span>
-                </button>
+                </a>
               )}
             </>
           ) : (
@@ -314,10 +314,11 @@ export function Navbar({
             const showPendingCount =
               item.id === 'transferencias' && pendingDelegateTransferCount > 0;
             return (
-              <button
+              <a
                 key={item.id}
-                type="button"
-                onClick={() => handleSelect(item.id)}
+                href={item.href}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={(e) => handleLinkClick(e, item.id)}
                 className={`w-full text-left px-3 py-3 text-sm font-medium transition-colors flex items-center justify-between cursor-pointer ${
                   isActive
                     ? 'text-white bg-white/5 border-b border-[#707ef9]'
@@ -330,20 +331,20 @@ export function Navbar({
                     {pendingDelegateTransferCount}
                   </span>
                 )}
-              </button>
+              </a>
             );
           })}
           <div className="pt-2 space-y-2 border-t border-white/10">
             {currentUser ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => handleSelect('cuenta')}
+                <a
+                  href={getSectionPath('cuenta')}
+                  onClick={(e) => handleLinkClick(e, 'cuenta')}
                   className="w-full py-2.5 px-3 border border-white/20 text-white text-left text-xs font-display font-bold uppercase tracking-widest flex items-center justify-between"
                 >
                   <span>Mi Cuenta · {currentUser.displayName}</span>
                   <span className="text-[#707ef9]">{ROLE_META[currentUser.role].shortLabel}</span>
-                </button>
+                </a>
                 <button
                   type="button"
                   onClick={() => {
@@ -369,13 +370,13 @@ export function Navbar({
             )}
 
             {hasOfficialAccess && (
-                <button
-                type="button"
-                onClick={() => handleSelect('panel')}
-                className="w-full py-3 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-sm"
+              <a
+                href={getSectionPath('panel')}
+                onClick={(e) => handleLinkClick(e, 'panel')}
+                className="block w-full py-3 bg-[#707ef9] text-white text-center font-display font-bold uppercase tracking-widest text-sm"
               >
                 {currentUser?.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}
-              </button>
+              </a>
             )}
           </div>
         </nav>
