@@ -332,8 +332,8 @@ export function HomeView({
                   <div className="flex items-center justify-between gap-3 text-xs border-b border-white/[0.08] pb-3.5">
                     <span className="font-medium text-zinc-200 truncate">
                       {homeFeaturedConfig?.mode === 'match' && homeFeaturedConfig.badgeLabel?.trim()
-                        ? `${homeFeaturedConfig.badgeLabel.trim()} · ${DISCIPLINE_MAP[featuredMatch.disciplineId].nombreCorto}`
-                        : DISCIPLINE_MAP[featuredMatch.disciplineId].nombreCorto}
+                        ? `${homeFeaturedConfig.badgeLabel.trim()} · ${DISCIPLINE_MAP[featuredMatch.disciplineId]?.nombreCorto ?? 'Campeonato'}`
+                        : (DISCIPLINE_MAP[featuredMatch.disciplineId]?.nombreCorto ?? 'Campeonato')}
                     </span>
                     <span className="whitespace-nowrap shrink-0 tabular-nums">
                       <span

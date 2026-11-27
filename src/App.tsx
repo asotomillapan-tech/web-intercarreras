@@ -37,6 +37,17 @@ import {
   type TotyBallotSubmissionInput,
 } from './domain/totyBatchQueue';
 import {
+  classifyFirestoreError,
+  computeSyncHealthSummary,
+  createInitialSyncHealthState,
+  markSyncStreamHealthy,
+  recordSyncIncident,
+  shouldEmitThrottledQuotaLog,
+  shouldShowPublicReadNotice,
+  type CloudErrorKind,
+  type SyncHealthState,
+} from './domain/syncHealthEngine';
+import {
   getGoogleAccessToken,
   initGoogleAuth,
   signInWithGoogleBasic,
@@ -64,6 +75,7 @@ import {
   deleteFirestoreTeam,
   deleteFirestoreTotyConfig,
   ensureAllConfigsInFirestore,
+  fetchFirestoreTotyForDiscipline,
   listAllFirestoreNews,
   listAllFirestoreTransfers,
   listDelegateFirestoreTransfers,
@@ -103,6 +115,15 @@ import {
   saveCachedEditorialPhotos,
   saveCachedPublicTournamentState,
 } from './services/localCache';
+import {
+  loadAllCachedTotyData,
+  loadCachedTotyForDiscipline,
+  removeCachedTotyConfig,
+  saveAllCachedTotySnapshot,
+  saveCachedTotyForDiscipline,
+  upsertCachedTotyBallots,
+  upsertCachedTotyConfig,
+} from './services/totyIndexedCache';
 import { AccountView } from './components/AccountView';
 import { AdminRefereeView, type PanelSubTab } from './components/AdminRefereeView';
 import { AuthModal } from './components/AuthModal';
@@ -149,11 +170,38 @@ import type {
 import type { AutoSyncStatusInfo } from './components/MasterSheetsPanel';
 
 function AppContent() {
-  const [initialBoot] = useState<{ state: TournamentState; hasCachedSnapshot: boolean }>(() => {
+  const [initialBoot] = useState<{
+    state: TournamentState;
+    hasCachedSnapshot: boolean;
+    totyCachedAtIso: string | null;
+  }>(() => {
     const base = createInitialTournamentState();
     const cached = loadCachedPublicTournamentState();
+    const indexedToty = loadAllCachedTotyData();
+    const totyCachedAtIso = indexedToty.latestSavedAt
+      ? new Date(indexedToty.latestSavedAt).toISOString()
+      : null;
+
+    const baseTotyBallots = cached?.data?.totyBallots ?? base.totyBallots;
+    const mergedTotyBallots =
+      indexedToty.ballots.length > 0
+        ? mergeTotyBallotsIntoState(baseTotyBallots, indexedToty.ballots)
+        : baseTotyBallots;
+    const mergedTotyConfigs = {
+      ...(cached?.data?.totyConfigs ?? base.totyConfigs),
+      ...indexedToty.configs,
+    };
+
     if (!cached?.data) {
-      return { state: base, hasCachedSnapshot: false };
+      return {
+        state: {
+          ...base,
+          totyBallots: mergedTotyBallots,
+          totyConfigs: mergedTotyConfigs,
+        },
+        hasCachedSnapshot: false,
+        totyCachedAtIso,
+      };
     }
     const merged: TournamentState = {
       ...base,
@@ -168,8 +216,8 @@ function AppContent() {
       awardNominees: cached.data.awardNominees ?? base.awardNominees,
       championshipMvpVotes: cached.data.championshipMvpVotes ?? base.championshipMvpVotes,
       positionAwardVotes: cached.data.positionAwardVotes ?? base.positionAwardVotes,
-      totyBallots: cached.data.totyBallots ?? base.totyBallots,
-      totyConfigs: cached.data.totyConfigs ?? base.totyConfigs,
+      totyBallots: mergedTotyBallots,
+      totyConfigs: mergedTotyConfigs,
       photos: cached.data.photos ?? base.photos,
       news: cached.data.news ?? base.news,
       leyendasLeaderboard: cached.data.leyendasLeaderboard ?? base.leyendasLeaderboard,
@@ -180,7 +228,7 @@ function AppContent() {
       merged.matches.length > 0 ||
       merged.news.length > 0 ||
       Boolean(merged.homeFeatured);
-    return { state: merged, hasCachedSnapshot: hasMeaningfulData };
+    return { state: merged, hasCachedSnapshot: hasMeaningfulData, totyCachedAtIso };
   });
   const [state, setState] = useState<TournamentState>(() => initialBoot.state);
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
@@ -203,12 +251,22 @@ function AppContent() {
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
-  const [totyLastSyncAt, setTotyLastSyncAt] = useState<string | null>(null);
+  const [syncHealthState, setSyncHealthState] = useState<SyncHealthState>(() =>
+    createInitialSyncHealthState()
+  );
+  const [dismissedPublicNoticeKind, setDismissedPublicNoticeKind] = useState<CloudErrorKind | null>(
+    null
+  );
+  const lastQuotaLogAtRef = useRef<number | null>(null);
+  const [totyLastSyncAt, setTotyLastSyncAt] = useState<string | null>(
+    () => initialBoot.totyCachedAtIso
+  );
   const [totyRealtimeActive, setTotyRealtimeActive] = useState(false);
   const [pendingTotyDisciplines, setPendingTotyDisciplines] = useState<DisciplineId[]>([]);
   const persistedTotyBallotsRef = useRef<TotyBallotRecord[]>(initialBoot.state.totyBallots);
   const pendingTotyQueueRef = useRef<TotyBallotBatchItem[]>([]);
   const pendingTotyTimerRef = useRef<number | null>(null);
+  const inFlightTotyDisciplinesRef = useRef<Set<DisciplineId>>(new Set());
 
   // Real-Time Initial Hydration State (prevents empty "0 equipos" flash on brand-new devices)
   const [settledCoreStreams, setSettledCoreStreams] = useState<Set<CoreRealtimeStreamKey>>(
@@ -220,6 +278,14 @@ function AppContent() {
   const [initialSyncTimedOut, setInitialSyncTimedOut] = useState(false);
   const [initialSyncErrorDetail, setInitialSyncErrorDetail] = useState<string | null>(null);
   const [realtimeRetryNonce, setRealtimeRetryNonce] = useState(0);
+
+  const syncHealth = useMemo(
+    () =>
+      computeSyncHealthSummary(syncHealthState, {
+        usingLocalCache: initialBoot.hasCachedSnapshot,
+      }),
+    [syncHealthState, initialBoot.hasCachedSnapshot]
+  );
 
   const initialSyncPhase = useMemo(
     () =>
@@ -267,7 +333,29 @@ function AppContent() {
     });
   }, []);
 
-  const reportCloudError = useCallback((context: string, err: unknown) => {
+  const reportCloudError = useCallback((context: string, err: unknown, streamKey?: string) => {
+    const kind = classifyFirestoreError(err);
+    const nowMs = Date.now();
+
+    setSyncHealthState((prev) =>
+      recordSyncIncident(prev, {
+        streamKey,
+        context,
+        err,
+        nowIso: new Date(nowMs).toISOString(),
+      })
+    );
+
+    if (kind === 'quota_exceeded') {
+      if (shouldEmitThrottledQuotaLog(lastQuotaLogAtRef.current, nowMs)) {
+        lastQuotaLogAtRef.current = nowMs;
+        console.warn(`[Firestore] ${context} (límite diario de lecturas alcanzado).`);
+      }
+      // Do not spam raw quota dumps into the dismissible top error toast;
+      // the single calm public read notice and Admin General diagnostics handle it cleanly.
+      return;
+    }
+
     const detail = err instanceof Error ? err.message : 'Error de sincronización con Firestore.';
     console.error(`[Firestore] ${context}:`, err);
     setCloudError(`${context}: ${detail}`);
@@ -281,6 +369,9 @@ function AppContent() {
     setInitialSyncTimedOut(false);
     setInitialSyncErrorDetail(null);
     setCloudError(null);
+    setSyncHealthState(createInitialSyncHealthState());
+    setDismissedPublicNoticeKind(null);
+    lastQuotaLogAtRef.current = null;
     setRealtimeRetryNonce((n) => n + 1);
   }, []);
 
@@ -288,17 +379,20 @@ function AppContent() {
   // Any change published by an Admin, Referee, Delegate, or Press user propagates instantly across devices.
   useEffect(() => {
     const coreSet = new Set<string>(CORE_REALTIME_STREAMS);
-    const markCoreSettled = (key: CoreRealtimeStreamKey) => {
+    const markStreamSettled = (streamKey: PublicRealtimeStreamKey) => {
+      setSyncHealthState((prev) => markSyncStreamHealthy(prev, streamKey));
+      if (!coreSet.has(streamKey)) return;
+      const coreKey = streamKey as CoreRealtimeStreamKey;
       setSettledCoreStreams((prev) => {
-        if (prev.has(key)) return prev;
+        if (prev.has(coreKey)) return prev;
         const next = new Set(prev);
-        next.add(key);
+        next.add(coreKey);
         return next;
       });
       setFailedCoreStreams((prev) => {
-        if (!prev.has(key)) return prev;
+        if (!prev.has(coreKey)) return prev;
         const next = new Set(prev);
-        next.delete(key);
+        next.delete(coreKey);
         return next;
       });
     };
@@ -321,26 +415,26 @@ function AppContent() {
           lastSyncedSpreadsheetId: patch.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
           lastSyncedAt: patch.lastSyncedAt ?? prev.lastSyncedAt,
         }));
-        markCoreSettled('settings');
+        markStreamSettled('settings');
       },
       onConfigs: (configs) => {
         setState((prev) => ({ ...prev, configs }));
-        markCoreSettled('configs');
+        markStreamSettled('configs');
       },
       onTeams: (teams) => {
         setState((prev) => ({ ...prev, teams }));
-        markCoreSettled('teams');
+        markStreamSettled('teams');
       },
       onPlayers: (incomingPlayers) => {
         setState((prev) => ({
           ...prev,
           players: mergePublicPlayersPreservingPii(prev.players, incomingPlayers),
         }));
-        markCoreSettled('players');
+        markStreamSettled('players');
       },
       onMatches: (matches) => {
         setState((prev) => ({ ...prev, matches }));
-        markCoreSettled('matches');
+        markStreamSettled('matches');
       },
       onNews: (publishedNews) => {
         const keepDrafts =
@@ -351,7 +445,7 @@ function AppContent() {
           ...prev,
           news: mergePublicNewsPreservingDrafts(prev.news, publishedNews, keepDrafts),
         }));
-        markCoreSettled('news');
+        markStreamSettled('news');
       },
       onTransfers: (approvedTransfers) => {
         const keepPrivate =
@@ -366,31 +460,56 @@ function AppContent() {
             keepPrivate
           ),
         }));
+        markStreamSettled('transfers');
       },
       onPhotos: (photos) => {
         setState((prev) => ({ ...prev, photos }));
+        markStreamSettled('photos');
       },
       onMvpVotes: (mvpVotes) => {
         setState((prev) => ({ ...prev, mvpVotes }));
+        markStreamSettled('mvpVotes');
       },
       onAwardNominees: (awardNominees) => {
         setState((prev) => ({ ...prev, awardNominees }));
+        markStreamSettled('awardNominees');
       },
       onChampionshipMvpVotes: (championshipMvpVotes) => {
         setState((prev) => ({ ...prev, championshipMvpVotes }));
+        markStreamSettled('championshipMvpVotes');
       },
       onPositionAwardVotes: (positionAwardVotes) => {
         setState((prev) => ({ ...prev, positionAwardVotes }));
+        markStreamSettled('positionAwardVotes');
       },
       onLeyendasLeaderboard: (leyendasLeaderboard) => {
         setState((prev) => ({ ...prev, leyendasLeaderboard }));
+        markStreamSettled('leyendasLeaderboard');
       },
       onStreamError: (stream: PublicRealtimeStreamKey, err: unknown) => {
         const detail =
           err instanceof Error ? err.message : 'Error de conexión en tiempo real con Firestore.';
-        if (detail.toLowerCase().includes('quota exceeded')) {
-          reportCloudError('Cuota diaria de Firestore alcanzada', err);
+        const kind = classifyFirestoreError(err);
+
+        setSyncHealthState((prev) =>
+          recordSyncIncident(prev, {
+            streamKey: stream,
+            context:
+              kind === 'quota_exceeded'
+                ? 'Cuota diaria de Firestore alcanzada'
+                : `Error leyendo colección ${stream}`,
+            err,
+          })
+        );
+
+        if (kind === 'quota_exceeded') {
+          const nowMs = Date.now();
+          if (shouldEmitThrottledQuotaLog(lastQuotaLogAtRef.current, nowMs)) {
+            lastQuotaLogAtRef.current = nowMs;
+            console.warn('[Firestore] Cuota diaria de lecturas alcanzada (colecciones públicas).');
+          }
         }
+
         if (coreSet.has(stream)) {
           const coreKey = stream as CoreRealtimeStreamKey;
           setFailedCoreStreams((prev) => {
@@ -408,7 +527,7 @@ function AppContent() {
       window.clearTimeout(timeoutId);
       unsubscribePublic();
     };
-  }, [realtimeRetryNonce, reportCloudError]);
+  }, [realtimeRetryNonce]);
 
   // 1A. Debounced persistence of public tournament snapshot to localStorage (only after initial hydration)
   useEffect(() => {
@@ -590,15 +709,119 @@ function AppContent() {
     return () => unsub();
   }, [hydrateForAuthenticatedProfile, reportCloudError]);
 
-  // 2B. Real-time Firestore listeners for TOTY ballots & discipline formation configs
+  // 2B. Indexed localStorage cache-first TOTY sync:
+  // - On /votaciones: serves instantly from the per-discipline indexed localStorage cache
+  //   with 0 Firestore reads while fresh (5 min TTL), and fetches ONLY the active discipline
+  //   on cache miss/expiry (instead of re-subscribing all 8 disciplines on every tab switch).
+  // - On /panel: attaches live admin listeners and writes snapshots back to the indexed cache.
+  const applyDisciplineTotyToState = useCallback(
+    (
+      disciplineId: DisciplineId,
+      ballots: TotyBallotRecord[],
+      config: DisciplineTotyConfig | null
+    ) => {
+      const otherPersisted = persistedTotyBallotsRef.current.filter(
+        (b) => b.disciplineId !== disciplineId
+      );
+      const nextPersisted = [...ballots, ...otherPersisted];
+      persistedTotyBallotsRef.current = nextPersisted;
+
+      const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
+      const mergedBallots =
+        pendingBallots.length > 0
+          ? mergeTotyBallotsIntoState(nextPersisted, pendingBallots)
+          : nextPersisted;
+
+      setState((prev) => {
+        const nextConfigs = { ...prev.totyConfigs };
+        if (config) {
+          nextConfigs[disciplineId] = config;
+        } else {
+          delete nextConfigs[disciplineId];
+        }
+        return {
+          ...prev,
+          totyBallots: mergedBallots,
+          totyConfigs: nextConfigs,
+        };
+      });
+    },
+    []
+  );
+
   useEffect(() => {
-    if (activeSection !== 'panel' && activeSection !== 'votaciones') {
+    if (activeSection !== 'votaciones') return;
+
+    let cancelled = false;
+    const cachedDisc = loadCachedTotyForDiscipline(selectedDiscipline);
+    if (cachedDisc) {
+      applyDisciplineTotyToState(selectedDiscipline, cachedDisc.ballots, cachedDisc.config);
+      setTotyLastSyncAt(new Date(cachedDisc.savedAt).toISOString());
+      if (cachedDisc.isFresh) {
+        // Fresh indexed cache hit -> 0 Firestore reads!
+        return;
+      }
+    }
+
+    if (inFlightTotyDisciplinesRef.current.has(selectedDiscipline)) {
+      return;
+    }
+
+    inFlightTotyDisciplinesRef.current.add(selectedDiscipline);
+    fetchFirestoreTotyForDiscipline(selectedDiscipline)
+      .then(({ ballots, config }) => {
+        saveCachedTotyForDiscipline(selectedDiscipline, {
+          ballots,
+          config,
+          temporada: stateRef.current.temporada,
+        });
+        if (!cancelled) {
+          applyDisciplineTotyToState(selectedDiscipline, ballots, config);
+          setTotyLastSyncAt(new Date().toISOString());
+        }
+      })
+      .catch((err) => {
+        console.warn(`Error sincronizando TOTY para ${selectedDiscipline}:`, err);
+      })
+      .finally(() => {
+        inFlightTotyDisciplinesRef.current.delete(selectedDiscipline);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, selectedDiscipline, applyDisciplineTotyToState]);
+
+  useEffect(() => {
+    if (activeSection !== 'panel') {
       setTotyRealtimeActive(false);
       return;
     }
+
+    const cachedAll = loadAllCachedTotyData();
+    if (cachedAll.ballots.length > 0 || Object.keys(cachedAll.configs).length > 0) {
+      persistedTotyBallotsRef.current = mergeTotyBallotsIntoState(
+        persistedTotyBallotsRef.current,
+        cachedAll.ballots
+      );
+      setState((prev) => ({
+        ...prev,
+        totyBallots: mergeTotyBallotsIntoState(prev.totyBallots, cachedAll.ballots),
+        totyConfigs: { ...prev.totyConfigs, ...cachedAll.configs },
+      }));
+      if (cachedAll.latestSavedAt) {
+        setTotyLastSyncAt(new Date(cachedAll.latestSavedAt).toISOString());
+      }
+    }
+
     const unsubBallots = subscribeToTotyBallots(
       (ballots) => {
         persistedTotyBallotsRef.current = ballots;
+        saveAllCachedTotySnapshot({
+          ballots,
+          configs: stateRef.current.totyConfigs,
+          temporada: stateRef.current.temporada,
+        });
         const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
         setState((prev) => ({
           ...prev,
@@ -617,6 +840,11 @@ function AppContent() {
     );
     const unsubConfigs = subscribeToTotyConfigs(
       (totyConfigs) => {
+        saveAllCachedTotySnapshot({
+          ballots: persistedTotyBallotsRef.current,
+          configs: totyConfigs,
+          temporada: stateRef.current.temporada,
+        });
         setState((prev) => ({ ...prev, totyConfigs }));
         setTotyLastSyncAt(new Date().toISOString());
         setTotyRealtimeActive(true);
@@ -1109,6 +1337,7 @@ function AppContent() {
     }));
     try {
       await saveFirestoreTotyConfig(normalized);
+      upsertCachedTotyConfig(normalized);
       setTotyLastSyncAt(new Date().toISOString());
     } catch (err) {
       reportCloudError('Error guardando configuración TOTY por disciplina', err);
@@ -1125,6 +1354,7 @@ function AppContent() {
     });
     try {
       await deleteFirestoreTotyConfig(disciplineId);
+      removeCachedTotyConfig(disciplineId);
       setTotyLastSyncAt(new Date().toISOString());
     } catch (err) {
       reportCloudError('Error restaurando formación TOTY estándar', err);
@@ -1220,10 +1450,13 @@ function AppContent() {
 
     try {
       const committedCount = await saveFirestoreTotyBallotsBatch(itemsToCommit);
+      const committedBallots = itemsToCommit.map((item) => item.ballot);
       persistedTotyBallotsRef.current = mergeTotyBallotsIntoState(
         persistedTotyBallotsRef.current,
-        itemsToCommit.map((item) => item.ballot)
+        committedBallots
       );
+      upsertCachedTotyBallots(committedBallots);
+      setTotyLastSyncAt(new Date().toISOString());
       return committedCount;
     } catch (err) {
       let restored = itemsToCommit;
@@ -1318,6 +1551,8 @@ function AppContent() {
           persistedTotyBallotsRef.current,
           ballotsToMerge
         );
+        upsertCachedTotyBallots(ballotsToMerge);
+        setTotyLastSyncAt(new Date().toISOString());
         return {
           committedCount,
           queuedCount: 0,
@@ -1972,6 +2207,40 @@ function AppContent() {
         onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
       />
 
+      {/* Calm, single, session-dismissible notice for conventional visitors when read issues occur */}
+      {!(activeSection === 'panel' && isAdminOrModerator(currentUser)) &&
+        !(activeSection !== 'privacidad' && initialSyncPhase === 'error') &&
+        shouldShowPublicReadNotice({
+          summary: syncHealth,
+          dismissedKind: dismissedPublicNoticeKind,
+        }) && (
+          <div
+            data-testid="public-read-notice"
+            role="status"
+            className="bg-[#12100b]/95 border-b border-amber-400/25 text-amber-100/95 px-4 py-2.5 text-xs backdrop-blur-md"
+          >
+            <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>{syncHealth.publicNoticeMessage}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (syncHealth.incident) {
+                    setDismissedPublicNoticeKind(syncHealth.incident.kind);
+                  }
+                }}
+                aria-label="Cerrar aviso de lectura"
+                className="p-1 text-amber-200/75 hover:text-white cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+      {/* Actionable non-quota write/operation error banner (e.g., permission/validation on explicit action) */}
       {cloudError && (
         <div
           role="alert"
@@ -1999,6 +2268,8 @@ function AppContent() {
           <InitialLoadSkeleton
             phase={initialSyncPhase}
             errorDetail={initialSyncErrorDetail}
+            isQuotaOrReadIssue={syncHealth.hasReadIssues}
+            isAdmin={isAdminOrModerator(currentUser)}
             onRetry={handleRetryInitialSync}
           />
         ) : (
@@ -2183,6 +2454,8 @@ function AppContent() {
                 onResetTotyConfig={handleResetTotyConfig}
                 onSaveHomeFeatured={handleSaveHomeFeatured}
                 onRefreshUsers={handleRefreshUsers}
+                syncHealth={syncHealth}
+                onRetryCloudSync={handleRetryInitialSync}
                 onOpenAuth={() => setAuthModalOpen(true)}
               />
             )}

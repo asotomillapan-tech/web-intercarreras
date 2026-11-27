@@ -37,6 +37,10 @@ import {
   sanitizeTotySelections,
   type TotyBallotBatchItem,
 } from '../domain/totyBatchQueue';
+import {
+  classifyFirestoreError,
+  shouldEmitThrottledQuotaLog,
+} from '../domain/syncHealthEngine';
 import type {
   AcademicLevel,
   AppUserProfile,
@@ -140,7 +144,18 @@ function sanitizeHomeFeatured(raw: unknown): HomeFeaturedConfig | undefined {
 // 1. Public Tournament Mappers, Hydration & Real-Time Subscriptions
 // ---------------------------------------------------------------------------
 
+let lastQuotaSnapshotLogAtMs: number | null = null;
+
 function logFirestoreSnapshotError(error: unknown, operationType: OperationType, path: string): void {
+  const kind = classifyFirestoreError(error);
+  const nowMs = Date.now();
+  if (kind === 'quota_exceeded') {
+    if (!shouldEmitThrottledQuotaLog(lastQuotaSnapshotLogAtMs, nowMs)) {
+      return;
+    }
+    lastQuotaSnapshotLogAtMs = nowMs;
+  }
+
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -2361,6 +2376,64 @@ export async function deleteFirestoreTotyConfig(disciplineId: DisciplineId): Pro
     await deleteDoc(doc(db, 'toty_configs', disciplineId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+/**
+ * One-shot discipline-scoped fetch for TOTY ballots + formation config.
+ * Only reads documents belonging to the active discipline instead of scanning
+ * all 8 disciplines, working in tandem with the indexed localStorage TOTY cache.
+ */
+export async function fetchFirestoreTotyForDiscipline(
+  disciplineId: DisciplineId
+): Promise<{
+  ballots: TotyBallotRecord[];
+  config: DisciplineTotyConfig | null;
+}> {
+  try {
+    const [ballotsSnap, configSnap] = await Promise.all([
+      getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', '==', disciplineId))),
+      getDoc(doc(db, 'toty_configs', disciplineId)),
+    ]);
+
+    const ballots = ballotsSnap.docs.map((d) => mapTotyBallotDoc(d.id, d.data()));
+    const config = configSnap.exists()
+      ? mapTotyConfigDoc(configSnap.id, configSnap.data() as Record<string, unknown>)
+      : null;
+
+    return { ballots, config };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, `toty_ballots(${disciplineId})`);
+    return { ballots: [], config: null };
+  }
+}
+
+/**
+ * One-shot fetch for all disciplines' TOTY ballots and configs (used for full cache sync).
+ */
+export async function fetchAllFirestoreTotyData(): Promise<{
+  ballots: TotyBallotRecord[];
+  configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+}> {
+  try {
+    const [ballotsSnap, configsSnap] = await Promise.all([
+      getDocs(query(collection(db, 'toty_ballots'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+      getDocs(query(collection(db, 'toty_configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    ]);
+
+    const ballots = ballotsSnap.docs.map((d) => mapTotyBallotDoc(d.id, d.data()));
+    const configs: Partial<Record<DisciplineId, DisciplineTotyConfig>> = {};
+    configsSnap.docs.forEach((d) => {
+      const mapped = mapTotyConfigDoc(d.id, d.data());
+      if (mapped) {
+        configs[mapped.disciplineId] = mapped;
+      }
+    });
+
+    return { ballots, configs };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'toty_ballots');
+    return { ballots: [], configs: {} };
   }
 }
 

@@ -54,6 +54,8 @@ import {
 import { getFirebaseIdToken } from '../services/firebaseAuth';
 import type { Editorial2025Photos } from '../services/googleDrive';
 import type { DeletedEntityIds, SheetImportDelta } from '../domain/sheetsMergeEngine';
+import type { SyncHealthSummary } from '../domain/syncHealthEngine';
+import firebaseConfig from '../../firebase-applet-config.json';
 import type {
   AiScoresheetResult,
   AppUserProfile,
@@ -155,6 +157,8 @@ interface AdminRefereeViewProps {
   onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
   onSaveHomeFeatured: (config: HomeFeaturedConfig) => Promise<void>;
   onRefreshUsers?: () => Promise<void> | void;
+  syncHealth: SyncHealthSummary;
+  onRetryCloudSync: () => void;
   onOpenAuth: () => void;
 }
 
@@ -315,6 +319,8 @@ export function AdminRefereeView({
   onResetTotyConfig,
   onSaveHomeFeatured,
   onRefreshUsers,
+  syncHealth,
+  onRetryCloudSync,
   onOpenAuth,
 }: AdminRefereeViewProps) {
   const accessiblePanels = useMemo(
@@ -1032,6 +1038,157 @@ export function AdminRefereeView({
 
       {/* Main Content Container */}
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        {/* ================= ESTADO DE SINCRONIZACIÓN (SOLO ADMINISTRACIÓN GENERAL) ================= */}
+        {effectivePanel === 'general' && canGeneral && (
+          <section
+            data-testid="admin-sync-health-panel"
+            aria-label="Estado de sincronización con Firestore"
+            className={`mb-8 rounded-3xl border transition-colors ${
+              syncHealth.quotaExceeded
+                ? 'border-amber-400/35 bg-[#120e09]'
+                : syncHealth.hasReadIssues
+                ? 'border-amber-400/25 bg-[#110f0c]'
+                : 'border-white/[0.08] bg-[#0c0c10]'
+            }`}
+          >
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 ${
+                      syncHealth.quotaExceeded
+                        ? 'bg-amber-500/15 border-amber-400/35 text-amber-300'
+                        : syncHealth.hasReadIssues
+                        ? 'bg-amber-500/10 border-amber-400/25 text-amber-300'
+                        : syncHealth.status === 'healthy'
+                        ? 'bg-emerald-500/10 border-emerald-400/25 text-emerald-400'
+                        : 'bg-[#707ef9]/15 border-[#707ef9]/30 text-[#a5b0ff]'
+                    }`}
+                  >
+                    {syncHealth.hasReadIssues ? (
+                      <AlertCircle className="w-5 h-5" />
+                    ) : (
+                      <CheckCircle2 className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="text-[11px] font-mono uppercase tracking-[0.16em] text-zinc-400">
+                        Estado de sincronización
+                      </span>
+                      <span
+                        className={`text-xs font-medium ${
+                          syncHealth.quotaExceeded || syncHealth.hasReadIssues
+                            ? 'text-amber-300'
+                            : syncHealth.status === 'healthy'
+                            ? 'text-emerald-400'
+                            : 'text-[#a5b0ff]'
+                        }`}
+                      >
+                        · {syncHealth.statusLabel}
+                      </span>
+                    </div>
+                    <h2 className="text-base sm:text-lg font-medium tracking-[-0.02em] text-white">
+                      {syncHealth.adminHeadline}
+                    </h2>
+                    <p className="text-xs text-zinc-400 leading-relaxed max-w-3xl">
+                      {syncHealth.adminDescription}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onRetryCloudSync}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reintentar sincronización</span>
+                  </button>
+                  {canManageAdminTabs && syncHealth.hasReadIssues && effectiveSubTab !== 'sheets' && (
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('sheets')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/[0.14] bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
+                    >
+                      <span>Abrir Google Sheets</span>
+                    </button>
+                  )}
+                  {syncHealth.quotaExceeded &&
+                    firebaseConfig.projectId &&
+                    firebaseConfig.firestoreDatabaseId && (
+                      <a
+                        href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data?openUpgradeDialog=true`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-amber-400/35 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-medium text-amber-200 transition-colors"
+                      >
+                        <span>Revisar cuota en Firebase</span>
+                      </a>
+                    )}
+                </div>
+              </div>
+
+              {/* Compact diagnostic metrics strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-white/[0.07] text-xs">
+                <div>
+                  <p className="text-[11px] text-zinc-500">Colecciones activas</p>
+                  <p className="font-mono text-sm text-white mt-0.5 tabular-nums">
+                    {syncHealth.activeStreamsCount} / {syncHealth.totalTrackedStreams}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-zinc-500">Con error de lectura</p>
+                  <p
+                    className={`font-mono text-sm mt-0.5 tabular-nums ${
+                      syncHealth.failedStreamsCount > 0 ? 'text-amber-300' : 'text-zinc-300'
+                    }`}
+                  >
+                    {syncHealth.failedStreamsCount}
+                    {syncHealth.incident && syncHealth.incident.occurrences > 1
+                      ? ` (${syncHealth.incident.occurrences} eventos)`
+                      : ''}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-zinc-500">Última sincronización</p>
+                  <p className="font-mono text-sm text-zinc-200 mt-0.5 tabular-nums">
+                    {syncHealth.lastSuccessfulSyncAt
+                      ? new Date(syncHealth.lastSuccessfulSyncAt).toLocaleTimeString('es-CL', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : 'Sin confirmar'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-zinc-500">Respaldo en caché local</p>
+                  <p className="text-sm text-zinc-200 mt-0.5">
+                    {syncHealth.usingLocalCache ? 'Disponible' : 'Sin respaldo previo'}
+                  </p>
+                </div>
+              </div>
+
+              {syncHealth.hasReadIssues && syncHealth.affectedStreamLabels.length > 0 && (
+                <div className="pt-3 border-t border-white/[0.07] space-y-1.5 text-xs">
+                  <p className="text-[11px] text-zinc-500">
+                    Colecciones afectadas ({syncHealth.affectedStreamLabels.length}):{' '}
+                    <span className="text-zinc-300">
+                      {syncHealth.affectedStreamLabels.join(' · ')}
+                    </span>
+                  </p>
+                  {syncHealth.incident?.detail && (
+                    <p className="text-[11px] font-mono text-zinc-500 break-words">
+                      Detalle técnico: {syncHealth.incident.detail}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* ================= PANEL DE ARBITRAJE ================= */}
         {effectivePanel === 'arbitraje' &&
           effectiveSubTab === 'designaciones' &&

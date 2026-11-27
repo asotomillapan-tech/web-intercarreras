@@ -1,37 +1,44 @@
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import type { InitialSyncPhase } from '../domain/realtimeSyncEngine';
+import { PUBLIC_READ_DEGRADED_NOTICE } from '../domain/syncHealthEngine';
 
 interface InitialLoadSkeletonProps {
   phase: Exclude<InitialSyncPhase, 'ready'>;
   errorDetail?: string | null;
+  isQuotaOrReadIssue?: boolean;
+  isAdmin?: boolean;
   onRetry: () => void;
 }
 
 export function InitialLoadSkeleton({
   phase,
   errorDetail,
+  isQuotaOrReadIssue = false,
+  isAdmin = false,
   onRetry,
 }: InitialLoadSkeletonProps) {
   if (phase === 'error') {
     return (
       <section
         data-testid="initial-sync-error"
-        aria-label="Error de conexión inicial"
+        aria-label="Error de lectura temporal"
         className="bg-[#050507] text-white py-24 px-4 sm:px-6 lg:px-8"
       >
         <div className="max-w-xl mx-auto rounded-3xl border border-white/[0.1] bg-[#0c0c10] p-8 sm:p-10 space-y-5">
-          <div className="flex items-center gap-2 text-[#9aa5ff] text-xs font-medium">
+          <div className="flex items-center gap-2 text-amber-300 text-xs font-medium">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>Conexión interrumpida</span>
+            <span>Problemas temporales de lectura</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] leading-tight">
-            No pudimos cargar el <span className="font-editorial text-zinc-300">campeonato</span>
+            Lectura del <span className="font-editorial text-zinc-300">campeonato</span> limitada
           </h1>
           <p className="text-sm text-zinc-400 leading-relaxed">
-            Verifica tu conexión e intenta nuevamente para sincronizar resultados y tablas en vivo.
+            {isQuotaOrReadIssue
+              ? PUBLIC_READ_DEGRADED_NOTICE
+              : 'La web está presentando problemas temporales de lectura de datos. Intenta recargar en unos minutos.'}
           </p>
-          {errorDetail && (
-            <p className="text-xs text-zinc-500 border-t border-white/[0.08] pt-3 break-words">
+          {isAdmin && errorDetail && (
+            <p className="text-xs text-zinc-500 border-t border-white/[0.08] pt-3 break-words font-mono">
               {errorDetail}
             </p>
           )}
