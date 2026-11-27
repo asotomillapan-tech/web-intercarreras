@@ -34,6 +34,10 @@ import {
   computeMatchMvpStandings,
   shouldRevealPublicMatchData,
 } from '../domain/rbacEngine';
+import {
+  areTotySelectionsEqual,
+  type TotyBallotSubmissionInput,
+} from '../domain/totyBatchQueue';
 import type {
   AppUserProfile,
   DisciplineId,
@@ -432,9 +436,13 @@ interface VotationsViewProps {
     player: Player
   ) => Promise<void> | void;
   onSubmitTotyBallot: (
-    disciplineId: DisciplineId,
-    selections: Record<string, string>
-  ) => Promise<void> | void;
+    disciplineIdOrBatch: DisciplineId | TotyBallotSubmissionInput[],
+    selections?: Record<string, string>
+  ) =>
+    | Promise<{ committedCount: number; queuedCount: number; skippedCount: number } | void>
+    | void;
+  pendingTotyDisciplines?: DisciplineId[];
+  onFlushTotyBatch?: () => Promise<number> | void;
 }
 
 export function VotationsView({
@@ -447,6 +455,8 @@ export function VotationsView({
   onVoteChampionshipMvp,
   onVotePositionAward,
   onSubmitTotyBallot,
+  pendingTotyDisciplines = [],
+  onFlushTotyBatch,
 }: VotationsViewProps) {
   const [activeTab, setActiveTab] = useState<VotationTab>('toty');
   const [potmDisciplineFilter, setPotmDisciplineFilter] = useState<'ALL' | DisciplineId>(
@@ -461,7 +471,9 @@ export function VotationsView({
   const [positionPlayerSearch, setPositionPlayerSearch] = useState('');
   const [positionTeamFilter, setPositionTeamFilter] = useState<'ALL' | string>('ALL');
   const [totyQuickSearch, setTotyQuickSearch] = useState('');
-  const [totyDraft, setTotyDraft] = useState<Record<string, string>>({});
+  const [totyDraftsByDiscipline, setTotyDraftsByDiscipline] = useState<
+    Partial<Record<DisciplineId, Record<string, string>>>
+  >({});
   const [totyBoardMode, setTotyBoardMode] = useState<'community' | 'draft'>('community');
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
@@ -522,6 +534,29 @@ export function VotationsView({
     [sortedAllMatches, potmDisciplineFilter, potmGroupFilter, potmStageFilter]
   );
 
+  // Reset local unsaved TOTY drafts only if the authenticated user changes
+  useEffect(() => {
+    setTotyDraftsByDiscipline({});
+  }, [currentUser?.uid]);
+
+  const savedTotySelectionsByDiscipline = useMemo(() => {
+    const map: Partial<Record<DisciplineId, Record<string, string>>> = {};
+    if (!currentUser) return map;
+    for (const disc of DISCIPLINES) {
+      const ballot = state.totyBallots.find(
+        (b) => b.disciplineId === disc.id && b.voterUid === currentUser.uid
+      );
+      if (ballot?.selections) {
+        map[disc.id] = normalizeTotyBallotSelections(
+          ballot.selections,
+          disc.sportType,
+          state.totyConfigs?.[disc.id] ?? null
+        );
+      }
+    }
+    return map;
+  }, [state.totyBallots, state.totyConfigs, currentUser]);
+
   const existingTotyBallot = useMemo(() => {
     if (!currentUser) return undefined;
     return state.totyBallots.find(
@@ -529,17 +564,50 @@ export function VotationsView({
     );
   }, [state.totyBallots, selectedDiscipline, currentUser]);
 
-  useEffect(() => {
-    setTotyDraft(
-      existingTotyBallot?.selections
-        ? normalizeTotyBallotSelections(
-            existingTotyBallot.selections,
-            discMeta.sportType,
-            activeTotyConfig
-          )
-        : {}
-    );
-  }, [existingTotyBallot, selectedDiscipline, discMeta.sportType, activeTotyConfig]);
+  const totyDraft = useMemo(
+    () =>
+      totyDraftsByDiscipline[selectedDiscipline] ??
+      savedTotySelectionsByDiscipline[selectedDiscipline] ??
+      {},
+    [totyDraftsByDiscipline, savedTotySelectionsByDiscipline, selectedDiscipline]
+  );
+
+  const updateActiveTotyDraft = (
+    updater: (prev: Record<string, string>) => Record<string, string>
+  ) => {
+    setTotyDraftsByDiscipline((prevMap) => {
+      const base =
+        prevMap[selectedDiscipline] ?? savedTotySelectionsByDiscipline[selectedDiscipline] ?? {};
+      return {
+        ...prevMap,
+        [selectedDiscipline]: updater(base),
+      };
+    });
+  };
+
+  const unsavedTotySubmissions = useMemo<TotyBallotSubmissionInput[]>(() => {
+    const list: TotyBallotSubmissionInput[] = [];
+    for (const disc of DISCIPLINES) {
+      const rawDraft = totyDraftsByDiscipline[disc.id];
+      if (!rawDraft) continue;
+      const clean = normalizeTotyBallotSelections(
+        rawDraft,
+        disc.sportType,
+        state.totyConfigs?.[disc.id] ?? null
+      );
+      if (Object.keys(clean).length === 0) continue;
+      const saved = savedTotySelectionsByDiscipline[disc.id];
+      if (!areTotySelectionsEqual(clean, saved)) {
+        list.push({ disciplineId: disc.id, selections: clean });
+      }
+    }
+    return list;
+  }, [totyDraftsByDiscipline, savedTotySelectionsByDiscipline, state.totyConfigs]);
+
+  const unsavedTotyDisciplineSet = useMemo(
+    () => new Set<DisciplineId>(unsavedTotySubmissions.map((s) => s.disciplineId)),
+    [unsavedTotySubmissions]
+  );
 
   const potmBuckets = useMemo(() => {
     const openNow: Match[] = [];
@@ -773,6 +841,31 @@ export function VotationsView({
       onOpenAuth();
       return;
     }
+
+    if (unsavedTotySubmissions.length > 1) {
+      setSavingKey('toty-save');
+      setFeedbackMsg(null);
+      try {
+        const res = await onSubmitTotyBallot(unsavedTotySubmissions);
+        setTotyDraftsByDiscipline((prev) => {
+          const next = { ...prev };
+          for (const sub of unsavedTotySubmissions) {
+            delete next[sub.disciplineId];
+          }
+          return next;
+        });
+        const count = res?.committedCount ?? unsavedTotySubmissions.length;
+        setFeedbackMsg(
+          `Se guardaron ${count} papeletas TOTYs en un solo lote.`
+        );
+      } catch {
+        setFeedbackMsg('No se pudo guardar el lote de TOTYs. Tus selecciones siguen listas para reintentar.');
+      } finally {
+        setSavingKey(null);
+      }
+      return;
+    }
+
     const cleanSelections = normalizeTotyBallotSelections(
       totyDraft,
       discMeta.sportType,
@@ -786,10 +879,27 @@ export function VotationsView({
     setSavingKey('toty-save');
     setFeedbackMsg(null);
     try {
-      await onSubmitTotyBallot(selectedDiscipline, cleanSelections);
-      setFeedbackMsg(
-        `Tu ${totyFormation.formationName} (${selectedEntries.length}/${totyFormation.slots.length}) fue guardado.`
-      );
+      const res = await onSubmitTotyBallot(selectedDiscipline, cleanSelections);
+      setTotyDraftsByDiscipline((prev) => {
+        const next = { ...prev };
+        delete next[selectedDiscipline];
+        return next;
+      });
+      if (res && res.skippedCount > 0 && res.committedCount === 0 && res.queuedCount === 0) {
+        setFeedbackMsg(
+          `Tu ${totyFormation.formationName} ya estaba guardado sin cambios nuevos.`
+        );
+      } else if (res && res.queuedCount > 1) {
+        setFeedbackMsg(
+          `${res.queuedCount} disciplinas TOTYs listas · Se sincronizarán juntas en un solo lote.`
+        );
+      } else {
+        setFeedbackMsg(
+          `Tu ${totyFormation.formationName} (${selectedEntries.length}/${totyFormation.slots.length}) fue guardado.`
+        );
+      }
+    } catch {
+      setFeedbackMsg('No se pudo guardar tu papeleta TOTY. Inténtalo nuevamente.');
     } finally {
       setSavingKey(null);
     }
@@ -859,7 +969,7 @@ export function VotationsView({
       return;
     }
 
-    setTotyDraft((prev) => ({ ...prev, [targetSlot.slotKey]: player.id }));
+    updateActiveTotyDraft((prev) => ({ ...prev, [targetSlot.slotKey]: player.id }));
     setTotyBoardMode('draft');
     setTotyQuickSearch('');
     setFeedbackMsg(`${player.nombre} ${player.apellidoPaterno} asignado a ${targetSlot.label}.`);
@@ -910,20 +1020,31 @@ export function VotationsView({
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-white/[0.08] pt-5">
             {DISCIPLINES.map((d) => {
               const active = selectedDiscipline === d.id;
+              const hasUnsavedToty =
+                activeTab === 'toty' &&
+                (unsavedTotyDisciplineSet.has(d.id) || pendingTotyDisciplines.includes(d.id));
               return (
                 <button
                   key={d.id}
                   type="button"
                   onClick={() => onSelectDiscipline(d.id)}
-                  className={`px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer border ${
+                  className={`px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer border inline-flex items-center gap-1.5 ${
                     active
                       ? activeTab === 'toty'
                         ? 'bg-[#2152d4] text-white border-[#8bbaff]/65'
                         : 'bg-[#707ef9] text-white border-[#707ef9]'
+                      : hasUnsavedToty
+                      ? 'bg-[#0b183d] text-[#dbeeff] border-[#78b3ff]/45 hover:bg-[#102255]'
                       : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white hover:bg-white/[0.07]'
                   }`}
                 >
-                  {d.nombreCorto}
+                  <span>{d.nombreCorto}</span>
+                  {hasUnsavedToty && (
+                    <span
+                      aria-label="Cambios TOTY pendientes"
+                      className="w-1.5 h-1.5 rounded-full bg-[#b8dcff]"
+                    />
+                  )}
                 </button>
               );
             })}
@@ -2082,7 +2203,7 @@ export function VotationsView({
                           excludedPlayerIds={totyDraftPlayerIdSet}
                           highlightAccent={Boolean(slot.isLibero)}
                           onSelect={(playerId) => {
-                            setTotyDraft((prev) => ({
+                            updateActiveTotyDraft((prev) => ({
                               ...prev,
                               [slot.slotKey]: playerId,
                             }));
@@ -2091,6 +2212,24 @@ export function VotationsView({
                       );
                     })}
 
+                    {unsavedTotySubmissions.length > 1 && (
+                      <div className="rounded-2xl bg-[#0b1739]/90 border border-[#78b3ff]/35 px-4 py-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-medium text-[#dbeeff]">
+                            {unsavedTotySubmissions.length} disciplinas con cambios
+                          </span>
+                          <span className="font-mono text-[11px] text-[#9ec8ff]">
+                            1 solo lote
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#b8d4f8]/80 leading-relaxed">
+                          {unsavedTotySubmissions
+                            .map((sub) => DISCIPLINE_MAP[sub.disciplineId].nombreCorto)
+                            .join(' · ')}
+                        </p>
+                      </div>
+                    )}
+
                     <button
                       type="button"
                       disabled={savingKey === 'toty-save'}
@@ -2098,13 +2237,35 @@ export function VotationsView({
                       className="w-full py-3 rounded-full bg-gradient-to-r from-[#eef6ff] via-white to-[#cce3ff] hover:brightness-105 disabled:opacity-50 text-[#050a1f] text-xs font-semibold tracking-[0.01em] shadow-[0_14px_30px_-14px_rgba(184,220,255,0.75)] transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
                     >
                       {savingKey === 'toty-save'
-                        ? 'Guardando...'
+                        ? 'Guardando lote...'
                         : !currentUser
-                        ? 'Iniciar sesión para votar TOTYs'
+                        ? unsavedTotySubmissions.length > 1
+                          ? `Iniciar sesión para enviar ${unsavedTotySubmissions.length} TOTYs`
+                          : 'Iniciar sesión para votar TOTYs'
+                        : unsavedTotySubmissions.length > 1
+                        ? `Enviar ${unsavedTotySubmissions.length} TOTYs en lote`
                         : existingTotyBallot
                         ? `Actualizar TOTY (${totySelectedCount}/${totyFormation.slots.length})`
                         : `Enviar TOTY (${totySelectedCount}/${totyFormation.slots.length})`}
                     </button>
+
+                    {pendingTotyDisciplines.length > 0 && (
+                      <div className="flex items-center justify-between gap-3 px-1 text-[11px] text-[#9ec8ff]">
+                        <span>
+                          Sincronizando lote ({pendingTotyDisciplines.length}{' '}
+                          {pendingTotyDisciplines.length === 1 ? 'disciplina' : 'disciplinas'})...
+                        </span>
+                        {onFlushTotyBatch && (
+                          <button
+                            type="button"
+                            onClick={() => void onFlushTotyBatch()}
+                            className="font-medium text-[#dbeeff] hover:text-white underline underline-offset-2 cursor-pointer"
+                          >
+                            Enviar ahora
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

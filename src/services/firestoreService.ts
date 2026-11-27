@@ -32,6 +32,11 @@ import {
 } from '../domain/firestoreSanitizer';
 import { BOOTSTRAPPED_ADMIN_EMAIL, isRefereeOrChiefRole } from '../domain/rbacEngine';
 import type { PublicRealtimeStreamKey } from '../domain/realtimeSyncEngine';
+import {
+  FIRESTORE_TOTY_BATCH_CHUNK_SIZE,
+  sanitizeTotySelections,
+  type TotyBallotBatchItem,
+} from '../domain/totyBatchQueue';
 import type {
   AcademicLevel,
   AppUserProfile,
@@ -2161,36 +2166,107 @@ export async function saveFirestorePositionAwardVote(
   }
 }
 
-export async function saveFirestoreTotyBallot(ballot: TotyBallotRecord): Promise<void> {
+/**
+ * Writes one or multiple TOTY ballots across disciplines in atomic Firestore writeBatch chunks.
+ * Avoids per-document getDoc() reads by relying on known persisted state (`item.isUpdate`),
+ * cutting Firestore read/write overhead when users vote across multiple disciplines.
+ */
+export async function saveFirestoreTotyBallotsBatch(
+  items: TotyBallotBatchItem[]
+): Promise<number> {
+  const validItems = items
+    .map((item) => ({
+      ballot: item.ballot,
+      isUpdate: item.isUpdate,
+      cleanSelections: sanitizeTotySelections(item.ballot.selections),
+    }))
+    .filter((entry) => Object.keys(entry.cleanSelections).length > 0);
+
+  if (validItems.length === 0) return 0;
+
+  let committedCount = 0;
+  for (let i = 0; i < validItems.length; i += FIRESTORE_TOTY_BATCH_CHUNK_SIZE) {
+    const chunk = validItems.slice(i, i + FIRESTORE_TOTY_BATCH_CHUNK_SIZE);
+    const batchPath =
+      chunk.length === 1
+        ? `toty_ballots/${chunk[0].ballot.disciplineId}_${chunk[0].ballot.voterUid}`
+        : `toty_ballots/batch(${chunk.map((c) => c.ballot.disciplineId).join(',')})`;
+
+    const commitChunk = async (chunkToWrite: typeof chunk) => {
+      const batch = writeBatch(db);
+      for (const entry of chunkToWrite) {
+        const ballotId = `${entry.ballot.disciplineId}_${entry.ballot.voterUid}`;
+        const ref = doc(db, 'toty_ballots', ballotId);
+        if (entry.isUpdate) {
+          batch.update(ref, {
+            selections: entry.cleanSelections,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          batch.set(ref, {
+            disciplineId: entry.ballot.disciplineId,
+            temporada: (entry.ballot.temporada || '2026').slice(0, 16),
+            voterUid: entry.ballot.voterUid,
+            selections: entry.cleanSelections,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+    };
+
+    try {
+      await commitChunk(chunk);
+      committedCount += chunk.length;
+    } catch (error) {
+      // Only if a stale `isUpdate: true` targeted a document removed on server (`not-found`),
+      // retry once using set() for update-marked items without burning extra getDoc reads.
+      const errCode = String((error as { code?: string })?.code ?? '').toLowerCase();
+      const errMsg = String((error as { message?: string })?.message ?? '').toLowerCase();
+      const isNotFound =
+        errCode.includes('not-found') || errMsg.includes('no document to update');
+      const hasUpdateItem = chunk.some((entry) => entry.isUpdate);
+
+      if (isNotFound && hasUpdateItem) {
+        try {
+          await commitChunk(chunk.map((entry) => ({ ...entry, isUpdate: false })));
+          committedCount += chunk.length;
+          continue;
+        } catch (retryError) {
+          handleFirestoreError(retryError, OperationType.WRITE, batchPath);
+        }
+      }
+      handleFirestoreError(error, OperationType.WRITE, batchPath);
+    }
+  }
+
+  return committedCount;
+}
+
+export async function saveFirestoreTotyBallot(
+  ballot: TotyBallotRecord,
+  isKnownExisting?: boolean
+): Promise<void> {
+  if (typeof isKnownExisting === 'boolean') {
+    await saveFirestoreTotyBallotsBatch([{ ballot, isUpdate: isKnownExisting }]);
+    return;
+  }
+
   const ballotId = `${ballot.disciplineId}_${ballot.voterUid}`;
   const path = `toty_ballots/${ballotId}`;
   try {
     const ref = doc(db, 'toty_ballots', ballotId);
-    const cleanSelections: Record<string, string> = {};
-    Object.entries(ballot.selections)
-      .slice(0, 10)
-      .forEach(([posKey, playerId]) => {
-        if (posKey.trim() && playerId.trim()) {
-          cleanSelections[posKey.trim().slice(0, 32)] = playerId.trim().slice(0, 128);
-        }
-      });
+    const cleanSelections = sanitizeTotySelections(ballot.selections);
+    if (Object.keys(cleanSelections).length === 0) return;
 
     const existing = await getDoc(ref);
-    if (existing.exists()) {
-      await updateDoc(ref, {
-        selections: cleanSelections,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await setDoc(ref, {
-        disciplineId: ballot.disciplineId,
-        temporada: (ballot.temporada || '2026').slice(0, 16),
-        voterUid: ballot.voterUid,
-        selections: cleanSelections,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
+    await saveFirestoreTotyBallotsBatch([
+      {
+        ballot: { ...ballot, selections: cleanSelections },
+        isUpdate: existing.exists(),
+      },
+    ]);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

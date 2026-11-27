@@ -30,6 +30,13 @@ import {
   type PublicRealtimeStreamKey,
 } from './domain/realtimeSyncEngine';
 import {
+  enqueueTotyBallotItem,
+  mergeTotyBallotsIntoState,
+  planTotyBallotBatch,
+  type TotyBallotBatchItem,
+  type TotyBallotSubmissionInput,
+} from './domain/totyBatchQueue';
+import {
   getGoogleAccessToken,
   initGoogleAuth,
   signInWithGoogleBasic,
@@ -76,7 +83,7 @@ import {
   saveFirestorePositionAwardVote,
   saveFirestoreSettings,
   saveFirestoreTeam,
-  saveFirestoreTotyBallot,
+  saveFirestoreTotyBallotsBatch,
   saveFirestoreTotyConfig,
   subscribeToPublicTournamentState,
   subscribeToTotyBallots,
@@ -198,6 +205,10 @@ function AppContent() {
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [totyLastSyncAt, setTotyLastSyncAt] = useState<string | null>(null);
   const [totyRealtimeActive, setTotyRealtimeActive] = useState(false);
+  const [pendingTotyDisciplines, setPendingTotyDisciplines] = useState<DisciplineId[]>([]);
+  const persistedTotyBallotsRef = useRef<TotyBallotRecord[]>(initialBoot.state.totyBallots);
+  const pendingTotyQueueRef = useRef<TotyBallotBatchItem[]>([]);
+  const pendingTotyTimerRef = useRef<number | null>(null);
 
   // Real-Time Initial Hydration State (prevents empty "0 equipos" flash on brand-new devices)
   const [settledCoreStreams, setSettledCoreStreams] = useState<Set<CoreRealtimeStreamKey>>(
@@ -587,7 +598,15 @@ function AppContent() {
     }
     const unsubBallots = subscribeToTotyBallots(
       (ballots) => {
-        setState((prev) => ({ ...prev, totyBallots: ballots }));
+        persistedTotyBallotsRef.current = ballots;
+        const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
+        setState((prev) => ({
+          ...prev,
+          totyBallots:
+            pendingBallots.length > 0
+              ? mergeTotyBallotsIntoState(ballots, pendingBallots)
+              : ballots,
+        }));
         setTotyLastSyncAt(new Date().toISOString());
         setTotyRealtimeActive(true);
       },
@@ -922,6 +941,9 @@ function AppContent() {
   };
 
   const handleSignOut = async () => {
+    if (pendingTotyQueueRef.current.length > 0) {
+      await flushPendingTotyBallots();
+    }
     try {
       await signOutGoogle();
     } catch {
@@ -1185,38 +1207,186 @@ function AppContent() {
     }
   };
 
+  const flushPendingTotyBallots = useCallback(async (): Promise<number> => {
+    if (pendingTotyTimerRef.current !== null) {
+      window.clearTimeout(pendingTotyTimerRef.current);
+      pendingTotyTimerRef.current = null;
+    }
+    const itemsToCommit = pendingTotyQueueRef.current;
+    if (itemsToCommit.length === 0) return 0;
+
+    pendingTotyQueueRef.current = [];
+    setPendingTotyDisciplines([]);
+
+    try {
+      const committedCount = await saveFirestoreTotyBallotsBatch(itemsToCommit);
+      persistedTotyBallotsRef.current = mergeTotyBallotsIntoState(
+        persistedTotyBallotsRef.current,
+        itemsToCommit.map((item) => item.ballot)
+      );
+      return committedCount;
+    } catch (err) {
+      let restored = itemsToCommit;
+      for (const newer of pendingTotyQueueRef.current) {
+        restored = enqueueTotyBallotItem(restored, newer);
+      }
+      pendingTotyQueueRef.current = restored;
+      setPendingTotyDisciplines(restored.map((item) => item.ballot.disciplineId));
+      reportCloudError('Error guardando papeletas de TOTYs en lote', err);
+      return 0;
+    }
+  }, [reportCloudError]);
+
+  // Flush any queued TOTY ballots when leaving Votaciones or hiding the tab
+  useEffect(() => {
+    if (activeSection !== 'votaciones' && pendingTotyQueueRef.current.length > 0) {
+      void flushPendingTotyBallots();
+    }
+  }, [activeSection, flushPendingTotyBallots]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && pendingTotyQueueRef.current.length > 0) {
+        void flushPendingTotyBallots();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (pendingTotyTimerRef.current !== null) {
+        window.clearTimeout(pendingTotyTimerRef.current);
+        pendingTotyTimerRef.current = null;
+      }
+    };
+  }, [flushPendingTotyBallots]);
+
   const handleSubmitTotyBallot = async (
-    disciplineId: DisciplineId,
-    selections: Record<string, string>
-  ) => {
+    disciplineIdOrBatch: DisciplineId | TotyBallotSubmissionInput[],
+    selections?: Record<string, string>
+  ): Promise<{ committedCount: number; queuedCount: number; skippedCount: number }> => {
     if (!currentUser) {
       setAuthModalOpen(true);
-      return;
+      return { committedCount: 0, queuedCount: 0, skippedCount: 0 };
     }
-    const ballotId = `${disciplineId}_${currentUser.uid}`;
-    const now = new Date().toISOString();
-    const ballot: TotyBallotRecord = {
-      id: ballotId,
-      disciplineId,
-      temporada: stateRef.current.temporada,
+
+    const isExplicitBatch = Array.isArray(disciplineIdOrBatch);
+    const incomingSubmissions: TotyBallotSubmissionInput[] = isExplicitBatch
+      ? disciplineIdOrBatch
+      : [{ disciplineId: disciplineIdOrBatch, selections: selections ?? {} }];
+
+    const queuedSubmissions: TotyBallotSubmissionInput[] = pendingTotyQueueRef.current.map(
+      (item) => ({
+        disciplineId: item.ballot.disciplineId,
+        selections: item.ballot.selections,
+      })
+    );
+
+    const plan = planTotyBallotBatch({
+      submissions: isExplicitBatch
+        ? [...queuedSubmissions, ...incomingSubmissions]
+        : incomingSubmissions,
+      persistedBallots: persistedTotyBallotsRef.current,
       voterUid: currentUser.uid,
-      selections,
-      updatedAt: now,
-    };
-    setState((prev) => {
-      const exists = prev.totyBallots.some((b) => b.id === ballotId);
-      return {
-        ...prev,
-        totyBallots: exists
-          ? prev.totyBallots.map((b) => (b.id === ballotId ? ballot : b))
-          : [ballot, ...prev.totyBallots],
-      };
+      temporada: stateRef.current.temporada,
     });
-    try {
-      await saveFirestoreTotyBallot(ballot);
-    } catch (err) {
-      reportCloudError('Error guardando papeleta de TOTYs', err);
+
+    if (isExplicitBatch) {
+      if (pendingTotyTimerRef.current !== null) {
+        window.clearTimeout(pendingTotyTimerRef.current);
+        pendingTotyTimerRef.current = null;
+      }
+      pendingTotyQueueRef.current = [];
+      setPendingTotyDisciplines([]);
+
+      if (plan.items.length === 0) {
+        return {
+          committedCount: 0,
+          queuedCount: 0,
+          skippedCount: plan.skippedDisciplineIds.length,
+        };
+      }
+
+      const ballotsToMerge = plan.items.map((item) => item.ballot);
+      setState((prev) => ({
+        ...prev,
+        totyBallots: mergeTotyBallotsIntoState(prev.totyBallots, ballotsToMerge),
+      }));
+
+      try {
+        const committedCount = await saveFirestoreTotyBallotsBatch(plan.items);
+        persistedTotyBallotsRef.current = mergeTotyBallotsIntoState(
+          persistedTotyBallotsRef.current,
+          ballotsToMerge
+        );
+        return {
+          committedCount,
+          queuedCount: 0,
+          skippedCount: plan.skippedDisciplineIds.length,
+        };
+      } catch (err) {
+        pendingTotyQueueRef.current = plan.items;
+        setPendingTotyDisciplines(plan.items.map((item) => item.ballot.disciplineId));
+        reportCloudError('Error guardando papeletas de TOTYs en lote', err);
+        throw err;
+      }
     }
+
+    // Single-discipline submission: skip no-op edits with 0 Firestore reads/writes
+    if (plan.items.length === 0) {
+      const disciplineId = incomingSubmissions[0]?.disciplineId;
+      if (
+        disciplineId &&
+        pendingTotyQueueRef.current.some((i) => i.ballot.disciplineId === disciplineId)
+      ) {
+        pendingTotyQueueRef.current = pendingTotyQueueRef.current.filter(
+          (i) => i.ballot.disciplineId !== disciplineId
+        );
+        setPendingTotyDisciplines(pendingTotyQueueRef.current.map((i) => i.ballot.disciplineId));
+        const persistedVersion = persistedTotyBallotsRef.current.find(
+          (b) => b.disciplineId === disciplineId && b.voterUid === currentUser.uid
+        );
+        if (persistedVersion) {
+          setState((prev) => ({
+            ...prev,
+            totyBallots: mergeTotyBallotsIntoState(prev.totyBallots, [persistedVersion]),
+          }));
+        }
+      }
+      return {
+        committedCount: 0,
+        queuedCount: pendingTotyQueueRef.current.length,
+        skippedCount: plan.skippedDisciplineIds.length,
+      };
+    }
+
+    // Coalesce rapid multi-discipline submits into one writeBatch after a short debounce window
+    let nextQueue = pendingTotyQueueRef.current;
+    for (const item of plan.items) {
+      nextQueue = enqueueTotyBallotItem(nextQueue, item);
+    }
+    pendingTotyQueueRef.current = nextQueue;
+    setPendingTotyDisciplines(nextQueue.map((item) => item.ballot.disciplineId));
+
+    setState((prev) => ({
+      ...prev,
+      totyBallots: mergeTotyBallotsIntoState(
+        prev.totyBallots,
+        plan.items.map((item) => item.ballot)
+      ),
+    }));
+
+    if (pendingTotyTimerRef.current !== null) {
+      window.clearTimeout(pendingTotyTimerRef.current);
+    }
+    pendingTotyTimerRef.current = window.setTimeout(() => {
+      void flushPendingTotyBallots();
+    }, 1800);
+
+    return {
+      committedCount: 0,
+      queuedCount: nextQueue.length,
+      skippedCount: plan.skippedDisciplineIds.length,
+    };
   };
 
   const handleSaveLeyendasEntry = async (entry: LeyendasLeaderboardEntry) => {
@@ -1898,6 +2068,8 @@ function AppContent() {
                 onVoteChampionshipMvp={handleVoteChampionshipMvp}
                 onVotePositionAward={handleVotePositionAward}
                 onSubmitTotyBallot={handleSubmitTotyBallot}
+                pendingTotyDisciplines={pendingTotyDisciplines}
+                onFlushTotyBatch={flushPendingTotyBallots}
               />
             )}
 
