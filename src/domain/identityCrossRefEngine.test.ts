@@ -209,3 +209,72 @@ test('buildUnifiedPlayers merges by RUT even when name spelling varies slightly'
   assert.equal(unified.length, 1);
   assert.equal(unified[0].teamIds.length, 2);
 });
+
+test('buildUnifiedPlayers never merges homonyms who have distinct RUTs and keeps unique personKeys', () => {
+  const teams: Team[] = [
+    makeTeam({ id: 't1', nombre: 'Equipo A', disciplineId: 'f7-h-1' }),
+    makeTeam({ id: 't2', nombre: 'Equipo B', disciplineId: 'f7-h-2' }),
+  ];
+  const players: Player[] = [
+    makePlayer({
+      id: 'homonym-1',
+      teamId: 't1',
+      disciplineId: 'f7-h-1',
+      nombre: 'Sebastián',
+      apellidoPaterno: 'González',
+      apellidoMaterno: 'Pérez',
+      rut: '20.111.222-3',
+    }),
+    makePlayer({
+      id: 'homonym-2',
+      teamId: 't2',
+      disciplineId: 'f7-h-2',
+      nombre: 'Sebastián',
+      apellidoPaterno: 'González',
+      apellidoMaterno: 'Pérez',
+      rut: '21.999.888-7',
+    }),
+  ];
+
+  const unified = buildUnifiedPlayers(players, teams);
+  assert.equal(unified.length, 2);
+  assert.notEqual(unified[0].personKey, unified[1].personKey);
+});
+
+test('buildUnifiedPlayers scales linearly: 3,000 players unify in under 250ms', () => {
+  const teams: Team[] = Array.from({ length: 80 }, (_, idx) =>
+    makeTeam({
+      id: `team-${idx}`,
+      nombre: `Club UFRO ${idx}`,
+      disciplineId: idx % 2 === 0 ? 'f7-h-1' : 'voley-m',
+    })
+  );
+
+  // Create 3,000 player records including 300 multi-discipline students
+  const players: Player[] = Array.from({ length: 3000 }, (_, i) => {
+    const personIdx = i < 2700 ? i : i - 2700;
+    return makePlayer({
+      id: `pl-${i}`,
+      teamId: teams[i % teams.length].id,
+      disciplineId: i < 2700 ? 'f7-h-1' : 'voley-m',
+      nombre: `Nombre${personIdx}`,
+      apellidoPaterno: `Paterno${personIdx}`,
+      apellidoMaterno: `Materno${personIdx}`,
+      rut: '',
+      carrera: `Carrera ${personIdx % 25}`,
+    });
+  });
+
+  const t0 = performance.now();
+  const unified = buildUnifiedPlayers(players, teams);
+  const elapsedMs = performance.now() - t0;
+
+  assert.equal(unified.length, 2700);
+  const multiCount = unified.filter((u) => u.participations.length > 1).length;
+  assert.equal(multiCount, 300);
+  assert.ok(
+    elapsedMs < 250,
+    `Expected O(N) buildUnifiedPlayers(3000) to run under 250ms, took ${elapsedMs.toFixed(1)}ms`
+  );
+});
+

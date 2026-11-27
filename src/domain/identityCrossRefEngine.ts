@@ -275,55 +275,80 @@ export function formatUnifiedClubDisplayName(teams: Team[]): string {
   return ranked[0]?.label ?? teams[0].nombre.trim();
 }
 
+const ES_COLLATOR = new Intl.Collator('es', { sensitivity: 'base' });
+
+interface NormalizedPlayerKeys {
+  id: string;
+  rutKey: string;
+  emailKey: string;
+  matKey: string;
+  shortKey: string;
+  fullKey: string;
+  hasMaternal: boolean;
+  careerKey: string;
+}
+
+function extractNormalizedPlayerKeys(p: Player): NormalizedPlayerKeys {
+  const rutKey = normalizeRutKey(p.rut);
+  const rawEmail = (p.correoInstitucional ?? '').trim().toLowerCase();
+  const emailKey = rawEmail.includes('@') ? rawEmail : '';
+  const rawMat = normalizeTextToken(p.numeroMatricula);
+  const matKey = rawMat.length >= 6 ? rawMat : '';
+
+  const first = normalizeTextToken(p.nombre);
+  const paternal = normalizeTextToken(p.apellidoPaterno);
+  const maternal = normalizeTextToken(p.apellidoMaterno);
+  const shortKey = first && paternal ? `${first} ${paternal}` : first || paternal;
+  const fullKey = maternal ? (shortKey ? `${shortKey} ${maternal}` : maternal) : shortKey;
+  const careerKey = normalizeTextToken(p.carrera);
+
+  return {
+    id: p.id,
+    rutKey,
+    emailKey,
+    matKey,
+    shortKey,
+    fullKey,
+    hasMaternal: maternal.length > 0,
+    careerKey,
+  };
+}
+
 /**
- * Checks whether two player records refer to the same real student across multiple teams/disciplines.
+ * Zero-allocation equivalence check operating on precomputed normalized player keys.
+ * Preserves exact negative-signal guards (two records with different RUT/email/matrícula
+ * never merge even if they share a full name).
  */
-export function isSamePerson(a: Player, b: Player): boolean {
+function areNormalizedKeysSamePerson(a: NormalizedPlayerKeys, b: NormalizedPlayerKeys): boolean {
   if (a.id === b.id) return true;
 
   // 1. Strongest signal: normalized RUT match
-  const rutA = normalizeRutKey(a.rut);
-  const rutB = normalizeRutKey(b.rut);
-  if (rutA && rutB) {
-    return rutA === rutB;
+  if (a.rutKey && b.rutKey) {
+    return a.rutKey === b.rutKey;
   }
 
   // 2. Institutional email match
-  const emailA = (a.correoInstitucional ?? '').trim().toLowerCase();
-  const emailB = (b.correoInstitucional ?? '').trim().toLowerCase();
-  if (emailA && emailB && emailA.includes('@') && emailB.includes('@')) {
-    return emailA === emailB;
+  if (a.emailKey && b.emailKey) {
+    return a.emailKey === b.emailKey;
   }
 
   // 3. Student registration number (matrícula) match
-  const matA = normalizeTextToken(a.numeroMatricula);
-  const matB = normalizeTextToken(b.numeroMatricula);
-  if (matA && matB && matA.length >= 6 && matB.length >= 6) {
-    return matA === matB;
+  if (a.matKey && b.matKey) {
+    return a.matKey === b.matKey;
   }
 
-  // 4. Normalized full name match (works even for public visitors when PII is hidden)
-  const nameA = normalizePlayerNameParts(a);
-  const nameB = normalizePlayerNameParts(b);
-
-  // Require at least first name + paternal surname to avoid merging single-word nicknames
-  if (!nameA.shortKey || !nameB.shortKey || !nameA.shortKey.includes(' ')) {
+  // 4. Normalized full name match (requires at least first name + paternal surname)
+  if (!a.shortKey || !b.shortKey || !a.shortKey.includes(' ')) {
     return false;
   }
 
-  // Exact full name match
-  if (nameA.fullKey === nameB.fullKey) {
+  if (a.fullKey === b.fullKey) {
     return true;
   }
 
-  // If one record omitted apellidoMaterno while nombre + apellidoPaterno match exactly
-  const hasMatA = normalizeTextToken(a.apellidoMaterno).length > 0;
-  const hasMatB = normalizeTextToken(b.apellidoMaterno).length > 0;
-  if ((!hasMatA || !hasMatB) && nameA.shortKey === nameB.shortKey) {
-    // Extra safety: if both have careers populated, require matching career (or one empty)
-    const carA = normalizeTextToken(a.carrera);
-    const carB = normalizeTextToken(b.carrera);
-    if (!carA || !carB || carA === carB) {
+  // 5. One record omitted apellidoMaterno while nombre + apellidoPaterno match exactly
+  if ((!a.hasMaternal || !b.hasMaternal) && a.shortKey === b.shortKey) {
+    if (!a.careerKey || !b.careerKey || a.careerKey === b.careerKey) {
       return true;
     }
   }
@@ -332,74 +357,215 @@ export function isSamePerson(a: Player, b: Player): boolean {
 }
 
 /**
+ * Checks whether two player records refer to the same real student across multiple teams/disciplines.
+ */
+export function isSamePerson(a: Player, b: Player): boolean {
+  if (a.id === b.id) return true;
+  return areNormalizedKeysSamePerson(
+    extractNormalizedPlayerKeys(a),
+    extractNormalizedPlayerKeys(b)
+  );
+}
+
+/**
  * Consolidates all Player records belonging to the same student across different teams
  * and disciplines into a single UnifiedPlayerProfile per person.
+ *
+ * Uses O(N) precomputed key extraction + hash-bucketed Disjoint Set Union (Union-Find)
+ * so thousands of student records unify in a few milliseconds without blocking the UI.
  */
 export function buildUnifiedPlayers(
   players: Player[],
   teams: Team[]
 ): UnifiedPlayerProfile[] {
-  const teamMap = new Map(teams.map((t) => [t.id, t]));
-  const groups: Player[][] = [];
+  const n = players.length;
+  if (n === 0) return [];
 
-  for (const player of players) {
-    const existingGroup = groups.find((grp) => grp.some((member) => isSamePerson(member, player)));
-    if (existingGroup) {
-      existingGroup.push(player);
-    } else {
-      groups.push([player]);
+  const teamMap = new Map<string, Team>();
+  for (const t of teams) teamMap.set(t.id, t);
+
+  // 1. Single O(N) pass: precompute normalized identity keys once per player
+  const keys: NormalizedPlayerKeys[] = new Array(n);
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    keys[i] = extractNormalizedPlayerKeys(players[i]);
+    parent[i] = i;
+  }
+
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== root) {
+      root = parent[root];
+    }
+    let curr = x;
+    while (parent[curr] !== root) {
+      const next = parent[curr];
+      parent[curr] = root;
+      curr = next;
+    }
+    return root;
+  };
+
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) {
+      if (ra < rb) parent[rb] = ra;
+      else parent[ra] = rb;
+    }
+  };
+
+  // 2. Hash-bucketed matching (O(N) expected time)
+  const byRut = new Map<string, number>();
+  const byEmail = new Map<string, number[]>();
+  const byMat = new Map<string, number[]>();
+  const byShortName = new Map<string, number[]>();
+
+  for (let i = 0; i < n; i++) {
+    const ki = keys[i];
+
+    if (ki.rutKey) {
+      const firstIdx = byRut.get(ki.rutKey);
+      if (firstIdx !== undefined) {
+        union(i, firstIdx);
+      } else {
+        byRut.set(ki.rutKey, i);
+      }
+    }
+
+    if (ki.emailKey) {
+      const bucket = byEmail.get(ki.emailKey);
+      if (bucket) {
+        for (let b = 0; b < bucket.length; b++) {
+          if (areNormalizedKeysSamePerson(ki, keys[bucket[b]])) {
+            union(i, bucket[b]);
+            break;
+          }
+        }
+        bucket.push(i);
+      } else {
+        byEmail.set(ki.emailKey, [i]);
+      }
+    }
+
+    if (ki.matKey) {
+      const bucket = byMat.get(ki.matKey);
+      if (bucket) {
+        for (let b = 0; b < bucket.length; b++) {
+          if (areNormalizedKeysSamePerson(ki, keys[bucket[b]])) {
+            union(i, bucket[b]);
+            break;
+          }
+        }
+        bucket.push(i);
+      } else {
+        byMat.set(ki.matKey, [i]);
+      }
+    }
+
+    if (ki.shortKey && ki.shortKey.includes(' ')) {
+      const bucket = byShortName.get(ki.shortKey);
+      if (bucket) {
+        for (let b = 0; b < bucket.length; b++) {
+          if (areNormalizedKeysSamePerson(ki, keys[bucket[b]])) {
+            union(i, bucket[b]);
+          }
+        }
+        bucket.push(i);
+      } else {
+        byShortName.set(ki.shortKey, [i]);
+      }
     }
   }
 
-  return groups
-    .map((records) => {
-      // Pick the richest record as primary (prefer one with photo, RUT, maternal surname)
-      const sortedRecords = [...records].sort((a, b) => {
-        const score = (p: Player) =>
-          (p.fotografia ? 4 : 0) +
-          (normalizeRutKey(p.rut) ? 3 : 0) +
-          (p.apellidoMaterno.trim() ? 2 : 0) +
-          (p.correoInstitucional.trim() ? 1 : 0);
-        const diff = score(b) - score(a);
-        if (diff !== 0) return diff;
+  // 3. Collect connected components into groups
+  const groupIndices = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const root = find(i);
+    const grp = groupIndices.get(root);
+    if (grp) grp.push(i);
+    else groupIndices.set(root, [i]);
+  }
+
+  // 4. Build unified profiles
+  const profiles: UnifiedPlayerProfile[] = [];
+  for (const idxList of groupIndices.values()) {
+    if (idxList.length > 1) {
+      idxList.sort((ia, ib) => {
+        const a = players[ia];
+        const b = players[ib];
+        const scoreA =
+          (a.fotografia ? 4 : 0) +
+          (keys[ia].rutKey ? 3 : 0) +
+          (a.apellidoMaterno.trim() ? 2 : 0) +
+          (a.correoInstitucional.trim() ? 1 : 0);
+        const scoreB =
+          (b.fotografia ? 4 : 0) +
+          (keys[ib].rutKey ? 3 : 0) +
+          (b.apellidoMaterno.trim() ? 2 : 0) +
+          (b.correoInstitucional.trim() ? 1 : 0);
+        if (scoreB !== scoreA) return scoreB - scoreA;
         return a.disciplineId.localeCompare(b.disciplineId);
       });
+    }
 
-      const primaryRecord = sortedRecords[0];
-      const participations: PlayerParticipation[] = sortedRecords.map((p) => ({
+    const primaryIdx = idxList[0];
+    const primaryRecord = players[primaryIdx];
+    const primaryKeys = keys[primaryIdx];
+
+    const records: Player[] = new Array(idxList.length);
+    const participations: PlayerParticipation[] = new Array(idxList.length);
+    const disciplineSet = new Set<DisciplineId>();
+    const teamIdSet = new Set<string>();
+    let totalPartidosJugados = 0;
+    let esSeleccionadoUfro = false;
+
+    for (let k = 0; k < idxList.length; k++) {
+      const p = players[idxList[k]];
+      records[k] = p;
+      participations[k] = {
         player: p,
         team: teamMap.get(p.teamId),
         disciplineId: p.disciplineId,
-      }));
-
-      const disciplines = Array.from(new Set(sortedRecords.map((p) => p.disciplineId)));
-      const teamIds = Array.from(new Set(sortedRecords.map((p) => p.teamId)));
-      const totalPartidosJugados = sortedRecords.reduce(
-        (sum, p) => sum + (p.stats?.partidosJugados ?? 0),
-        0
-      );
-      const esSeleccionadoUfro = sortedRecords.some((p) => p.esSeleccionadoUfro);
-
-      const rutKey = normalizeRutKey(primaryRecord.rut);
-      const { fullKey } = normalizePlayerNameParts(primaryRecord);
-      const personKey = rutKey ? `rut:${rutKey}` : `name:${fullKey || primaryRecord.id}`;
-
-      return {
-        personKey,
-        primaryRecord,
-        records: sortedRecords,
-        participations,
-        disciplines,
-        teamIds,
-        totalPartidosJugados,
-        esSeleccionadoUfro,
       };
-    })
-    .sort((a, b) => {
-      const nameA = `${a.primaryRecord.nombre} ${a.primaryRecord.apellidoPaterno}`;
-      const nameB = `${b.primaryRecord.nombre} ${b.primaryRecord.apellidoPaterno}`;
-      return nameA.localeCompare(nameB, 'es');
+      disciplineSet.add(p.disciplineId);
+      teamIdSet.add(p.teamId);
+      totalPartidosJugados += p.stats?.partidosJugados ?? 0;
+      if (p.esSeleccionadoUfro) esSeleccionadoUfro = true;
+    }
+
+    const personKey = primaryKeys.rutKey
+      ? `rut:${primaryKeys.rutKey}`
+      : `name:${primaryKeys.fullKey || primaryRecord.id}`;
+
+    profiles.push({
+      personKey,
+      primaryRecord,
+      records,
+      participations,
+      disciplines: Array.from(disciplineSet),
+      teamIds: Array.from(teamIdSet),
+      totalPartidosJugados,
+      esSeleccionadoUfro,
     });
+  }
+
+  // Ensure unique personKeys if two distinct people share a name (e.g. different RUTs, one missing)
+  const usedKeys = new Set<string>();
+  for (const profile of profiles) {
+    if (usedKeys.has(profile.personKey)) {
+      profile.personKey = `${profile.personKey}:${profile.primaryRecord.id}`;
+    }
+    usedKeys.add(profile.personKey);
+  }
+
+  profiles.sort((a, b) => {
+    const nameA = `${a.primaryRecord.nombre} ${a.primaryRecord.apellidoPaterno}`;
+    const nameB = `${b.primaryRecord.nombre} ${b.primaryRecord.apellidoPaterno}`;
+    return ES_COLLATOR.compare(nameA, nameB);
+  });
+
+  return profiles;
 }
 
 /**
@@ -411,7 +577,17 @@ export function findPlayerParticipations(
   teams: Team[]
 ): PlayerParticipation[] {
   const teamMap = new Map(teams.map((t) => [t.id, t]));
-  const matching = allPlayers.filter((p) => isSamePerson(p, target));
+  const targetKeys = extractNormalizedPlayerKeys(target);
+  const matching: Player[] = [];
+  for (let i = 0; i < allPlayers.length; i++) {
+    const candidate = allPlayers[i];
+    if (
+      candidate.id === target.id ||
+      areNormalizedKeysSamePerson(extractNormalizedPlayerKeys(candidate), targetKeys)
+    ) {
+      matching.push(candidate);
+    }
+  }
   const list = matching.length > 0 ? matching : [target];
   return list.map((p) => ({
     player: p,
@@ -443,6 +619,18 @@ export function buildUnifiedClubs(
       groups.push([team]);
     }
   }
+
+  // Pre-index players by teamId in O(P) instead of scanning all players per club
+  const playersByTeam = new Map<string, Player[]>();
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    const list = playersByTeam.get(p.teamId);
+    if (list) list.push(p);
+    else playersByTeam.set(p.teamId, [p]);
+  }
+
+  // Pre-filter finalized matches once
+  const finalizedMatches = matches.filter((m) => m.status === 'FINALIZADO');
 
   return groups
     .map((clubTeams) => {
@@ -476,14 +664,20 @@ export function buildUnifiedClubs(
       const logrosAnteriores = logrosList.length > 0 ? logrosList.join(' · ') : undefined;
 
       // Count unique individuals across all squads of this club
-      const clubPlayers = players.filter((p) => teamIdSet.has(p.teamId));
+      const clubPlayers: Player[] = [];
+      for (const tid of teamIdSet) {
+        const roster = playersByTeam.get(tid);
+        if (roster) {
+          for (let i = 0; i < roster.length; i++) clubPlayers.push(roster[i]);
+        }
+      }
       const uniquePlayerCount = buildUnifiedPlayers(clubPlayers, sortedTeams).length;
 
       // Count total finalized matches & wins across all squads
       let totalMatchesPlayed = 0;
       let totalWins = 0;
-      for (const m of matches) {
-        if (m.status !== 'FINALIZADO') continue;
+      for (let i = 0; i < finalizedMatches.length; i++) {
+        const m = finalizedMatches[i];
         const isHome = teamIdSet.has(m.homeTeamId);
         const isAway = teamIdSet.has(m.awayTeamId);
         if (!isHome && !isAway) continue;
@@ -509,7 +703,7 @@ export function buildUnifiedClubs(
         totalWins,
       };
     })
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+    .sort((a, b) => ES_COLLATOR.compare(a.displayName, b.displayName));
 }
 
 /**

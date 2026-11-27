@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Award,
   CheckCircle2,
@@ -15,6 +15,7 @@ import { computePlayerAttendanceSummary } from '../domain/attendanceEngine';
 import {
   buildUnifiedPlayers,
   findPlayerParticipations,
+  normalizeTextToken,
 } from '../domain/identityCrossRefEngine';
 import { computePlayerSeasonPerformance } from '../domain/playerPerformanceEngine';
 import { canEditPlayerProfile } from '../domain/rbacEngine';
@@ -37,6 +38,8 @@ interface PlayersViewProps {
   onUpdatePlayer: (updated: Player) => void;
 }
 
+const PAGE_SIZE = 40;
+
 export function PlayersView({
   state,
   currentUser,
@@ -46,10 +49,12 @@ export function PlayersView({
   onUpdatePlayer,
 }: PlayersViewProps) {
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [disciplineFilter, setDisciplineFilter] = useState<'ALL' | DisciplineId>('ALL');
   const [facultyFilter, setFacultyFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<'ALL' | AcademicLevel>('ALL');
   const [onlySelectedUfro, setOnlySelectedUfro] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   // Inline edit state for authorized roles (admin, delegate of same team, or player editing self)
   const [isEditing, setIsEditing] = useState(false);
@@ -59,15 +64,69 @@ export function PlayersView({
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
 
+  // Consolidate players who compete in multiple teams/disciplines into 1 profile per person (O(N))
+  const unifiedPlayers = useMemo(
+    () => buildUnifiedPlayers(state.players, state.teams),
+    [state.players, state.teams]
+  );
+
+  // Precomputed O(1) lookup map from any playerId -> unified profile + accent-insensitive search index
+  const { profileByPlayerId, indexedProfiles, multiTeamPlayerCount } = useMemo(() => {
+    const byId = new Map<string, (typeof unifiedPlayers)[number]>();
+    let multiCount = 0;
+    const indexed = unifiedPlayers.map((profile) => {
+      if (profile.participations.length > 1) multiCount += 1;
+      const faculties = new Set<string>();
+      const levels = new Set<AcademicLevel>();
+      const searchTokens: string[] = [];
+
+      for (const part of profile.participations) {
+        const p = part.player;
+        byId.set(p.id, profile);
+        faculties.add(p.facultad);
+        levels.add(p.nivelAcademico);
+        searchTokens.push(
+          p.nombre,
+          p.apellidoPaterno,
+          p.apellidoMaterno,
+          p.rut,
+          p.carrera,
+          part.team?.nombre ?? '',
+          DISCIPLINE_MAP[p.disciplineId].nombreCorto,
+          p.numeroMatricula
+        );
+      }
+
+      return {
+        profile,
+        disciplineSet: new Set(profile.disciplines),
+        faculties,
+        levels,
+        searchText: normalizeTextToken(searchTokens.join(' ')),
+      };
+    });
+    return {
+      profileByPlayerId: byId,
+      indexedProfiles: indexed,
+      multiTeamPlayerCount: multiCount,
+    };
+  }, [unifiedPlayers]);
+
   const liveSelectedPlayer = useMemo(() => {
     if (!selectedPlayer) return null;
+    const unified = profileByPlayerId.get(selectedPlayer.id);
+    if (unified) {
+      return unified.records.find((p) => p.id === selectedPlayer.id) ?? selectedPlayer;
+    }
     return state.players.find((p) => p.id === selectedPlayer.id) ?? selectedPlayer;
-  }, [selectedPlayer, state.players]);
+  }, [selectedPlayer, profileByPlayerId, state.players]);
 
   const selectedPlayerParticipations = useMemo(() => {
     if (!liveSelectedPlayer) return [];
+    const unified = profileByPlayerId.get(liveSelectedPlayer.id);
+    if (unified) return unified.participations;
     return findPlayerParticipations(liveSelectedPlayer, state.players, state.teams);
-  }, [liveSelectedPlayer, state.players, state.teams]);
+  }, [liveSelectedPlayer, profileByPlayerId, state.players, state.teams]);
 
   const [activeParticipationId, setActiveParticipationId] = useState<string | null>(null);
   const [profileTab, setProfileTab] = useState<'ficha' | 'rendimiento'>('ficha');
@@ -86,8 +145,9 @@ export function PlayersView({
     return liveSelectedPlayer;
   }, [liveSelectedPlayer, activeParticipationId, selectedPlayerParticipations]);
 
+  // Compute historical performance chart data lazily only when the Rendimiento tab is active
   const activePerformanceSummary = useMemo(() => {
-    if (!activeParticipationRecord) return null;
+    if (!activeParticipationRecord || profileTab !== 'rendimiento') return null;
     const sportType = DISCIPLINE_MAP[activeParticipationRecord.disciplineId].sportType;
     return computePlayerSeasonPerformance(
       activeParticipationRecord,
@@ -95,7 +155,16 @@ export function PlayersView({
       sportType,
       teamMap
     );
-  }, [activeParticipationRecord, state.matches, teamMap]);
+  }, [activeParticipationRecord, profileTab, state.matches, teamMap]);
+
+  const activeAttendanceSummary = useMemo(() => {
+    if (!activeParticipationRecord || profileTab !== 'ficha') return null;
+    return computePlayerAttendanceSummary(
+      state.matches,
+      activeParticipationRecord.id,
+      activeParticipationRecord.teamId
+    );
+  }, [activeParticipationRecord, profileTab, state.matches]);
 
   useEffect(() => {
     setIsEditing(false);
@@ -103,6 +172,11 @@ export function PlayersView({
     setEditErrors([]);
     setEditSaved(null);
   }, [activeParticipationRecord?.id]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
 
   const canEditSelected = activeParticipationRecord
     ? canEditPlayerProfile(currentUser, activeParticipationRecord)
@@ -143,52 +217,48 @@ export function PlayersView({
     setEditSaved('Ficha oficial actualizada correctamente.');
   };
 
-  // Consolidate players who compete in multiple teams/disciplines into 1 profile per person
-  const unifiedPlayers = useMemo(
-    () => buildUnifiedPlayers(state.players, state.teams),
-    [state.players, state.teams]
+  const matchedProfiles = useMemo(() => {
+    const normalizedQ = normalizeTextToken(deferredQuery);
+    const terms = normalizedQ ? normalizedQ.split(' ') : [];
+    const results: (typeof unifiedPlayers)[number][] = [];
+
+    for (let i = 0; i < indexedProfiles.length; i++) {
+      const entry = indexedProfiles[i];
+      if (disciplineFilter !== 'ALL' && !entry.disciplineSet.has(disciplineFilter)) {
+        continue;
+      }
+      if (facultyFilter !== 'ALL' && !entry.faculties.has(facultyFilter)) {
+        continue;
+      }
+      if (levelFilter !== 'ALL' && !entry.levels.has(levelFilter)) {
+        continue;
+      }
+      if (onlySelectedUfro && !entry.profile.esSeleccionadoUfro) {
+        continue;
+      }
+      if (terms.length > 0) {
+        let allMatched = true;
+        for (let t = 0; t < terms.length; t++) {
+          if (!entry.searchText.includes(terms[t])) {
+            allMatched = false;
+            break;
+          }
+        }
+        if (!allMatched) continue;
+      }
+      results.push(entry.profile);
+    }
+
+    return results;
+  }, [indexedProfiles, deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
+
+  const filteredProfiles = useMemo(
+    () => matchedProfiles.slice(0, visibleCount),
+    [matchedProfiles, visibleCount]
   );
 
-  const multiTeamPlayerCount = useMemo(
-    () => unifiedPlayers.filter((u) => u.participations.length > 1).length,
-    [unifiedPlayers]
-  );
-
-  const filteredProfiles = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return unifiedPlayers
-      .filter((profile) => {
-        if (disciplineFilter !== 'ALL' && !profile.disciplines.includes(disciplineFilter)) {
-          return false;
-        }
-        if (
-          facultyFilter !== 'ALL' &&
-          !profile.records.some((r) => r.facultad === facultyFilter)
-        ) {
-          return false;
-        }
-        if (
-          levelFilter !== 'ALL' &&
-          !profile.records.some((r) => r.nivelAcademico === levelFilter)
-        ) {
-          return false;
-        }
-        if (onlySelectedUfro && !profile.esSeleccionadoUfro) return false;
-        if (!q) return true;
-        return profile.participations.some(({ player, team }) => {
-          const fullName = `${player.nombre} ${player.apellidoPaterno} ${player.apellidoMaterno}`.toLowerCase();
-          return (
-            fullName.includes(q) ||
-            player.rut.toLowerCase().includes(q) ||
-            player.carrera.toLowerCase().includes(q) ||
-            (team?.nombre ?? '').toLowerCase().includes(q) ||
-            DISCIPLINE_MAP[player.disciplineId].nombreCorto.toLowerCase().includes(q) ||
-            player.numeroMatricula.toLowerCase().includes(q)
-          );
-        });
-      })
-      .slice(0, 60);
-  }, [unifiedPlayers, query, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
+  const hasMoreProfiles = filteredProfiles.length < matchedProfiles.length;
+  const remainingProfilesCount = matchedProfiles.length - filteredProfiles.length;
 
   const getInitials = (p: Player) =>
     `${p.nombre[0] ?? ''}${p.apellidoPaterno[0] ?? ''}`.toUpperCase();
@@ -289,7 +359,10 @@ export function PlayersView({
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 mb-4">
           <span className="tabular-nums">
-            Mostrando {filteredProfiles.length} de {unifiedPlayers.length} perfiles únicos
+            Mostrando {filteredProfiles.length} de {matchedProfiles.length} perfiles
+            {matchedProfiles.length !== unifiedPlayers.length
+              ? ` (${unifiedPlayers.length} totales)`
+              : ' únicos'}
             {multiTeamPlayerCount > 0 && (
               <span className="text-[#707ef9] font-medium">
                 {' '}· {multiTeamPlayerCount} participan en múltiples equipos/disciplinas
@@ -370,6 +443,8 @@ export function PlayersView({
                             <img
                               src={primary.fotografia}
                               alt={`${primary.nombre} ${primary.apellidoPaterno}`}
+                              loading="lazy"
+                              decoding="async"
                               className="w-9 h-9 object-cover border border-neutral-200 shrink-0"
                               referrerPolicy="no-referrer"
                             />
@@ -456,6 +531,21 @@ export function PlayersView({
                 })}
               </tbody>
             </table>
+
+            {hasMoreProfiles && (
+              <div className="bg-[#f5f6f8] border-t border-neutral-200 px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-neutral-600 tabular-nums">
+                  Mostrando {filteredProfiles.length} de {matchedProfiles.length} jugadores
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                  className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                >
+                  Mostrar {Math.min(PAGE_SIZE, remainingProfilesCount)} más ({remainingProfilesCount} restantes)
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1027,39 +1117,32 @@ export function PlayersView({
                     </>
                   )}
                 </div>
-                {(() => {
-                  const attSummary = computePlayerAttendanceSummary(
-                    state.matches,
-                    activeParticipationRecord.id,
-                    activeParticipationRecord.teamId
-                  );
-                  if (attSummary.registeredTeamMatches === 0 && attSummary.omittedTeamMatches === 0) {
-                    return null;
-                  }
-                  return (
+                {activeAttendanceSummary &&
+                  (activeAttendanceSummary.registeredTeamMatches > 0 ||
+                    activeAttendanceSummary.omittedTeamMatches > 0) && (
                     <div className="mt-3 bg-white border border-neutral-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                       <span className="flex items-center gap-2 text-[#0d0d0d] font-medium">
                         <ClipboardCheck className="w-4 h-4 text-[#707ef9] shrink-0" />
                         <span>
                           Asistencia arbitral verificada:{' '}
                           <strong className="tabular-nums">
-                            {attSummary.attendedMatches} de {attSummary.registeredTeamMatches}
+                            {activeAttendanceSummary.attendedMatches} de{' '}
+                            {activeAttendanceSummary.registeredTeamMatches}
                           </strong>{' '}
                           partido(s) con registro
-                          {attSummary.attendanceRate !== null
-                            ? ` (${attSummary.attendanceRate}%)`
+                          {activeAttendanceSummary.attendanceRate !== null
+                            ? ` (${activeAttendanceSummary.attendanceRate}%)`
                             : ''}
                         </span>
                       </span>
-                      {attSummary.omittedTeamMatches > 0 && (
+                      {activeAttendanceSummary.omittedTeamMatches > 0 && (
                         <span className="text-[11px] text-neutral-500 tabular-nums">
-                          {attSummary.omittedTeamMatches} partido(s) con asistencia omitida (no
-                          afectan el porcentaje)
+                          {activeAttendanceSummary.omittedTeamMatches} partido(s) con asistencia
+                          omitida (no afectan el porcentaje)
                         </span>
                       )}
                     </div>
-                  );
-                })()}
+                  )}
               </div>
                 </>
               )}
