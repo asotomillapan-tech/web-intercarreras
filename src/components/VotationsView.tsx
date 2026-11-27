@@ -43,6 +43,7 @@ import type {
   TournamentState,
 } from '../types/tournament';
 import { MatchFilterBar } from './MatchFilterBar';
+import { RevealSection, SectionKicker } from './MotionPrimitives';
 import { TeamCrest } from './TeamCrest';
 
 type VotationTab = 'potm' | 'mvp' | 'posiciones' | 'toty';
@@ -107,7 +108,7 @@ function VotingPlayerAutocompleteBar({
 
   return (
     <div className="relative">
-      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
       <input
         id={id}
         type="text"
@@ -119,7 +120,6 @@ function VotingPlayerAutocompleteBar({
         value={value}
         onFocus={() => setFocused(true)}
         onBlur={() => {
-          // Delay close briefly so button click registers before unmount
           window.setTimeout(() => setFocused(false), 160);
         }}
         onChange={(e) => {
@@ -127,7 +127,7 @@ function VotingPlayerAutocompleteBar({
           setFocused(true);
         }}
         placeholder={placeholder}
-        className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+        className="w-full pl-10 pr-8 py-2.5 rounded-xl text-xs sm:text-sm border border-white/[0.1] bg-[#111117] text-zinc-100 placeholder:text-zinc-500 focus:border-[#707ef9] focus:outline-none"
       />
       {value && (
         <button
@@ -135,7 +135,7 @@ function VotingPlayerAutocompleteBar({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onChange('')}
           aria-label="Limpiar búsqueda de jugador"
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white cursor-pointer"
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -146,10 +146,10 @@ function VotingPlayerAutocompleteBar({
           id={`${id}-listbox`}
           role="listbox"
           aria-label="Sugerencias de jugadores"
-          className="absolute left-0 right-0 top-full mt-1 z-30 border border-neutral-300 bg-white shadow-xl max-h-64 overflow-y-auto divide-y divide-neutral-100"
+          className="absolute left-0 right-0 top-full mt-1.5 z-30 rounded-2xl border border-white/[0.12] bg-[#0e0e14] shadow-2xl max-h-64 overflow-y-auto divide-y divide-white/[0.06]"
         >
           {visibleSuggestions.length === 0 ? (
-            <p className="px-3 py-3 text-xs text-neutral-500 text-center">
+            <p className="px-3 py-3 text-xs text-zinc-500 text-center">
               Sin coincidencias para &ldquo;{value}&rdquo;.
             </p>
           ) : (
@@ -165,10 +165,10 @@ function VotingPlayerAutocompleteBar({
                   onSelectOption(opt);
                   setFocused(false);
                 }}
-                className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors ${
+                className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-2 transition-colors ${
                   opt.disabled
-                    ? 'bg-neutral-50 opacity-50 cursor-not-allowed'
-                    : 'hover:bg-[#f5f6f8] cursor-pointer'
+                    ? 'opacity-40 cursor-not-allowed'
+                    : 'hover:bg-white/[0.04] cursor-pointer'
                 }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -179,11 +179,11 @@ function VotingPlayerAutocompleteBar({
                     size="xs"
                   />
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-[#0d0d0d] truncate">{opt.label}</p>
-                    <p className="text-[11px] text-neutral-500 truncate">{opt.subtitle}</p>
+                    <p className="text-xs font-medium text-white truncate">{opt.label}</p>
+                    <p className="text-[11px] text-zinc-500 truncate">{opt.subtitle}</p>
                   </div>
                 </div>
-                <span className="text-[10px] font-mono uppercase text-[#707ef9] font-semibold shrink-0">
+                <span className="text-[11px] font-medium text-[#a5b0ff] shrink-0">
                   {opt.badge ?? actionHint}
                 </span>
               </button>
@@ -228,18 +228,15 @@ function TotyPlayerSearchPicker({
     [all, selectedPlayerId]
   );
   const selectedTeam = selectedPlayer ? teamMap.get(selectedPlayer.teamId) : undefined;
-
   const matchedIdSet = useMemo(() => new Set(matched.map((p) => p.id)), [matched]);
 
   const results = useMemo(() => {
     const q = normalizeSearchText(query);
     if (!q) {
-      // Show specialists first, then rest of discipline
       const rest = all.filter((p) => !matchedIdSet.has(p.id));
       return [...matched, ...rest].slice(0, 20);
     }
     const filtered = all.filter((p) => playerMatchesQuery(p, teamMap.get(p.teamId), q));
-    // Rank position specialists first among search hits
     return filtered.sort((a, b) => {
       const aSpec = matchedIdSet.has(a.id) ? 0 : 1;
       const bSpec = matchedIdSet.has(b.id) ? 0 : 1;
@@ -249,13 +246,13 @@ function TotyPlayerSearchPicker({
 
   return (
     <div className="space-y-1.5 relative">
-      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-[#0d0d0d]">
-        <label htmlFor={`toty-search-${posKey}`} className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between text-xs text-zinc-200">
+        <label htmlFor={`toty-search-${posKey}`} className="flex items-center gap-2 font-medium">
           <span
-            className={`font-mono text-[10px] px-1.5 py-0.5 ${
+            className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${
               highlightAccent
                 ? 'bg-[#707ef9] text-white'
-                : 'bg-[#0d0d0d] text-white'
+                : 'bg-white/[0.08] text-zinc-200'
             }`}
           >
             {shortCode}
@@ -263,14 +260,12 @@ function TotyPlayerSearchPicker({
           <span>{label}</span>
         </label>
         {matched.length > 0 && (
-          <span className="font-normal text-[11px] text-neutral-500">
-            {matched.length} en posición
-          </span>
+          <span className="text-[11px] text-zinc-500">{matched.length} en posición</span>
         )}
       </div>
 
       {selectedPlayer && !open ? (
-        <div className="border border-[#707ef9] bg-[#707ef9]/5 px-3 py-2 flex items-center justify-between gap-2">
+        <div className="rounded-xl border border-[#707ef9]/45 bg-[#707ef9]/10 px-3 py-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             <TeamCrest
               escudo={selectedTeam?.escudo}
@@ -279,10 +274,10 @@ function TotyPlayerSearchPicker({
               size="xs"
             />
             <div className="min-w-0">
-              <p className="text-xs font-bold text-[#0d0d0d] truncate">
+              <p className="text-xs font-medium text-white truncate">
                 #{selectedPlayer.dorsal} {selectedPlayer.nombre} {selectedPlayer.apellidoPaterno}
               </p>
-              <p className="text-[11px] text-neutral-500 truncate">
+              <p className="text-[11px] text-zinc-400 truncate">
                 {selectedTeam?.nombre ?? selectedPlayer.teamId} · {selectedPlayer.posicion}
               </p>
             </div>
@@ -294,7 +289,7 @@ function TotyPlayerSearchPicker({
                 setQuery('');
                 setOpen(true);
               }}
-              className="text-[11px] font-medium text-[#707ef9] hover:underline cursor-pointer"
+              className="text-[11px] font-medium text-[#a5b0ff] hover:text-white cursor-pointer"
             >
               Cambiar
             </button>
@@ -305,7 +300,7 @@ function TotyPlayerSearchPicker({
                 setQuery('');
               }}
               aria-label={`Quitar selección de ${label}`}
-              className="p-1 text-neutral-400 hover:text-red-600 cursor-pointer"
+              className="p-1 text-zinc-400 hover:text-red-400 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -314,7 +309,7 @@ function TotyPlayerSearchPicker({
       ) : (
         <div className="space-y-1">
           <div className="relative">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               id={`toty-search-${posKey}`}
               type="text"
@@ -324,8 +319,8 @@ function TotyPlayerSearchPicker({
                 setQuery(e.target.value);
                 setOpen(true);
               }}
-              placeholder={`Buscar jugador para ${label} (nombre, dorsal o equipo)...`}
-              className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm border border-neutral-300 bg-white focus:border-[#707ef9] focus:outline-none"
+              placeholder={`Buscar para ${label}...`}
+              className="w-full pl-9 pr-8 py-2 rounded-xl text-xs sm:text-sm border border-white/[0.1] bg-[#111117] text-zinc-100 placeholder:text-zinc-500 focus:border-[#707ef9] focus:outline-none"
             />
             {(query || open) && (
               <button
@@ -335,7 +330,7 @@ function TotyPlayerSearchPicker({
                   setOpen(false);
                 }}
                 aria-label="Cerrar búsqueda"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-[#0d0d0d] cursor-pointer"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -346,11 +341,11 @@ function TotyPlayerSearchPicker({
             <div
               role="listbox"
               aria-label={`Opciones de jugadores para ${label}`}
-              className="border border-neutral-300 bg-white max-h-52 overflow-y-auto divide-y divide-neutral-100 shadow-lg"
+              className="rounded-xl border border-white/[0.12] bg-[#0e0e14] max-h-52 overflow-y-auto divide-y divide-white/[0.06] shadow-2xl"
             >
               {results.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-neutral-500 text-center">
-                  Sin jugadores que coincidan con &ldquo;{query}&rdquo;.
+                <p className="px-3 py-3 text-xs text-zinc-500 text-center">
+                  Sin jugadores para &ldquo;{query}&rdquo;.
                 </p>
               ) : (
                 results.map((p) => {
@@ -375,10 +370,10 @@ function TotyPlayerSearchPicker({
                       }}
                       className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors ${
                         isUsedElsewhere
-                          ? 'bg-neutral-50 opacity-50 cursor-not-allowed'
+                          ? 'opacity-40 cursor-not-allowed'
                           : isCurrent
-                          ? 'bg-[#707ef9]/10 cursor-pointer'
-                          : 'hover:bg-[#f5f6f8] cursor-pointer'
+                          ? 'bg-[#707ef9]/15 cursor-pointer'
+                          : 'hover:bg-white/[0.04] cursor-pointer'
                       }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -389,22 +384,18 @@ function TotyPlayerSearchPicker({
                           size="xs"
                         />
                         <div className="min-w-0">
-                          <p className="text-xs font-bold text-[#0d0d0d] truncate">
+                          <p className="text-xs font-medium text-white truncate">
                             #{p.dorsal} {p.nombre} {p.apellidoPaterno}
                           </p>
-                          <p className="text-[11px] text-neutral-500 truncate">
+                          <p className="text-[11px] text-zinc-500 truncate">
                             {tm?.nombre ?? p.teamId} · {p.posicion}
                           </p>
                         </div>
                       </div>
                       {isUsedElsewhere ? (
-                        <span className="text-[10px] font-mono uppercase text-neutral-500 font-semibold shrink-0">
-                          Ya en tu TOTY
-                        </span>
+                        <span className="text-[10px] text-zinc-500 shrink-0">En tu TOTY</span>
                       ) : isSpec ? (
-                        <span className="text-[10px] font-mono uppercase text-[#707ef9] font-semibold shrink-0">
-                          Posición
-                        </span>
+                        <span className="text-[10px] text-[#a5b0ff] shrink-0">Posición</span>
                       ) : null}
                     </button>
                   );
@@ -478,7 +469,6 @@ export function VotationsView({
     [discMeta.sportType, activeTotyConfig]
   );
 
-  // Keep selectedPositionKey & POTM filters valid when switching discipline/sport
   useEffect(() => {
     if (!sportPositions.some((p) => p.key === selectedPositionKey)) {
       setSelectedPositionKey(sportPositions[0]?.key ?? '');
@@ -524,7 +514,6 @@ export function VotationsView({
     [sortedAllMatches, potmDisciplineFilter, potmGroupFilter, potmStageFilter]
   );
 
-  // Sync user's existing TOTY ballot into local draft when discipline or user changes
   const existingTotyBallot = useMemo(() => {
     if (!currentUser) return undefined;
     return state.totyBallots.find(
@@ -544,7 +533,6 @@ export function VotationsView({
     );
   }, [existingTotyBallot, selectedDiscipline, discMeta.sportType, activeTotyConfig]);
 
-  // --- POTM Matches Categorization ---
   const potmBuckets = useMemo(() => {
     const openNow: Match[] = [];
     const finalized: Match[] = [];
@@ -561,7 +549,6 @@ export function VotationsView({
     return { openNow, finalized, upcoming };
   }, [filteredPotmMatches]);
 
-  // --- Championship MVP Aggregation ---
   const nomineeIds = state.awardNominees[selectedDiscipline] ?? [];
   const championshipMvpSummary = useMemo(
     () =>
@@ -607,7 +594,6 @@ export function VotationsView({
     );
   }, [state.championshipMvpVotes, selectedDiscipline, currentUser]);
 
-  // --- Position Awards Aggregation ---
   const positionAwardStandings = useMemo(
     () =>
       aggregatePositionAwardVotes(
@@ -642,8 +628,6 @@ export function VotationsView({
   );
 
   const positionCandidatesBase = useMemo(() => {
-    // When user types a manual search query, search across ALL discipline players (ranking position matches first)
-    // so they immediately find any player they look up by name/dorsal/team!
     if (positionPlayerSearch.trim().length > 0) {
       const matchedIds = new Set(eligibleForActivePosition.matched.map((p) => p.id));
       return [...eligibleForActivePosition.all].sort((a, b) => {
@@ -676,7 +660,6 @@ export function VotationsView({
     );
   }, [state.positionAwardVotes, selectedDiscipline, activePositionStanding, currentUser]);
 
-  // --- Community TOTY ---
   const communityToty = useMemo(
     () =>
       computeCommunityToty(
@@ -709,7 +692,7 @@ export function VotationsView({
     try {
       await onVoteChampionshipMvp(selectedDiscipline, player);
       setFeedbackMsg(
-        `Tu voto al MVP del Campeonato en ${discMeta.nombreCorto} fue registrado por ${player.nombre} ${player.apellidoPaterno}.`
+        `Voto al MVP registrado por ${player.nombre} ${player.apellidoPaterno}.`
       );
     } finally {
       setSavingKey(null);
@@ -732,7 +715,7 @@ export function VotationsView({
         player
       );
       setFeedbackMsg(
-        `Voto registrado para ${activePositionStanding.position.awardTitle}: ${player.nombre} ${player.apellidoPaterno}.`
+        `Voto registrado en ${activePositionStanding.position.awardTitle}: ${player.nombre} ${player.apellidoPaterno}.`
       );
     } finally {
       setSavingKey(null);
@@ -774,7 +757,6 @@ export function VotationsView({
         });
       }
     }
-    // Render top-to-bottom: Attack/Net (highest row) down to Goal/Base/Libero (row 0)
     return Array.from(rowMap.values()).sort((a, b) => b.row - a.row);
   }, [communityToty.slots]);
 
@@ -798,14 +780,13 @@ export function VotationsView({
     try {
       await onSubmitTotyBallot(selectedDiscipline, cleanSelections);
       setFeedbackMsg(
-        `Tu ${totyFormation.formationName} (${selectedEntries.length}/${totyFormation.slots.length}) para ${discMeta.nombreCorto} quedó guardado y sumado al recuento oficial.`
+        `Tu ${totyFormation.formationName} (${selectedEntries.length}/${totyFormation.slots.length}) fue guardado.`
       );
     } finally {
       setSavingKey(null);
     }
   };
 
-  // Real-time autocomplete options for Position Awards
   const positionAutocompleteOptions = useMemo<AutocompletePlayerOption[]>(
     () =>
       positionCandidatesToDisplay.map((pl) => {
@@ -823,7 +804,6 @@ export function VotationsView({
     [positionCandidatesToDisplay, teamMap, userPositionVote]
   );
 
-  // Real-time autocomplete options & quick assignment for TOTY
   const totyFilteredQuickPlayers = useMemo(() => {
     if (!totyQuickSearch.trim()) return disciplinePlayers;
     return disciplinePlayers.filter((pl) =>
@@ -840,7 +820,7 @@ export function VotationsView({
           id: pl.id,
           label: `#${pl.dorsal} ${pl.nombre} ${pl.apellidoPaterno}`,
           subtitle: `${tm?.nombre ?? pl.teamId} · ${pl.posicion}`,
-          badge: alreadyInToty ? 'En tu TOTY' : 'Asignar',
+          badge: alreadyInToty ? 'En TOTY' : 'Asignar',
           escudo: tm?.escudo,
           sigla: tm?.sigla ?? 'EQ',
           teamName: tm?.nombre ?? pl.teamId,
@@ -854,7 +834,6 @@ export function VotationsView({
     const player = disciplinePlayers.find((p) => p.id === playerId);
     if (!player || totyDraftPlayerIdSet.has(playerId)) return;
 
-    // 1. Prefer an empty slot whose position matches this player
     const compatibleEmpty = totyFormation.slots.find((slot) => {
       if (totyDraft[slot.slotKey]) return false;
       const { matched } = getEligiblePlayersForPosition(
@@ -864,72 +843,63 @@ export function VotationsView({
       );
       return matched.length > 0;
     });
-    // 2. Fallback to first empty slot in the formation
     const fallbackEmpty = totyFormation.slots.find((slot) => !totyDraft[slot.slotKey]);
     const targetSlot = compatibleEmpty ?? fallbackEmpty;
 
     if (!targetSlot) {
-      setFeedbackMsg(
-        'Tu formación TOTY ya está completa. Quita algún jugador de un puesto para asignar otro.'
-      );
+      setFeedbackMsg('Tu formación TOTY está completa. Quita un jugador para asignar otro.');
       return;
     }
 
     setTotyDraft((prev) => ({ ...prev, [targetSlot.slotKey]: player.id }));
     setTotyBoardMode('draft');
     setTotyQuickSearch('');
-    setFeedbackMsg(
-      `${player.nombre} ${player.apellidoPaterno} asignado a ${targetSlot.label} en tu papeleta TOTY.`
-    );
+    setFeedbackMsg(`${player.nombre} ${player.apellidoPaterno} asignado a ${targetSlot.label}.`);
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f6f8] pb-20">
-      {/* Carbon Editorial Header */}
-      <section className="bg-[#0d0d0d] text-white border-b border-white/10">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+    <div className="min-h-[80vh] bg-[#050507] text-zinc-100 pb-20">
+      {/* Obsidian Editorial Header */}
+      <section className="border-b border-white/[0.08]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-7">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-[#707ef9] font-medium">
-                Premios Oficiales de la Comunidad · Temporada {state.temporada}
-              </p>
-              <h1 className="font-display text-4xl sm:text-5xl font-bold uppercase tracking-tight mt-2">
-                Centro de Votaciones UFRO
+              <SectionKicker index="01" label={`Premios Comunidad · ${state.temporada}`} />
+              <h1 className="text-4xl sm:text-5xl font-medium tracking-[-0.035em] text-white mt-4">
+                Centro de <span className="font-editorial text-[#c8ceff]">votaciones</span>
               </h1>
-              <p className="text-sm text-neutral-300 mt-2 max-w-2xl">
-                Elige al <strong>Player of The Match (POTM)</strong> en cada encuentro, vota entre
-                los 5 nominados al <strong>MVP del Campeonato</strong>, premia a los mejores por
-                posición según deporte y construye el <strong>TOTY oficial</strong>.
+              <p className="text-sm text-zinc-400 mt-3 max-w-xl">
+                Elige al POTM de cada partido, vota al MVP del campeonato y arma el equipo ideal.
               </p>
             </div>
 
             {!currentUser ? (
-              <div className="bg-white/5 border border-white/15 px-4 py-3 flex items-center justify-between gap-4">
-                <div className="text-xs text-neutral-300">
-                  <p className="font-semibold text-white">Votación verificada por cuenta</p>
-                  <p>Inicia sesión con Google para emitir o actualizar tus votos.</p>
+              <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] px-4 py-3 flex items-center justify-between gap-4">
+                <div className="text-xs text-zinc-400">
+                  <p className="font-medium text-white">Votación verificada</p>
+                  <p>Ingresa con Google para votar.</p>
                 </div>
                 <button
                   type="button"
                   onClick={onOpenAuth}
-                  className="px-3.5 py-2 bg-[#707ef9] hover:bg-white hover:text-[#0d0d0d] text-white text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer"
                 >
                   Ingresar
                 </button>
               </div>
             ) : (
-              <div className="bg-white/5 border border-white/15 px-4 py-3 flex items-center gap-3 text-xs">
+              <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] px-4 py-3 flex items-center gap-3 text-xs">
                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
-                  <p className="font-semibold text-white">{currentUser.displayName}</p>
-                  <p className="text-neutral-400">Habilitado para votar en todas las categorías</p>
+                  <p className="font-medium text-white">{currentUser.displayName}</p>
+                  <p className="text-zinc-500">Habilitado para votar</p>
                 </div>
               </div>
             )}
           </div>
 
           {/* Discipline Switcher */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 border-t border-white/10 pt-5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-white/[0.08] pt-5">
             {DISCIPLINES.map((d) => {
               const active = selectedDiscipline === d.id;
               return (
@@ -937,10 +907,10 @@ export function VotationsView({
                   key={d.id}
                   type="button"
                   onClick={() => onSelectDiscipline(d.id)}
-                  className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer border ${
                     active
-                      ? 'bg-[#707ef9] text-white'
-                      : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
+                      ? 'bg-[#707ef9] text-white border-[#707ef9]'
+                      : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white hover:bg-white/[0.07]'
                   }`}
                 >
                   {d.nombreCorto}
@@ -950,31 +920,31 @@ export function VotationsView({
           </div>
 
           {/* 4 Sub-tabs */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pt-2">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {(
               [
                 {
                   id: 'potm',
-                  label: 'POTM por Partido',
-                  sub: 'Player of The Match',
+                  label: 'POTM',
+                  sub: 'Jugador del partido',
                   icon: Star,
                 },
                 {
                   id: 'mvp',
-                  label: 'MVP del Campeonato',
-                  sub: '5 Nominados Oficiales',
+                  label: 'MVP Torneo',
+                  sub: '5 nominados oficiales',
                   icon: Trophy,
                 },
                 {
                   id: 'posiciones',
-                  label: 'Premios por Posición',
-                  sub: `${sportPositions.length} categorías · ${discMeta.nombreCorto}`,
+                  label: 'Por posición',
+                  sub: `${sportPositions.length} categorías`,
                   icon: Award,
                 },
                 {
                   id: 'toty',
-                  label: 'Equipo Ideal (TOTY)',
-                  sub: `${communityToty.totalBallots} votos recibidos`,
+                  label: 'Equipo Ideal',
+                  sub: `${communityToty.totalBallots} papeletas`,
                   icon: Crown,
                 },
               ] as const
@@ -989,19 +959,17 @@ export function VotationsView({
                     setActiveTab(tab.id);
                     setFeedbackMsg(null);
                   }}
-                  className={`text-left p-4 border transition-colors cursor-pointer ${
+                  className={`text-left p-4 rounded-2xl border transition-all cursor-pointer ${
                     isActive
-                      ? 'bg-white text-[#0d0d0d] border-white'
-                      : 'bg-white/5 text-white border-white/10 hover:bg-white/10'
+                      ? 'bg-white text-[#050507] border-white'
+                      : 'bg-[#0c0c10] text-white border-white/[0.08] hover:border-white/[0.18]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-display text-lg font-bold uppercase tracking-wide">
-                      {tab.label}
-                    </span>
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-[#707ef9]' : 'text-neutral-400'}`} />
+                    <span className="text-base font-medium tracking-[-0.02em]">{tab.label}</span>
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-[#707ef9]' : 'text-zinc-500'}`} />
                   </div>
-                  <p className={`text-xs mt-1 ${isActive ? 'text-neutral-600' : 'text-neutral-400'}`}>
+                  <p className={`text-xs mt-1 ${isActive ? 'text-zinc-600' : 'text-zinc-500'}`}>
                     {tab.sub}
                   </p>
                 </button>
@@ -1011,17 +979,15 @@ export function VotationsView({
         </div>
       </section>
 
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-6">
+      <RevealSection className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-6">
         {feedbackMsg && (
-          <div className="bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/25 px-4 py-3 text-xs sm:text-sm text-emerald-200 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{feedbackMsg}</span>
           </div>
         )}
 
-        {/* ================================================================
-            TAB 1: POTM POR PARTIDO (Player of The Match)
-           ================================================================ */}
+        {/* TAB 1: POTM */}
         {activeTab === 'potm' && (
           <div className="space-y-8">
             <MatchFilterBar
@@ -1054,30 +1020,24 @@ export function VotationsView({
 
             {/* Active Voting Window */}
             <section className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 pb-3">
-                <div>
-                  <h2 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-                    Votación POTM Abierta Ahora
-                  </h2>
-                  <p className="text-xs text-neutral-600">
-                    Disponible durante la hora programada de cada encuentro en{' '}
-                    {potmDisciplineFilter === 'ALL' ? 'todas las disciplinas' : discMeta.nombre}.
-                  </p>
-                </div>
-                <span className="text-xs font-mono text-[#707ef9] font-semibold">
-                  {potmBuckets.openNow.length} partido(s) en ventana activa
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] pb-3">
+                <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.02em] text-white">
+                  Votación <span className="font-editorial text-[#c8ceff]">abierta</span>
+                </h2>
+                <span className="text-xs font-mono text-[#a5b0ff]">
+                  {potmBuckets.openNow.length} activos
                 </span>
               </div>
 
               {potmBuckets.openNow.length === 0 ? (
-                <div className="bg-white border border-neutral-200 p-6 text-sm text-neutral-600 flex items-center gap-3">
-                  <Clock className="w-5 h-5 text-neutral-400 shrink-0" />
+                <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-6 text-xs sm:text-sm text-zinc-400 flex items-center gap-3">
+                  <Clock className="w-4 h-4 text-zinc-500 shrink-0" />
                   <span>
-                    No hay encuentros en horario de votación POTM activa en este momento para{' '}
-                    <strong>
+                    Sin partidos en ventana activa para{' '}
+                    <strong className="text-zinc-200 font-medium">
                       {potmDisciplineFilter === 'ALL' ? 'todas las disciplinas' : discMeta.nombre}
                     </strong>
-                    . Revisa los partidos finalizados o próximos a disputarse abajo.
+                    .
                   </span>
                 </div>
               ) : (
@@ -1093,11 +1053,11 @@ export function VotationsView({
                     return (
                       <div
                         key={m.id}
-                        className="bg-white border border-[#707ef9] p-5 flex flex-col justify-between gap-4"
+                        className="rounded-3xl bg-[#0c0c10] border border-[#707ef9]/40 p-5 flex flex-col justify-between gap-4"
                       >
-                        <div className="flex items-center justify-between text-xs text-neutral-500">
-                          <span className="font-semibold text-[#707ef9] uppercase tracking-wider">
-                            POTM Abierto · {m.fecha} {m.hora}
+                        <div className="flex items-center justify-between text-xs text-zinc-500">
+                          <span className="font-medium text-[#a5b0ff]">
+                            Abierto · {m.fecha} {m.hora}
                           </span>
                           <span>{m.fase !== 'Grupos' ? m.fase : m.groupName}</span>
                         </div>
@@ -1110,13 +1070,13 @@ export function VotationsView({
                               nombre={home?.nombre ?? m.homeTeamId}
                               size="sm"
                             />
-                            <span className="font-display text-lg font-bold uppercase truncate">
+                            <span className="text-base font-medium text-white truncate">
                               {home?.nombre ?? m.homeTeamId}
                             </span>
                           </div>
-                          <span className="text-xs font-mono text-neutral-400 shrink-0">VS</span>
+                          <span className="font-editorial text-sm text-zinc-500 shrink-0">vs</span>
                           <div className="flex items-center gap-2.5 min-w-0 justify-end">
-                            <span className="font-display text-lg font-bold uppercase truncate text-right">
+                            <span className="text-base font-medium text-white truncate text-right">
                               {away?.nombre ?? m.awayTeamId}
                             </span>
                             <TeamCrest
@@ -1128,18 +1088,18 @@ export function VotationsView({
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-3">
-                          <span className="text-xs text-neutral-600">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-3">
+                          <span className="text-xs text-zinc-400">
                             {myVote
-                              ? `Tu voto POTM: ${myVote.playerName}`
-                              : `${standings.totalVotes} voto(s) acumulados`}
+                              ? `Tu voto: ${myVote.playerName}`
+                              : `${standings.totalVotes} voto(s)`}
                           </span>
                           <button
                             type="button"
                             onClick={() => onOpenMatchMvp(m)}
-                            className="px-4 py-2 bg-[#707ef9] hover:bg-[#0d0d0d] text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                            className="px-4 py-2 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] text-white text-xs font-medium transition-colors cursor-pointer"
                           >
-                            {myVote ? 'Cambiar voto POTM' : 'Votar Player of The Match'}
+                            {myVote ? 'Cambiar voto' : 'Votar POTM'}
                           </button>
                         </div>
                       </div>
@@ -1149,20 +1109,20 @@ export function VotationsView({
               )}
             </section>
 
-            {/* Finalized Matches with Official POTM Winner */}
+            {/* Finalized Matches */}
             <section className="space-y-4">
-              <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
-                <h2 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-                  Ganadores POTM — Partidos Finalizados
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.02em] text-white">
+                  Ganadores <span className="font-editorial text-[#c8ceff]">POTM</span>
                 </h2>
-                <span className="text-xs font-mono text-neutral-500">
-                  {potmBuckets.finalized.length} encuentros
+                <span className="text-xs font-mono text-zinc-500">
+                  {potmBuckets.finalized.length} finalizados
                 </span>
               </div>
 
               {potmBuckets.finalized.length === 0 ? (
-                <div className="bg-white border border-neutral-200 p-6 text-sm text-neutral-500">
-                  Aún no hay encuentros finalizados en {discMeta.nombre}.
+                <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-6 text-xs text-zinc-500">
+                  Sin encuentros finalizados en {discMeta.nombre}.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1175,14 +1135,14 @@ export function VotationsView({
                     return (
                       <div
                         key={m.id}
-                        className="bg-white border border-neutral-200 p-4 flex flex-col justify-between gap-4"
+                        className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] hover:border-white/[0.16] p-5 flex flex-col justify-between gap-4 transition-colors"
                       >
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between text-[11px] text-neutral-500 font-mono">
+                        <div className="space-y-3.5">
+                          <div className="flex items-center justify-between text-[11px] text-zinc-500 font-mono">
                             <span>
                               {m.fecha} · {m.fase !== 'Grupos' ? m.fase : m.groupName}
                             </span>
-                            <span>FINAL</span>
+                            <span className="text-emerald-400">FINAL</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
@@ -1192,15 +1152,15 @@ export function VotationsView({
                                 nombre={home?.nombre ?? m.homeTeamId}
                                 size="xs"
                               />
-                              <span className="text-sm font-semibold truncate">
+                              <span className="text-sm font-medium text-white truncate">
                                 {home?.sigla ?? m.homeTeamId}
                               </span>
                             </div>
-                            <span className="font-display text-xl font-bold tabular-nums text-[#0d0d0d]">
+                            <span className="text-xl font-medium tabular-nums text-white">
                               {m.homeScore} — {m.awayScore}
                             </span>
                             <div className="flex items-center gap-2 min-w-0 justify-end">
-                              <span className="text-sm font-semibold truncate">
+                              <span className="text-sm font-medium text-white truncate">
                                 {away?.sigla ?? m.awayTeamId}
                               </span>
                               <TeamCrest
@@ -1212,23 +1172,19 @@ export function VotationsView({
                             </div>
                           </div>
 
-                          <div className="bg-[#f5f6f8] border border-neutral-200/80 p-3">
-                            <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold">
-                              Player of The Match (POTM)
-                            </p>
+                          <div className="rounded-2xl bg-[#111117] border border-white/[0.06] p-3">
+                            <p className="text-[11px] text-zinc-500">POTM</p>
                             {winner ? (
                               <div className="flex items-center justify-between gap-2 mt-1">
-                                <p className="text-sm font-bold text-[#0d0d0d] truncate">
+                                <p className="text-sm font-medium text-white truncate">
                                   {winner.playerName}
                                 </p>
-                                <span className="text-xs font-mono text-[#707ef9] font-semibold shrink-0">
-                                  {winner.votes} votos ({winner.percentage}%)
+                                <span className="text-xs font-mono text-[#a5b0ff] shrink-0">
+                                  {winner.votes} ({winner.percentage}%)
                                 </span>
                               </div>
                             ) : (
-                              <p className="text-xs text-neutral-500 mt-1">
-                                Sin votos registrados durante el partido.
-                              </p>
+                              <p className="text-xs text-zinc-500 mt-1">Sin votos registrados.</p>
                             )}
                           </div>
                         </div>
@@ -1236,9 +1192,9 @@ export function VotationsView({
                         <button
                           type="button"
                           onClick={() => onOpenMatchMvp(m)}
-                          className="w-full py-2 border border-neutral-300 hover:border-[#0d0d0d] text-xs font-display font-bold uppercase tracking-wider text-[#0d0d0d] transition-colors cursor-pointer"
+                          className="w-full py-2.5 rounded-full border border-white/[0.1] bg-white/[0.03] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors cursor-pointer"
                         >
-                          Ver desglose POTM y ficha
+                          Ver ficha
                         </button>
                       </div>
                     );
@@ -1250,10 +1206,10 @@ export function VotationsView({
             {/* Upcoming matches */}
             {potmBuckets.upcoming.length > 0 && (
               <section className="space-y-3">
-                <h2 className="font-display text-xl font-bold uppercase text-neutral-700">
-                  Próximas Votaciones POTM ({potmBuckets.upcoming.length})
+                <h2 className="text-lg font-medium text-zinc-300">
+                  Próximos ({potmBuckets.upcoming.length})
                 </h2>
-                <div className="bg-white border border-neutral-200 divide-y divide-neutral-200">
+                <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] divide-y divide-white/[0.06]">
                   {potmBuckets.upcoming.slice(0, 6).map((m) => {
                     const home = teamMap.get(m.homeTeamId);
                     const away = teamMap.get(m.awayTeamId);
@@ -1262,18 +1218,18 @@ export function VotationsView({
                         key={m.id}
                         className="px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
                       >
-                        <div className="flex items-center gap-2 font-medium text-[#0d0d0d]">
+                        <div className="flex items-center gap-2 font-medium text-zinc-200">
                           <span>{home?.nombre ?? m.homeTeamId}</span>
-                          <span className="text-neutral-400">vs</span>
+                          <span className="font-editorial text-zinc-500">vs</span>
                           <span>{away?.nombre ?? m.awayTeamId}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-neutral-500 font-mono">
+                        <div className="flex items-center gap-3 text-zinc-500 font-mono">
                           <span>
                             {m.fecha} · {m.hora}
                           </span>
                           <span className="inline-flex items-center gap-1">
                             <Lock className="w-3 h-3" />
-                            Abre en horario del partido
+                            <span>En horario</span>
                           </span>
                         </div>
                       </div>
@@ -1285,85 +1241,75 @@ export function VotationsView({
           </div>
         )}
 
-        {/* ================================================================
-            TAB 2: MVP DEL CAMPEONATO (5 Admin-Nominated Players)
-           ================================================================ */}
+        {/* TAB 2: CHAMPIONSHIP MVP */}
         {activeTab === 'mvp' && (
           <div className="space-y-6">
-            <div className="bg-white border border-neutral-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-widest text-[#707ef9] font-semibold">
-                  {discMeta.nombre} · Temporada {state.temporada}
+                <p className="text-xs text-[#9aa5ff] font-medium">
+                  {discMeta.nombre} · {state.temporada}
                 </p>
-                <h2 className="font-display text-3xl font-bold uppercase tracking-tight text-[#0d0d0d] mt-1">
-                  MVP del Campeonato — 5 Nominados Oficiales
+                <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white mt-1">
+                  MVP del <span className="font-editorial text-[#c8ceff]">campeonato</span>
                 </h2>
-                <p className="text-sm text-neutral-600 mt-1">
-                  La organización selecciona a los 5 jugadores finalistas de la disciplina. Cada
-                  usuario registrado puede emitir un voto y actualizarlo mientras la votación esté
-                  abierta.
+                <p className="text-xs text-zinc-400 mt-1">
+                  5 finalistas oficiales seleccionados por la organización.
                 </p>
               </div>
               <div className="text-left md:text-right shrink-0">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">
-                  Total votos válidos
-                </p>
-                <p className="font-display text-3xl font-bold tabular-nums text-[#0d0d0d]">
+                <p className="text-xs text-zinc-500">Votos válidos</p>
+                <p className="text-3xl font-light tracking-[-0.03em] tabular-nums text-white">
                   {championshipMvpSummary.totalVotes}
                 </p>
               </div>
             </div>
 
             {championshipMvpSummary.candidates.length === 0 ? (
-              <div className="bg-white border border-neutral-200 p-10 text-center space-y-2">
-                <Trophy className="w-10 h-10 text-neutral-300 mx-auto" />
-                <h3 className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
+              <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-12 text-center space-y-2">
+                <Trophy className="w-8 h-8 text-zinc-600 mx-auto" />
+                <h3 className="text-lg font-medium text-white">
                   Nominados aún no publicados para {discMeta.nombreCorto}
                 </h3>
-                <p className="text-sm text-neutral-600 max-w-lg mx-auto">
-                  Un administrador debe seleccionar a los 5 nominados oficiales desde el{' '}
-                  <strong>Panel Oficial → Votaciones / MVP</strong> para habilitar esta votación.
+                <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                  Los 5 nominados oficiales se habilitan desde administración.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="bg-white border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex-1 max-w-lg">
                     <VotingPlayerAutocompleteBar
                       id="votations-mvp-autocomplete"
                       value={mvpSearchQuery}
                       onChange={setMvpSearchQuery}
-                      placeholder="Buscar nominado al MVP por nombre, dorsal, posición o equipo..."
+                      placeholder="Buscar nominado por nombre, dorsal o equipo..."
                       ariaLabel="Buscar nominado al MVP del campeonato"
                       options={mvpAutocompleteOptions}
-                      actionHint="Ver nominado"
+                      actionHint="Ver"
                       onSelectOption={(opt) => {
                         const picked = championshipMvpSummary.candidates.find(
                           (c) => c.playerId === opt.id
                         );
-                        if (picked) {
-                          setMvpSearchQuery(picked.playerName);
-                        }
+                        if (picked) setMvpSearchQuery(picked.playerName);
                       }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-neutral-500 tabular-nums">
-                    Mostrando {filteredMvpCandidates.length} de{' '}
-                    {championshipMvpSummary.candidates.length} nominados
+                  <span className="text-xs font-mono text-zinc-500 tabular-nums">
+                    {filteredMvpCandidates.length} / {championshipMvpSummary.candidates.length}
                   </span>
                 </div>
 
                 {filteredMvpCandidates.length === 0 ? (
-                  <div className="bg-white border border-neutral-200 p-8 text-center space-y-2">
-                    <p className="text-sm text-neutral-600">
-                      Ningún nominado al MVP coincide con &ldquo;{mvpSearchQuery}&rdquo;.
+                  <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-8 text-center space-y-2">
+                    <p className="text-sm text-zinc-400">
+                      Sin coincidencias para &ldquo;{mvpSearchQuery}&rdquo;.
                     </p>
                     <button
                       type="button"
                       onClick={() => setMvpSearchQuery('')}
-                      className="text-xs font-bold uppercase tracking-wider text-[#707ef9] hover:underline cursor-pointer"
+                      className="text-xs text-[#a5b0ff] hover:text-white cursor-pointer"
                     >
-                      Mostrar todos los nominados
+                      Mostrar todos
                     </button>
                   </div>
                 ) : (
@@ -1377,10 +1323,10 @@ export function VotationsView({
                       return (
                         <div
                           key={cand.playerId}
-                          className={`bg-white border p-5 flex flex-col justify-between gap-5 ${
+                          className={`rounded-3xl bg-[#0c0c10] border p-5 flex flex-col justify-between gap-5 transition-colors ${
                             isMyPick
-                              ? 'border-[#707ef9] ring-1 ring-[#707ef9]'
-                              : 'border-neutral-200'
+                              ? 'border-[#707ef9] bg-[#707ef9]/[0.06]'
+                              : 'border-white/[0.08] hover:border-white/[0.16]'
                           }`}
                         >
                           <div className="space-y-4">
@@ -1393,29 +1339,28 @@ export function VotationsView({
                                   size="md"
                                 />
                                 <div className="min-w-0">
-                                  <p className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
-                                    #{rankIndex + 1} · Dorsal {cand.dorsal} · {cand.posicion}
+                                  <p className="text-[11px] font-mono text-zinc-500">
+                                    #{rankIndex + 1} · #{cand.dorsal} · {cand.posicion}
                                   </p>
-                                  <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d] truncate">
+                                  <h3 className="text-lg font-medium text-white truncate">
                                     {cand.playerName}
                                   </h3>
-                                  <p className="text-xs text-neutral-600 truncate">{cand.teamName}</p>
+                                  <p className="text-xs text-zinc-400 truncate">{cand.teamName}</p>
                                 </div>
                               </div>
                               {isLeader && (
-                                <Trophy className="w-5 h-5 text-amber-500 shrink-0" aria-label="Líder actual" />
+                                <Trophy className="w-5 h-5 text-amber-400 shrink-0" aria-label="Líder actual" />
                               )}
                             </div>
 
-                            {/* Progress bar */}
                             <div className="space-y-1.5">
                               <div className="flex items-center justify-between text-xs font-mono">
-                                <span className="font-semibold text-[#0d0d0d]">{cand.votes} votos</span>
-                                <span className="text-[#707ef9] font-semibold">{cand.percentage}%</span>
+                                <span className="text-zinc-300">{cand.votes} votos</span>
+                                <span className="text-[#a5b0ff]">{cand.percentage}%</span>
                               </div>
-                              <div className="h-2 bg-neutral-100 overflow-hidden">
+                              <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                                 <div
-                                  className="h-full bg-[#707ef9] transition-all"
+                                  className="h-full bg-[#707ef9] rounded-full transition-all"
                                   style={{ width: `${cand.percentage}%` }}
                                 />
                               </div>
@@ -1426,18 +1371,18 @@ export function VotationsView({
                             type="button"
                             disabled={savingKey === `mvp-${cand.playerId}`}
                             onClick={() => handleChampionshipMvpClick(cand.playerId)}
-                            className={`w-full py-2.5 text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                            className={`w-full py-2.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                               isMyPick
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
+                                ? 'bg-emerald-500 text-[#050507]'
+                                : 'bg-white text-[#050507] hover:bg-zinc-200'
                             }`}
                           >
                             {isMyPick
-                              ? 'Tu voto actual al MVP'
+                              ? 'Tu voto actual'
                               : savingKey === `mvp-${cand.playerId}`
                               ? 'Guardando...'
                               : currentUser
-                              ? 'Votar por este jugador'
+                              ? 'Votar'
                               : 'Ingresar para votar'}
                           </button>
                         </div>
@@ -1450,20 +1395,13 @@ export function VotationsView({
           </div>
         )}
 
-        {/* ================================================================
-            TAB 3: PREMIOS POR POSICIÓN (Adaptado por Deporte)
-           ================================================================ */}
+        {/* TAB 3: POSITION AWARDS */}
         {activeTab === 'posiciones' && activePositionStanding && (
           <div className="space-y-6">
-            {/* Position selector strip */}
-            <div className="bg-white border border-neutral-200 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs uppercase tracking-widest text-neutral-500 font-semibold">
-                  Categorías de posición para {discMeta.nombre}
-                </p>
-                <span className="text-xs text-neutral-500">
-                  Vota por 1 jugador en cada posición de este deporte
-                </span>
+            <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+                <span>Categorías · {discMeta.nombre}</span>
+                <span>1 voto por posición</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {positionAwardStandings.map((st) => {
@@ -1485,10 +1423,10 @@ export function VotationsView({
                         setShowAllPlayersForPosition(false);
                         setFeedbackMsg(null);
                       }}
-                      className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
                         active
-                          ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                          : 'bg-white text-[#0d0d0d] border-neutral-300 hover:border-[#0d0d0d]'
+                          ? 'bg-white text-[#050507] border-white'
+                          : 'bg-white/[0.03] text-zinc-300 border-white/[0.08] hover:border-white/[0.2]'
                       }`}
                     >
                       <span>{st.position.awardTitle}</span>
@@ -1501,32 +1439,30 @@ export function VotationsView({
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left: Live Position Ranking */}
-              <div className="lg:col-span-5 bg-white border border-neutral-200">
-                <div className="bg-[#0d0d0d] text-white p-5 flex items-center justify-between">
+              <div className="lg:col-span-5 rounded-3xl bg-[#0c0c10] border border-white/[0.08] overflow-hidden">
+                <div className="p-5 border-b border-white/[0.08] flex items-center justify-between">
                   <div>
-                    <p className="text-[11px] uppercase tracking-widest text-[#707ef9]">
-                      Ranking en Vivo
-                    </p>
-                    <h3 className="font-display text-2xl font-bold uppercase mt-0.5">
+                    <p className="text-xs text-[#9aa5ff]">Ranking en vivo</p>
+                    <h3 className="text-xl font-medium text-white mt-0.5">
                       {activePositionStanding.position.awardTitle}
                     </h3>
                   </div>
-                  <span className="font-mono text-xs text-neutral-300">
+                  <span className="font-mono text-xs text-zinc-500">
                     {activePositionStanding.totalVotes} votos
                   </span>
                 </div>
 
                 {activePositionStanding.rankings.length === 0 ? (
-                  <div className="p-6 text-sm text-neutral-500">
-                    Aún no hay votos en esta categoría. Sé el primero en votar desde el listado.
+                  <div className="p-6 text-xs text-zinc-500">
+                    Aún no hay votos en esta categoría.
                   </div>
                 ) : (
-                  <div className="divide-y divide-neutral-200">
+                  <div className="divide-y divide-white/[0.06]">
                     {activePositionStanding.rankings.slice(0, 8).map((r, idx) => (
                       <div key={r.playerId} className="p-4 space-y-2">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
-                            <span className="font-display text-xl font-bold text-neutral-400 w-5 text-center tabular-nums">
+                            <span className="text-base font-medium text-zinc-500 w-5 text-center tabular-nums">
                               {idx + 1}
                             </span>
                             <TeamCrest
@@ -1536,20 +1472,20 @@ export function VotationsView({
                               size="sm"
                             />
                             <div className="min-w-0">
-                              <p className="text-sm font-bold text-[#0d0d0d] truncate">
+                              <p className="text-sm font-medium text-white truncate">
                                 {r.playerName}
                               </p>
-                              <p className="text-xs text-neutral-500 truncate">{r.teamName}</p>
+                              <p className="text-xs text-zinc-500 truncate">{r.teamName}</p>
                             </div>
                           </div>
                           <div className="text-right font-mono shrink-0">
-                            <p className="text-sm font-bold text-[#0d0d0d]">{r.votes}</p>
-                            <p className="text-[11px] text-[#707ef9]">{r.percentage}%</p>
+                            <p className="text-sm font-medium text-white">{r.votes}</p>
+                            <p className="text-[11px] text-[#a5b0ff]">{r.percentage}%</p>
                           </div>
                         </div>
-                        <div className="h-1.5 bg-neutral-100">
+                        <div className="h-1 rounded-full bg-white/[0.08] overflow-hidden">
                           <div
-                            className="h-full bg-[#707ef9]"
+                            className="h-full bg-[#707ef9] rounded-full"
                             style={{ width: `${r.percentage}%` }}
                           />
                         </div>
@@ -1559,19 +1495,15 @@ export function VotationsView({
                 )}
               </div>
 
-              {/* Right: Eligible Candidates to Vote with Manual Player Search */}
-              <div className="lg:col-span-7 bg-white border border-neutral-200 p-5 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+              {/* Right: Eligible Candidates */}
+              <div className="lg:col-span-7 rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-3">
                   <div>
-                    <h3 className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
-                      Elegir {activePositionStanding.position.awardTitle}
+                    <h3 className="text-lg font-medium text-white">
+                      {activePositionStanding.position.awardTitle}
                     </h3>
-                    <p className="text-xs text-neutral-600">
-                      {positionPlayerSearch.trim()
-                        ? `Búsqueda manual en ${discMeta.nombreCorto}: ${positionCandidatesToDisplay.length} coincidencia(s).`
-                        : eligibleForActivePosition.matched.length > 0 && !showAllPlayersForPosition
-                        ? `Mostrando ${positionCandidatesToDisplay.length} jugador(es) en posición ${activePositionStanding.position.label}.`
-                        : `Mostrando ${positionCandidatesToDisplay.length} de ${eligibleForActivePosition.all.length} jugadores inscritos en ${discMeta.nombreCorto}.`}
+                    <p className="text-xs text-zinc-500">
+                      {positionCandidatesToDisplay.length} candidato(s)
                     </p>
                   </div>
 
@@ -1579,23 +1511,20 @@ export function VotationsView({
                     <button
                       type="button"
                       onClick={() => setShowAllPlayersForPosition((v) => !v)}
-                      className="text-xs text-[#707ef9] hover:underline font-medium cursor-pointer"
+                      className="text-xs text-[#a5b0ff] hover:text-white cursor-pointer"
                     >
-                      {showAllPlayersForPosition
-                        ? 'Ver solo posición específica'
-                        : 'Ver todo el plantel de la disciplina'}
+                      {showAllPlayersForPosition ? 'Solo posición' : 'Ver todo el plantel'}
                     </button>
                   )}
                 </div>
 
-                {/* Manual Player Autocomplete Search + Team Filter */}
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
                   <div className="sm:col-span-7">
                     <VotingPlayerAutocompleteBar
                       id="votations-position-player-search"
                       value={positionPlayerSearch}
                       onChange={setPositionPlayerSearch}
-                      placeholder="Buscar jugador con autocompletado (nombre, dorsal o equipo)..."
+                      placeholder="Buscar por nombre, dorsal o equipo..."
                       ariaLabel="Buscar jugador manualmente para votar"
                       options={positionAutocompleteOptions}
                       actionHint="Elegir"
@@ -1613,7 +1542,7 @@ export function VotationsView({
                       aria-label="Filtrar candidatos por equipo"
                       value={positionTeamFilter}
                       onChange={(e) => setPositionTeamFilter(e.target.value)}
-                      className="w-full px-3 py-2 text-xs sm:text-sm border border-neutral-300 bg-white text-[#0d0d0d] focus:border-[#707ef9] focus:outline-none"
+                      className="w-full px-3 py-2.5 rounded-xl text-xs sm:text-sm border border-white/[0.1] bg-[#111117] text-zinc-100 focus:border-[#707ef9] focus:outline-none"
                     >
                       <option value="ALL">Todos los equipos ({disciplineTeams.length})</option>
                       {disciplineTeams.map((tm) => (
@@ -1626,12 +1555,8 @@ export function VotationsView({
                 </div>
 
                 {positionCandidatesToDisplay.length === 0 ? (
-                  <div className="py-8 text-center space-y-2 border border-dashed border-neutral-200 bg-[#f5f6f8]">
-                    <p className="text-sm text-neutral-600">
-                      {positionPlayerSearch.trim() || positionTeamFilter !== 'ALL'
-                        ? 'No se encontraron jugadores con ese criterio de búsqueda.'
-                        : `No hay jugadores inscritos aún en ${discMeta.nombre}.`}
-                    </p>
+                  <div className="py-8 text-center space-y-2 rounded-2xl border border-dashed border-white/[0.1] bg-[#101016]">
+                    <p className="text-xs text-zinc-400">Sin jugadores con ese criterio.</p>
                     {(positionPlayerSearch.trim() || positionTeamFilter !== 'ALL') && (
                       <button
                         type="button"
@@ -1639,9 +1564,9 @@ export function VotationsView({
                           setPositionPlayerSearch('');
                           setPositionTeamFilter('ALL');
                         }}
-                        className="text-xs font-bold uppercase tracking-wider text-[#707ef9] hover:underline cursor-pointer"
+                        className="text-xs text-[#a5b0ff] hover:text-white cursor-pointer"
                       >
-                        Limpiar búsqueda
+                        Limpiar
                       </button>
                     )}
                   </div>
@@ -1653,10 +1578,10 @@ export function VotationsView({
                       return (
                         <div
                           key={pl.id}
-                          className={`border p-3.5 flex items-center justify-between gap-3 ${
+                          className={`rounded-2xl border p-3.5 flex items-center justify-between gap-3 transition-colors ${
                             isVoted
-                              ? 'border-[#707ef9] bg-[#707ef9]/5'
-                              : 'border-neutral-200 bg-white'
+                              ? 'border-[#707ef9] bg-[#707ef9]/10'
+                              : 'border-white/[0.08] bg-[#101016]'
                           }`}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -1667,10 +1592,10 @@ export function VotationsView({
                               size="sm"
                             />
                             <div className="min-w-0">
-                              <p className="text-sm font-bold text-[#0d0d0d] truncate">
+                              <p className="text-sm font-medium text-white truncate">
                                 #{pl.dorsal} {pl.nombre} {pl.apellidoPaterno}
                               </p>
-                              <p className="text-[11px] text-neutral-500 truncate">
+                              <p className="text-[11px] text-zinc-500 truncate">
                                 {team?.nombre ?? pl.teamId} · {pl.posicion}
                               </p>
                             </div>
@@ -1680,10 +1605,10 @@ export function VotationsView({
                             type="button"
                             disabled={savingKey === `pos-${pl.id}`}
                             onClick={() => handlePositionAwardClick(pl)}
-                            className={`px-3 py-1.5 text-[11px] font-display font-bold uppercase tracking-wider shrink-0 transition-colors cursor-pointer ${
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-medium shrink-0 transition-colors cursor-pointer ${
                               isVoted
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-[#0d0d0d] hover:bg-[#707ef9] text-white'
+                                ? 'bg-emerald-500 text-[#050507]'
+                                : 'bg-white text-[#050507] hover:bg-zinc-200'
                             }`}
                           >
                             {isVoted ? 'Votado' : 'Votar'}
@@ -1698,89 +1623,68 @@ export function VotationsView({
           </div>
         )}
 
-        {/* ================================================================
-            TAB 4: TOTY (TEAM OF THE YEAR — FORMACIÓN COMPLETA DE LA COMUNIDAD)
-           ================================================================ */}
+        {/* TAB 4: TOTY */}
         {activeTab === 'toty' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left: Live Tactical Full-Formation TOTY Board */}
-            <div className="lg:col-span-7 bg-[#0d0d0d] text-white border border-neutral-800 overflow-hidden">
-              <div className="p-6 border-b border-white/10 space-y-4">
+            {/* Left: Tactical Full-Formation TOTY Board */}
+            <div className="lg:col-span-7 rounded-3xl bg-[#0c0c10] text-white border border-white/[0.08] overflow-hidden">
+              <div className="p-6 border-b border-white/[0.08] space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-[#707ef9] font-medium flex items-center gap-1.5">
+                    <p className="text-xs text-[#9aa5ff] font-medium flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5" />
                       {totyFormation.formationName} · {discMeta.nombreCorto}
                     </p>
-                    <h2 className="font-display text-3xl font-bold uppercase tracking-tight mt-1">
-                      TOTY de la Comunidad {state.temporada}
+                    <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] mt-1">
+                      TOTY <span className="font-editorial text-[#c8ceff]">{state.temporada}</span>
                     </h2>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      {totyFormation.summaryText}
-                    </p>
+                    <p className="text-xs text-zinc-500 mt-1">{totyFormation.summaryText}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                      Papeletas TOTY
-                    </p>
-                    <p className="font-display text-3xl font-bold text-[#707ef9] tabular-nums">
+                    <p className="text-xs text-zinc-500">Papeletas</p>
+                    <p className="text-3xl font-light text-[#a5b0ff] tabular-nums">
                       {communityToty.totalBallots}
                     </p>
                   </div>
                 </div>
 
-                {/* Toggle: Community Winning Lineup vs User's Draft Formation Preview */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <div className="inline-flex border border-white/15 bg-white/5 p-0.5">
+                  <div className="inline-flex rounded-full border border-white/[0.1] bg-white/[0.03] p-1">
                     <button
                       type="button"
                       onClick={() => setTotyBoardMode('community')}
-                      className={`px-3 py-1.5 text-[11px] font-display font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                         totyBoardMode === 'community'
                           ? 'bg-[#707ef9] text-white'
-                          : 'text-neutral-300 hover:text-white'
+                          : 'text-zinc-400 hover:text-white'
                       }`}
                     >
-                      TOTY Oficial ({totyFormation.slots.length})
+                      Oficial ({totyFormation.slots.length})
                     </button>
                     <button
                       type="button"
                       onClick={() => setTotyBoardMode('draft')}
-                      className={`px-3 py-1.5 text-[11px] font-display font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                         totyBoardMode === 'draft'
-                          ? 'bg-white text-[#0d0d0d]'
-                          : 'text-neutral-300 hover:text-white'
+                          ? 'bg-white text-[#050507]'
+                          : 'text-zinc-400 hover:text-white'
                       }`}
                     >
-                      Mi Formación ({totySelectedCount}/{totyFormation.slots.length})
+                      Mi formación ({totySelectedCount}/{totyFormation.slots.length})
                     </button>
                   </div>
-                  <span className="text-[11px] font-mono text-neutral-400">
-                    {totyBoardMode === 'community'
-                      ? 'Los más votados en cada línea forman el equipo titular'
-                      : 'Vista previa táctica de tu papeleta actual'}
-                  </span>
                 </div>
               </div>
 
               {/* Tactical Pitch / Court Surface */}
-              <div className="relative p-5 sm:p-6 bg-[#111318] overflow-hidden">
-                {/* Architectural Sport Court / Pitch Line Markings */}
+              <div className="relative p-5 sm:p-6 bg-[#08090d] overflow-hidden">
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 600 520"
                   preserveAspectRatio="none"
-                  className="pointer-events-none absolute inset-0 w-full h-full opacity-20"
+                  className="pointer-events-none absolute inset-0 w-full h-full opacity-15"
                 >
-                  <rect
-                    x="18"
-                    y="18"
-                    width="564"
-                    height="484"
-                    fill="none"
-                    stroke="#ffffff"
-                    strokeWidth="1.5"
-                  />
+                  <rect x="18" y="18" width="564" height="484" fill="none" stroke="#ffffff" strokeWidth="1.5" />
                   {discMeta.sportType === 'futbol7' && (
                     <>
                       <line x1="18" y1="260" x2="582" y2="260" stroke="#ffffff" strokeWidth="1.2" />
@@ -1791,12 +1695,7 @@ export function VotationsView({
                   )}
                   {(discMeta.sportType === 'basquetbol' || discMeta.sportType === 'basquetbol3x3') && (
                     <>
-                      <path
-                        d="M 85 18 L 85 170 A 215 215 0 0 0 515 170 L 515 18"
-                        fill="none"
-                        stroke="#ffffff"
-                        strokeWidth="1.2"
-                      />
+                      <path d="M 85 18 L 85 170 A 215 215 0 0 0 515 170 L 515 18" fill="none" stroke="#ffffff" strokeWidth="1.2" />
                       <rect x="215" y="18" width="170" height="175" fill="none" stroke="#ffffff" strokeWidth="1.2" />
                       <circle cx="300" cy="193" r="52" fill="none" stroke="#ffffff" strokeWidth="1.2" />
                       <line x1="18" y1="430" x2="582" y2="430" stroke="#ffffff" strokeWidth="1" strokeDasharray="6 6" />
@@ -1823,11 +1722,11 @@ export function VotationsView({
                     return (
                       <div key={rowGroup.row} className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="h-px flex-1 bg-white/10" />
-                          <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-neutral-400">
+                          <span className="h-px flex-1 bg-white/[0.08]" />
+                          <span className="text-[11px] font-mono text-zinc-500">
                             {rowGroup.rowLabel}
                           </span>
-                          <span className="h-px flex-1 bg-white/10" />
+                          <span className="h-px flex-1 bg-white/[0.08]" />
                         </div>
 
                         <div className={`grid ${colClass} gap-3`}>
@@ -1842,26 +1741,24 @@ export function VotationsView({
 
                             const isLibero = Boolean(slotRes.slot.isLibero);
                             const cardBorder = isLibero
-                              ? 'border-[#707ef9] bg-[#707ef9]/15'
-                              : 'border-white/15 bg-[#0d0d0d]/90';
+                              ? 'border-[#707ef9]/50 bg-[#707ef9]/12'
+                              : 'border-white/[0.1] bg-[#0c0c10]/90';
 
                             return (
                               <div
                                 key={slotRes.slot.slotKey}
-                                className={`border p-3.5 flex flex-col justify-between gap-2.5 backdrop-blur-xs ${cardBorder}`}
+                                className={`rounded-2xl border p-3.5 flex flex-col justify-between gap-2.5 backdrop-blur-sm ${cardBorder}`}
                               >
                                 <div className="flex items-center justify-between gap-2 min-w-0">
-                                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#707ef9] font-bold truncate">
+                                  <span className="text-[11px] font-mono text-[#a5b0ff] truncate">
                                     {slotRes.slot.shortCode} · {slotRes.slot.label}
                                   </span>
                                   {totyBoardMode === 'community' ? (
-                                    <span className="text-[10px] font-mono text-neutral-400 tabular-nums shrink-0 whitespace-nowrap">
-                                      {slotRes.winner
-                                        ? `${slotRes.winner.votes} v.`
-                                        : '0 v.'}
+                                    <span className="text-[10px] font-mono text-zinc-500 tabular-nums shrink-0 whitespace-nowrap">
+                                      {slotRes.winner ? `${slotRes.winner.votes} v.` : '0 v.'}
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] font-mono text-neutral-400 shrink-0 whitespace-nowrap">
+                                    <span className="text-[10px] font-mono text-zinc-500 shrink-0 whitespace-nowrap">
                                       {draftPlayer ? 'Elegido' : 'Pendiente'}
                                     </span>
                                   )}
@@ -1878,21 +1775,21 @@ export function VotationsView({
                                         surface="dark"
                                       />
                                       <div className="min-w-0">
-                                        <p className="font-display text-lg font-bold uppercase leading-tight truncate text-white">
+                                        <p className="text-sm font-medium leading-tight truncate text-white">
                                           {slotRes.winner.playerName}
                                         </p>
-                                        <p className="text-[11px] text-neutral-300 truncate">
+                                        <p className="text-[11px] text-zinc-400 truncate">
                                           {slotRes.winner.teamName}
                                         </p>
                                         <p className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
-                                          {slotRes.winner.votes} votos ({slotRes.winner.percentage}%)
+                                          {slotRes.winner.votes} ({slotRes.winner.percentage}%)
                                         </p>
                                       </div>
                                     </div>
                                   ) : (
-                                    <div className="py-2 text-xs text-neutral-400 flex items-center gap-2">
-                                      <Users className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-                                      <span>Puesto vacante</span>
+                                    <div className="py-2 text-xs text-zinc-500 flex items-center gap-2">
+                                      <Users className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                                      <span>Vacante</span>
                                     </div>
                                   )
                                 ) : draftPlayer ? (
@@ -1905,19 +1802,19 @@ export function VotationsView({
                                       surface="dark"
                                     />
                                     <div className="min-w-0">
-                                      <p className="font-display text-lg font-bold uppercase leading-tight truncate text-white">
+                                      <p className="text-sm font-medium leading-tight truncate text-white">
                                         #{draftPlayer.dorsal} {draftPlayer.nombre}{' '}
                                         {draftPlayer.apellidoPaterno}
                                       </p>
-                                      <p className="text-[11px] text-neutral-300 truncate">
+                                      <p className="text-[11px] text-zinc-400 truncate">
                                         {draftTeam?.nombre ?? draftPlayer.teamId}
                                       </p>
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="py-2 text-xs text-neutral-500 flex items-center gap-2">
-                                    <Users className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-                                    <span>Selecciona en tu papeleta →</span>
+                                  <div className="py-2 text-xs text-zinc-500 flex items-center gap-2">
+                                    <Users className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                                    <span>Selecciona en tu papeleta</span>
                                   </div>
                                 )}
                               </div>
@@ -1930,31 +1827,27 @@ export function VotationsView({
                 </div>
               </div>
 
-              {/* Compact Runner-Ups / Bench Watch */}
+              {/* Runner-Ups */}
               {totyBoardMode === 'community' &&
                 communityToty.slots.some((s) => s.runnerUps.length > 0) && (
-                  <div className="px-6 py-4 border-t border-white/10 bg-[#0d0d0d] space-y-2">
-                    <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-neutral-400">
-                      Siguientes más votados por posición
-                    </p>
+                  <div className="px-6 py-4 border-t border-white/[0.08] space-y-2">
+                    <p className="text-xs text-zinc-500">Siguientes más votados</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {communityToty.slots
                         .filter((s) => s.runnerUps.length > 0)
                         .map((s) => (
                           <div
                             key={`ru-${s.slot.slotKey}`}
-                            className="bg-white/5 border border-white/10 px-3 py-2 text-[11px]"
+                            className="rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2 text-[11px]"
                           >
-                            <p className="font-mono text-[10px] uppercase text-[#707ef9] mb-1">
-                              {s.position.label}
-                            </p>
+                            <p className="text-[10px] text-[#9aa5ff] mb-1">{s.position.label}</p>
                             {s.runnerUps.slice(0, 2).map((ru) => (
                               <div
                                 key={ru.playerId}
-                                className="flex items-center justify-between text-neutral-300 gap-2"
+                                className="flex items-center justify-between text-zinc-300 gap-2"
                               >
                                 <span className="truncate">{ru.playerName}</span>
-                                <span className="font-mono text-neutral-400 shrink-0 tabular-nums">
+                                <span className="font-mono text-zinc-500 shrink-0 tabular-nums">
                                   {ru.votes} v.
                                 </span>
                               </div>
@@ -1966,27 +1859,23 @@ export function VotationsView({
                 )}
             </div>
 
-            {/* Right: Interactive Full-Formation User TOTY Ballot */}
-            <div className="lg:col-span-5 bg-white border border-neutral-200 p-6 space-y-5">
-              <div className="border-b border-neutral-200 pb-4 space-y-2">
+            {/* Right: User TOTY Ballot */}
+            <div className="lg:col-span-5 rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 space-y-5">
+              <div className="border-b border-white/[0.08] pb-4 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs uppercase tracking-widest text-[#707ef9] font-semibold">
-                    Tu Papeleta · {totyFormation.formationName}
+                  <p className="text-xs text-[#9aa5ff] font-medium">
+                    Tu papeleta · {totyFormation.formationName}
                   </p>
-                  <span className="text-xs font-mono font-bold text-[#0d0d0d] tabular-nums">
-                    {totySelectedCount}/{totyFormation.slots.length} puestos
+                  <span className="text-xs font-mono text-zinc-300 tabular-nums">
+                    {totySelectedCount}/{totyFormation.slots.length}
                   </span>
                 </div>
-                <h3 className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-                  Arma tu TOTY — {discMeta.nombreCorto}
+                <h3 className="text-xl font-medium text-white">
+                  Arma tu <span className="font-editorial text-[#c8ceff]">TOTY</span>
                 </h3>
-                <p className="text-xs text-neutral-600">
-                  Completa la formación oficial ({totyFormation.summaryText}). No puedes repetir al
-                  mismo jugador en dos puestos.
-                </p>
-                <div className="w-full h-1.5 bg-neutral-100 overflow-hidden">
+                <div className="w-full h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                   <div
-                    className="h-full bg-[#707ef9] transition-all duration-300"
+                    className="h-full bg-[#707ef9] rounded-full transition-all duration-300"
                     style={{
                       width: `${Math.round(
                         (totySelectedCount / Math.max(1, totyFormation.slots.length)) * 100
@@ -1997,35 +1886,28 @@ export function VotationsView({
               </div>
 
               {disciplinePlayers.length === 0 ? (
-                <p className="text-sm text-neutral-500 py-4">
-                  Aún no hay jugadores registrados en {discMeta.nombre}.
+                <p className="text-xs text-zinc-500 py-4">
+                  Sin jugadores registrados en {discMeta.nombre}.
                 </p>
               ) : (
                 <div className="space-y-4">
-                  {/* Top-level real-time autocomplete search bar for TOTY */}
-                  <div className="bg-[#f5f6f8] border border-neutral-200 p-3 space-y-2">
+                  <div className="rounded-2xl bg-[#101016] border border-white/[0.08] p-3.5 space-y-2">
                     <label
                       htmlFor="toty-quick-autocomplete"
-                      className="block text-[11px] font-bold uppercase tracking-wider text-neutral-600"
+                      className="block text-xs text-zinc-400"
                     >
-                      Búsqueda rápida con autocompletado para tu TOTY
+                      Asignación rápida
                     </label>
                     <VotingPlayerAutocompleteBar
                       id="toty-quick-autocomplete"
                       value={totyQuickSearch}
                       onChange={setTotyQuickSearch}
-                      placeholder="Escribe nombre, dorsal o equipo para filtrar o asignar rápido..."
+                      placeholder="Nombre, dorsal o equipo..."
                       ariaLabel="Buscar jugador con autocompletado para el TOTY"
                       options={totyQuickAutocompleteOptions}
-                      actionHint="Asignar al TOTY"
+                      actionHint="Asignar"
                       onSelectOption={(opt) => handleQuickAssignTotyPlayer(opt.id)}
                     />
-                    {totyQuickSearch.trim().length > 0 && (
-                      <p className="text-[11px] text-neutral-500">
-                        Filtrando opciones en vivo: <strong>{totyFilteredQuickPlayers.length}</strong>{' '}
-                        jugador(es) disponible(s). Haz clic en una sugerencia para asignarlo automáticamente.
-                      </p>
-                    )}
                   </div>
 
                   {totyFormation.slots.map((slot) => {
@@ -2062,22 +1944,22 @@ export function VotationsView({
                     type="button"
                     disabled={savingKey === 'toty-save'}
                     onClick={handleSaveToty}
-                    className="w-full py-3 bg-[#707ef9] hover:bg-[#0d0d0d] disabled:opacity-50 text-white font-display text-sm font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                    className="w-full py-3 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] disabled:opacity-50 text-white text-xs font-medium transition-colors cursor-pointer"
                   >
                     {savingKey === 'toty-save'
-                      ? 'Guardando formación TOTY...'
+                      ? 'Guardando...'
                       : !currentUser
-                      ? 'Iniciar sesión para enviar mi TOTY'
+                      ? 'Iniciar sesión para enviar'
                       : existingTotyBallot
-                      ? `Actualizar mi TOTY (${totySelectedCount}/${totyFormation.slots.length})`
-                      : `Enviar mi TOTY Oficial (${totySelectedCount}/${totyFormation.slots.length})`}
+                      ? `Actualizar TOTY (${totySelectedCount}/${totyFormation.slots.length})`
+                      : `Enviar TOTY (${totySelectedCount}/${totyFormation.slots.length})`}
                   </button>
                 </div>
               )}
             </div>
           </div>
         )}
-      </div>
+      </RevealSection>
     </div>
   );
 }

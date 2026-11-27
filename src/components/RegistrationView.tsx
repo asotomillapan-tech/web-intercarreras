@@ -3,7 +3,7 @@ import { CheckCircle2, Edit3, Lock, Plus, Shield, Trash2, Upload, Users } from '
 import {
   DISCIPLINES,
   DISCIPLINE_MAP,
-  LOGO_DARK_SVG,
+  LOGO_LIGHT_SVG,
   UFRO_CAREERS,
 } from '../data/ufroSeed';
 import { canManageRegistrationsAndTransfers } from '../domain/rbacEngine';
@@ -17,6 +17,7 @@ import type {
   TournamentState,
 } from '../types/tournament';
 import { CrestUploader } from './CrestUploader';
+import { RevealSection, SectionKicker } from './MotionPrimitives';
 import { TeamCrest } from './TeamCrest';
 
 interface RegistrationViewProps {
@@ -68,6 +69,12 @@ function createEmptyPlayer(defaultCarrera: string, defaultFacultad: string, inde
   };
 }
 
+const INPUT_CLASS =
+  'w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9] transition-colors';
+
+const READONLY_INPUT_CLASS =
+  'w-full rounded-xl bg-white/[0.03] border border-white/[0.06] px-3.5 py-2.5 text-sm text-zinc-400';
+
 export function RegistrationView({
   state,
   currentUser,
@@ -92,7 +99,6 @@ export function RegistrationView({
   const [errors, setErrors] = useState<string[]>([]);
   const [successInfo, setSuccessInfo] = useState<{ teamName: string; count: number } | null>(null);
 
-  // Existing Roster Management State (Delegado / Admin)
   const canManage = canManageRegistrationsAndTransfers(currentUser);
   const managedTeams = useMemo(() => {
     if (!currentUser) return [];
@@ -126,7 +132,12 @@ export function RegistrationView({
       );
       setEditTeamLogros(effectiveManagedTeam.logrosAnteriores ?? '');
     }
-  }, [effectiveManagedTeam?.id, effectiveManagedTeam?.escudo, effectiveManagedTeam?.anioFundacion, effectiveManagedTeam?.logrosAnteriores]);
+  }, [
+    effectiveManagedTeam?.id,
+    effectiveManagedTeam?.escudo,
+    effectiveManagedTeam?.anioFundacion,
+    effectiveManagedTeam?.logrosAnteriores,
+  ]);
 
   const managedTeamPlayers = useMemo(() => {
     if (!effectiveManagedTeam) return [];
@@ -274,7 +285,6 @@ export function RegistrationView({
       return;
     }
 
-    // Assign equitably to the group with fewest teams in this discipline
     const discTeams = state.teams.filter((t) => t.disciplineId === disciplineId);
     const groupCounts = new Map<string, number>();
     for (let i = 0; i < currentConfig.numGrupos; i++) {
@@ -474,56 +484,53 @@ export function RegistrationView({
   };
 
   return (
-    <div className="bg-white min-h-[75vh]">
+    <div className="bg-[#050507] text-zinc-100 min-h-[75vh]">
       {/* Header */}
-      <div className="bg-[#0d0d0d] text-white border-b border-white/10">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-            Postulación oficial · Temporada {state.temporada}
-          </p>
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mt-2">
-            <div>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight">
-                Inscripción de Equipos y Nóminas UFRO
+      <section className="border-b border-white/[0.06]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-10">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+            <div className="space-y-3">
+              <SectionKicker index="01" label={`Postulación · Temporada ${state.temporada}`} />
+              <h1 className="font-display text-4xl sm:text-5xl font-medium tracking-[-0.03em] text-white">
+                Inscripciones y <span className="font-editorial text-[#c8ceff]">nóminas</span>
               </h1>
-              <p className="text-sm text-neutral-400 mt-2 max-w-2xl">
-                Gestiona cupos disponibles por disciplina, inscribe equipos nuevos o actualiza el
-                plantel oficial de jugadores (12 campos exigidos por Deportes UFRO).
+              <p className="text-sm text-zinc-400 max-w-xl">
+                Cupos por disciplina, alta de equipos y gestión de planteles oficiales UFRO.
               </p>
             </div>
 
-            <div className="flex items-center gap-1 bg-white/5 p-1 self-start lg:self-auto">
+            <div className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-[#0c0c10] p-1 self-start lg:self-auto">
               <button
                 type="button"
                 onClick={() => setModeTab('nuevo')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   modeTab === 'nuevo'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
+                    ? 'bg-white text-[#050507]'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Inscribir Nuevo Equipo
+                Inscribir equipo
               </button>
               <button
                 type="button"
                 onClick={() => setModeTab('plantel')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   modeTab === 'plantel'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
+                    ? 'bg-white text-[#050507]'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Modificar Plantel Existente
+                Modificar plantel
               </button>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Cupos Availability Matrix */}
-      <div className="bg-[#f5f6f8] border-b border-neutral-200">
+      <section className="border-b border-white/[0.06] bg-[#08080c]">
         <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
             {DISCIPLINES.map((d) => {
               const cfg = state.configs[d.id];
               const count = state.teams.filter((t) => t.disciplineId === d.id).length;
@@ -534,88 +541,84 @@ export function RegistrationView({
                   key={d.id}
                   type="button"
                   onClick={() => setDisciplineId(d.id)}
-                  className={`text-left p-3 border transition-colors cursor-pointer ${
+                  className={`text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                      : 'bg-white text-[#0d0d0d] border-neutral-200 hover:border-[#707ef9]'
+                      ? 'bg-[#121322] border-[#707ef9]/70 text-white'
+                      : 'bg-[#0c0c10] border-white/[0.08] text-zinc-200 hover:border-white/[0.2]'
                   }`}
                 >
-                  <p className="font-display text-xs font-bold uppercase tracking-wide truncate">
-                    {d.nombreCorto}
-                  </p>
-                  <p className="font-display text-xl font-bold tabular-nums mt-1">
+                  <p className="text-xs font-medium truncate text-zinc-300">{d.nombreCorto}</p>
+                  <p className="font-display text-xl font-medium tabular-nums mt-1.5 text-white">
                     {count}
-                    <span className={isSelected ? 'text-neutral-400 text-xs font-normal' : 'text-neutral-500 text-xs font-normal'}>
-                      /{cfg.maxCupos}
-                    </span>
+                    <span className="text-zinc-500 text-xs font-normal">/{cfg.maxCupos}</span>
                   </p>
                   <p
-                    className={`text-[11px] mt-0.5 ${
+                    className={`text-[11px] mt-1 ${
                       !cfg.inscripcionesAbiertas
-                        ? 'text-red-500'
+                        ? 'text-red-400'
                         : avail > 0
                         ? isSelected
-                          ? 'text-[#707ef9]'
-                          : 'text-emerald-700'
-                        : 'text-amber-700'
+                          ? 'text-[#a5b0ff]'
+                          : 'text-emerald-400'
+                        : 'text-amber-400'
                     }`}
                   >
                     {!cfg.inscripcionesAbiertas
                       ? 'Cerrada'
                       : avail > 0
-                      ? `${avail} cupos libres`
-                      : 'Cupos llenos'}
+                      ? `${avail} libres`
+                      : 'Completo'}
                   </p>
                 </button>
               );
             })}
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Main Content Area */}
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {!canManage && (
-          <div className="mb-8 bg-[#f5f6f8] border-l-4 border-[#707ef9] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <Lock className="w-5 h-5 text-[#707ef9] shrink-0 mt-0.5" />
-              <div className="text-sm text-neutral-700">
-                <p className="font-bold text-[#0d0d0d]">
-                  Gestión de inscripciones habilitada para Delegados de Equipo y Administradores
+          <RevealSection className="mb-8 rounded-3xl border border-[#707ef9]/25 bg-[#0c0d18] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-full bg-[#707ef9]/15 border border-[#707ef9]/30 flex items-center justify-center shrink-0">
+                <Lock className="w-4 h-4 text-[#a5b0ff]" />
+              </div>
+              <div className="text-sm">
+                <p className="font-medium text-white">
+                  Acceso para Delegados y Administradores UFRO
                 </p>
-                <p className="text-xs text-neutral-600 mt-1">
-                  Puedes revisar los cupos disponibles por disciplina arriba. Para inscribir un
-                  equipo o modificar jugadores de una nómina, inicia sesión con un perfil de{' '}
-                  <strong>Delegado</strong> o <strong>Administrador UFRO</strong>.
+                <p className="text-xs text-zinc-400 mt-1">
+                  Inicia sesión con un perfil autorizado para inscribir equipos o editar nóminas.
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={onOpenAuth}
-              className="px-4 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-5 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               Iniciar sesión con Google
             </button>
-          </div>
+          </RevealSection>
         )}
 
         {modeTab === 'plantel' ? (
-          <div className="space-y-6">
+          <RevealSection className="space-y-6">
             {!canManage || !effectiveManagedTeam ? (
-              <div className="border border-neutral-200 p-8 text-center space-y-3">
-                <p className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
-                  Sin equipo asignado para edición de plantel
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-3">
+                <p className="font-display text-2xl font-medium tracking-[-0.02em] text-white">
+                  Sin equipo asignado para <span className="font-editorial text-[#c8ceff]">edición</span>
                 </p>
-                <p className="text-xs text-neutral-600 max-w-md mx-auto">
-                  Inicia sesión como Delegado de Equipo (con equipo asignado) o como Administrador
-                  UFRO para modificar la nómina oficial de jugadores.
+                <p className="text-sm text-zinc-400 max-w-md mx-auto">
+                  Inicia sesión como Delegado con equipo asignado o Administrador UFRO para gestionar
+                  el plantel oficial.
                 </p>
               </div>
             ) : (
               <>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
-                  <div className="flex items-center gap-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/[0.08]">
+                  <div className="flex items-center gap-4">
                     <TeamCrest
                       escudo={effectiveManagedTeam.escudo}
                       sigla={effectiveManagedTeam.sigla}
@@ -623,13 +626,16 @@ export function RegistrationView({
                       size="md"
                     />
                     <div>
-                      <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                        Gestión de Nómina Oficial ({currentUser?.role === 'admin' ? 'Administrador' : 'Delegado'})
+                      <p className="text-xs text-[#a5b0ff] font-medium">
+                        {currentUser?.role === 'admin' ? 'Administrador' : 'Delegado'} · Nómina oficial
                       </p>
-                      <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                        Plantel de {effectiveManagedTeam.nombre} ({managedTeamPlayers.length} jugadores)
+                      <h2 className="font-display text-2xl font-medium tracking-[-0.02em] text-white mt-0.5">
+                        {effectiveManagedTeam.nombre}{' '}
+                        <span className="text-zinc-500 text-lg tabular-nums">
+                          ({managedTeamPlayers.length})
+                        </span>
                       </h2>
-                      <p className="text-xs text-neutral-500 mt-0.5">
+                      <p className="text-xs text-zinc-400 mt-0.5">
                         {effectiveManagedTeam.carrera}
                         {effectiveManagedTeam.anioFundacion
                           ? ` · Fundado en ${effectiveManagedTeam.anioFundacion}`
@@ -641,7 +647,7 @@ export function RegistrationView({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     {managedTeams.length > 1 && (
                       <select
                         aria-label="Seleccionar equipo a administrar"
@@ -652,7 +658,7 @@ export function RegistrationView({
                           setShowAddMember(false);
                           setShowIdentityEditor(false);
                         }}
-                        className="border border-neutral-300 bg-white px-3 py-2 text-sm text-[#0d0d0d]"
+                        className="rounded-full bg-[#111117] border border-white/[0.12] px-4 py-2 text-xs text-zinc-100 focus:outline-none focus:border-[#707ef9]"
                       >
                         {managedTeams.map((t) => (
                           <option key={t.id} value={t.id}>
@@ -670,10 +676,10 @@ export function RegistrationView({
                         setEditingPlayer(null);
                         setRosterErrors([]);
                       }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 border border-[#0d0d0d] bg-white hover:bg-[#0d0d0d] hover:text-white text-[#0d0d0d] text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.1] text-zinc-100 text-xs font-medium transition-colors cursor-pointer"
                     >
-                      <Shield className="w-4 h-4" />
-                      <span>{showIdentityEditor ? 'Cerrar escudo' : 'Escudo e Historia'}</span>
+                      <Shield className="w-3.5 h-3.5 text-[#a5b0ff]" />
+                      <span>{showIdentityEditor ? 'Cerrar escudo' : 'Escudo e historia'}</span>
                     </button>
 
                     <button
@@ -684,10 +690,10 @@ export function RegistrationView({
                         setEditingPlayer(null);
                         setRosterErrors([]);
                       }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors cursor-pointer"
                     >
-                      <Plus className="w-4 h-4" />
-                      <span>{showAddMember ? 'Cerrar formulario' : 'Agregar jugador al plantel'}</span>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{showAddMember ? 'Cerrar formulario' : 'Agregar jugador'}</span>
                     </button>
                   </div>
                 </div>
@@ -695,41 +701,42 @@ export function RegistrationView({
                 {rosterMsg && (
                   <div
                     role="status"
-                    className="bg-emerald-50 border border-emerald-300 p-4 text-xs text-emerald-950 flex items-center gap-2"
+                    className="rounded-2xl bg-emerald-500/10 border border-emerald-500/25 p-4 text-xs text-emerald-200 flex items-center gap-2.5"
                   >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span>{rosterMsg}</span>
                   </div>
                 )}
 
                 {rosterErrors.length > 0 && (
-                  <div role="alert" className="bg-red-50 border border-red-300 p-4 text-xs text-red-900 space-y-1">
+                  <div
+                    role="alert"
+                    className="rounded-2xl bg-red-500/10 border border-red-500/25 p-4 text-xs text-red-200 space-y-1"
+                  >
                     {rosterErrors.map((err, i) => (
                       <p key={i}>{err}</p>
                     ))}
                   </div>
                 )}
 
-                {/* Team Crest, Founding Year & Previous Titles Editor (Delegado / Admin) */}
                 {showIdentityEditor && (
                   <form
                     onSubmit={handleSaveTeamIdentity}
-                    className="border border-[#0d0d0d] bg-[#f5f6f8] p-6 space-y-5"
+                    className="rounded-3xl border border-white/[0.12] bg-[#0c0c10] p-6 space-y-5"
                   >
-                    <div className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+                    <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
                       <div>
-                        <h3 className="font-display text-lg font-bold uppercase text-[#0d0d0d]">
-                          Escudo oficial e historia de {effectiveManagedTeam.nombre}
+                        <h3 className="font-display text-lg font-medium text-white">
+                          Identidad de {effectiveManagedTeam.nombre}
                         </h3>
-                        <p className="text-xs text-neutral-600">
-                          Sube tu escudo sobre fondo blanco para quitar el fondo automáticamente, o
-                          carga directamente un PNG transparente / SVG.
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Actualiza escudo, año de fundación y palmarés del equipo.
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setShowIdentityEditor(false)}
-                        className="text-xs text-neutral-600 hover:text-[#0d0d0d] cursor-pointer"
+                        className="text-xs text-zinc-400 hover:text-white cursor-pointer"
                       >
                         Cancelar
                       </button>
@@ -745,7 +752,7 @@ export function RegistrationView({
                       <div>
                         <label
                           htmlFor="edit-team-year"
-                          className="block text-xs font-medium text-neutral-700 mb-1"
+                          className="block text-xs text-zinc-400 mb-1.5"
                         >
                           Año de fundación (opcional)
                         </label>
@@ -757,13 +764,13 @@ export function RegistrationView({
                           placeholder="Ej: 2018"
                           value={editTeamAnio}
                           onChange={(e) => setEditTeamAnio(e.target.value)}
-                          className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                          className={`${INPUT_CLASS} tabular-nums`}
                         />
                       </div>
                       <div className="md:col-span-2">
                         <label
                           htmlFor="edit-team-logros"
-                          className="block text-xs font-medium text-neutral-700 mb-1"
+                          className="block text-xs text-zinc-400 mb-1.5"
                         >
                           Títulos anteriores y palmarés (opcional)
                         </label>
@@ -774,7 +781,7 @@ export function RegistrationView({
                           placeholder="Ej: Campeón 2023, Subcampeón 2025"
                           value={editTeamLogros}
                           onChange={(e) => setEditTeamLogros(e.target.value)}
-                          className="w-full bg-white border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
+                          className={INPUT_CLASS}
                         />
                       </div>
                     </div>
@@ -782,22 +789,21 @@ export function RegistrationView({
                     <div className="flex justify-end">
                       <button
                         type="submit"
-                        className="px-5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                        className="px-6 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors cursor-pointer"
                       >
-                        Guardar identidad del equipo
+                        Guardar identidad
                       </button>
                     </div>
                   </form>
                 )}
 
-                {/* Add New Player to Existing Team Form */}
                 {showAddMember && (
                   <form
                     onSubmit={handleAddMemberSubmit}
-                    className="border border-[#707ef9] bg-[#f5f6f8] p-6 space-y-4"
+                    className="rounded-3xl border border-[#707ef9]/35 bg-[#0c0c10] p-6 space-y-5"
                   >
-                    <h3 className="font-display text-lg font-bold uppercase text-[#0d0d0d]">
-                      Incorporar Estudiante a {effectiveManagedTeam.nombre}
+                    <h3 className="font-display text-lg font-medium text-white">
+                      Incorporar estudiante a {effectiveManagedTeam.nombre}
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <input
@@ -807,7 +813,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, nombre: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -816,7 +822,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, apellidoPaterno: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -825,7 +831,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, apellidoMaterno: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -834,7 +840,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, rut: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                       <select
                         value={newMemberDraft.carrera}
@@ -846,7 +852,7 @@ export function RegistrationView({
                             facultad: found?.facultad ?? newMemberDraft.facultad,
                           });
                         }}
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       >
                         {UFRO_CAREERS.map((c) => (
                           <option key={c.carrera} value={c.carrera}>
@@ -861,7 +867,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, numeroMatricula: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                       <input
                         type="email"
@@ -873,7 +879,7 @@ export function RegistrationView({
                             correoInstitucional: e.target.value,
                           })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="date"
@@ -881,11 +887,11 @@ export function RegistrationView({
                         onChange={(e) =>
                           setNewMemberDraft({ ...newMemberDraft, fechaNacimiento: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                     </div>
                     <div className="flex items-center justify-between gap-4 pt-2">
-                      <label className="inline-flex items-center gap-2 text-xs font-medium text-[#0d0d0d] cursor-pointer">
+                      <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={newMemberDraft.esSeleccionadoUfro}
@@ -901,28 +907,27 @@ export function RegistrationView({
                       </label>
                       <button
                         type="submit"
-                        className="px-5 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                        className="px-6 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors cursor-pointer"
                       >
-                        Guardar nuevo jugador
+                        Guardar jugador
                       </button>
                     </div>
                   </form>
                 )}
 
-                {/* Inline Edit Existing Player Form */}
                 {editingPlayer && (
                   <form
                     onSubmit={handleSaveEditedMember}
-                    className="border border-[#0d0d0d] bg-[#f5f6f8] p-6 space-y-4"
+                    className="rounded-3xl border border-white/[0.14] bg-[#0c0c10] p-6 space-y-5"
                   >
                     <div className="flex items-center justify-between">
-                      <h3 className="font-display text-lg font-bold uppercase text-[#0d0d0d]">
+                      <h3 className="font-display text-lg font-medium text-white">
                         Editando ficha: {editingPlayer.nombre} {editingPlayer.apellidoPaterno}
                       </h3>
                       <button
                         type="button"
                         onClick={() => setEditingPlayer(null)}
-                        className="text-xs text-neutral-600 hover:text-[#0d0d0d] cursor-pointer"
+                        className="text-xs text-zinc-400 hover:text-white cursor-pointer"
                       >
                         Cancelar
                       </button>
@@ -935,7 +940,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, nombre: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -944,7 +949,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, apellidoPaterno: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -953,7 +958,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, apellidoMaterno: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="text"
@@ -962,7 +967,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, rut: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                       <select
                         aria-label="Carrera"
@@ -975,7 +980,7 @@ export function RegistrationView({
                             facultad: found?.facultad ?? editingPlayer.facultad,
                           });
                         }}
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       >
                         {UFRO_CAREERS.map((c) => (
                           <option key={c.carrera} value={c.carrera}>
@@ -990,7 +995,7 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, numeroMatricula: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                       <input
                         type="email"
@@ -1002,7 +1007,7 @@ export function RegistrationView({
                             correoInstitucional: e.target.value,
                           })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm"
+                        className={INPUT_CLASS}
                       />
                       <input
                         type="date"
@@ -1011,11 +1016,11 @@ export function RegistrationView({
                         onChange={(e) =>
                           setEditingPlayer({ ...editingPlayer, fechaNacimiento: e.target.value })
                         }
-                        className="bg-white border border-neutral-300 px-3 py-2 text-sm tabular-nums"
+                        className={`${INPUT_CLASS} tabular-nums`}
                       />
                     </div>
                     <div className="flex items-center justify-between pt-2">
-                      <label className="inline-flex items-center gap-2 text-xs font-medium text-[#0d0d0d] cursor-pointer">
+                      <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={editingPlayer.esSeleccionadoUfro}
@@ -1031,367 +1036,203 @@ export function RegistrationView({
                       </label>
                       <button
                         type="submit"
-                        className="px-5 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                        className="px-6 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5c6bf5] text-white text-xs font-medium transition-colors cursor-pointer"
                       >
-                        Guardar cambios del jugador
+                        Guardar cambios
                       </button>
                     </div>
                   </form>
                 )}
 
                 {/* Roster Table */}
-                <div className="border border-neutral-200 overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-[#f5f6f8] border-b border-neutral-200 text-xs text-neutral-500 uppercase">
-                        <th className="py-3 px-4 font-medium">Dorsal / Estudiante</th>
-                        <th className="py-3 px-3 font-medium">RUT</th>
-                        <th className="py-3 px-3 hidden md:table-cell font-medium">Carrera / Nivel</th>
-                        <th className="py-3 px-3 hidden lg:table-cell font-medium">Correo</th>
-                        <th className="py-3 px-4 text-right font-medium">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-200">
-                      {managedTeamPlayers.map((p) => (
-                        <tr key={p.id} className="hover:bg-[#f9fafb]">
-                          <td className="py-3 px-4">
-                            <p className="font-bold text-[#0d0d0d]">
-                              #{p.dorsal} {p.nombre} {p.apellidoPaterno} {p.apellidoMaterno}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              {p.posicion}
-                              {p.esSeleccionadoUfro && ' · Seleccionado UFRO'}
-                            </p>
-                          </td>
-                          <td className="py-3 px-3 text-xs tabular-nums text-neutral-700">
-                            {p.rut}
-                          </td>
-                          <td className="py-3 px-3 hidden md:table-cell text-xs text-neutral-700">
-                            {p.carrera} ({p.nivelAcademico})
-                          </td>
-                          <td className="py-3 px-3 hidden lg:table-cell text-xs text-neutral-600">
-                            {p.correoInstitucional}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingPlayer(p);
-                                setShowAddMember(false);
-                                setRosterErrors([]);
-                              }}
-                              className="inline-flex items-center gap-1 text-xs font-display font-bold uppercase tracking-wider text-[#707ef9] hover:text-[#0d0d0d] cursor-pointer"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Editar</span>
-                            </button>
-                          </td>
+                <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-white/[0.08] bg-white/[0.02] text-xs text-zinc-400">
+                          <th className="py-3.5 px-5 font-medium">Dorsal / Estudiante</th>
+                          <th className="py-3.5 px-4 font-medium">RUT</th>
+                          <th className="py-3.5 px-4 hidden md:table-cell font-medium">Carrera / Nivel</th>
+                          <th className="py-3.5 px-4 hidden lg:table-cell font-medium">Correo</th>
+                          <th className="py-3.5 px-5 text-right font-medium">Acción</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.06]">
+                        {managedTeamPlayers.map((p) => (
+                          <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="py-3.5 px-5">
+                              <p className="font-medium text-white">
+                                <span className="text-zinc-500 tabular-nums mr-1.5">#{p.dorsal}</span>
+                                {p.nombre} {p.apellidoPaterno} {p.apellidoMaterno}
+                              </p>
+                              <p className="text-xs text-zinc-400 mt-0.5">
+                                {p.posicion}
+                                {p.esSeleccionadoUfro && ' · Seleccionado UFRO'}
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 text-xs tabular-nums text-zinc-300">
+                              {p.rut}
+                            </td>
+                            <td className="py-3.5 px-4 hidden md:table-cell text-xs text-zinc-400">
+                              {p.carrera} ({p.nivelAcademico})
+                            </td>
+                            <td className="py-3.5 px-4 hidden lg:table-cell text-xs text-zinc-400">
+                              {p.correoInstitucional}
+                            </td>
+                            <td className="py-3.5 px-5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPlayer(p);
+                                  setShowAddMember(false);
+                                  setRosterErrors([]);
+                                }}
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#a5b0ff] hover:text-white transition-colors cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Editar</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </>
             )}
-          </div>
+          </RevealSection>
         ) : (
           <>
-        {successInfo && (
-          <div
-            role="status"
-            className="mb-8 border border-emerald-300 bg-emerald-50 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-          >
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-display text-lg font-bold uppercase text-emerald-950">
-                  Equipo «{successInfo.teamName}» inscrito correctamente
-                </p>
-                <p className="text-sm text-emerald-900 mt-0.5">
-                  Se registraron {successInfo.count} estudiante(s) y el equipo ya aparece asignado en
-                  la tabla de posiciones y cupos de {currentMeta.nombre}.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenSheetsSync}
-              className="px-4 py-2.5 bg-[#0d0d0d] text-white text-xs font-display font-bold uppercase tracking-widest hover:bg-[#707ef9] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Guardar en Google Sheets
-            </button>
-          </div>
-        )}
-
-        {errors.length > 0 && (
-          <div role="alert" className="mb-8 border border-red-300 bg-red-50 p-5 space-y-2">
-            <p className="font-display text-base font-bold uppercase text-red-900">
-              Corrige los siguientes campos antes de inscribir el equipo
-            </p>
-            <ul className="list-disc pl-5 text-sm text-red-800 space-y-1">
-              {errors.map((err, i) => (
-                <li key={i}>{err}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} noValidate className="space-y-10">
-          {/* Team Data Block */}
-          <div className="border border-neutral-200 p-6 sm:p-8 space-y-6">
-            <div className="flex items-center justify-between gap-4 border-b border-neutral-200 pb-4">
-              <div className="flex items-center gap-3">
-                <img
-                  src={LOGO_DARK_SVG}
-                  alt=""
-                  aria-hidden="true"
-                  className="h-6 w-auto"
-                  referrerPolicy="no-referrer"
-                />
-                <div>
-                  <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                    1. Datos del Equipo
-                  </h2>
-                  <p className="text-xs text-neutral-500">
-                    Disciplina seleccionada: {currentMeta.nombre} · Cupos restantes:{' '}
-                    <strong className="text-[#0d0d0d] tabular-nums">{remainingSlots}</strong> ·
-                    Máx. seleccionados UFRO: {currentMeta.maxSeleccionadosPorEquipo}
-                  </p>
-                </div>
-              </div>
-              <span
-                className={`text-xs font-bold uppercase tracking-wider ${
-                  currentConfig.inscripcionesAbiertas ? 'text-emerald-700' : 'text-red-600'
-                }`}
-              >
-                {currentConfig.inscripcionesAbiertas ? 'Inscripciones Abiertas' : 'Inscripciones Cerradas'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              <div>
-                <label htmlFor="reg-discipline" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Disciplina y División *
-                </label>
-                <select
-                  id="reg-discipline"
-                  value={disciplineId}
-                  onChange={(e) => setDisciplineId(e.target.value as DisciplineId)}
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                >
-                  {DISCIPLINES.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="reg-team-name" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Nombre Oficial del Equipo *
-                </label>
-                <input
-                  id="reg-team-name"
-                  type="text"
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                  placeholder="Ej: Atlético Ingeniería UFRO"
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="reg-team-career" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Carrera Representada *
-                </label>
-                <select
-                  id="reg-team-career"
-                  value={teamCarrera}
-                  onChange={(e) => handleTeamCarreraChange(e.target.value)}
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                >
-                  {UFRO_CAREERS.map((c) => (
-                    <option key={c.carrera} value={c.carrera}>
-                      {c.carrera}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-neutral-500 mt-1 truncate">
-                  {selectedCareerObj.facultad}
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="reg-captain-email" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Correo Institucional Capitán *
-                </label>
-                <input
-                  id="reg-captain-email"
-                  type="email"
-                  value={capitanCorreo}
-                  onChange={(e) => setCapitanCorreo(e.target.value)}
-                  placeholder="capitan@ufromail.cl"
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 border-t border-neutral-100">
-              <div>
-                <label htmlFor="reg-team-year" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Año de Fundación (opcional)
-                </label>
-                <input
-                  id="reg-team-year"
-                  type="number"
-                  min={1950}
-                  max={2035}
-                  value={teamAnioFundacion}
-                  onChange={(e) => setTeamAnioFundacion(e.target.value)}
-                  placeholder="Ej: 2019"
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] tabular-nums focus:outline-none focus:border-[#707ef9]"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label htmlFor="reg-team-logros" className="block text-xs font-medium text-neutral-700 mb-1.5">
-                  Títulos y Logros Anteriores (opcional)
-                </label>
-                <input
-                  id="reg-team-logros"
-                  type="text"
-                  maxLength={160}
-                  value={teamLogros}
-                  onChange={(e) => setTeamLogros(e.target.value)}
-                  placeholder="Ej: Campeón 2024, 3er Lugar 2025"
-                  className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm text-[#0d0d0d] focus:outline-none focus:border-[#707ef9]"
-                />
-              </div>
-            </div>
-
-            <CrestUploader
-              value={teamEscudo}
-              onChange={(nextUrl) => setTeamEscudo(nextUrl ?? '')}
-              teamName={teamName || 'Equipo'}
-            />
-          </div>
-
-          {/* Roster Builder (All 12 Mandatory Fields) */}
-          <div className="space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                  2. Nómina de Jugadores (12 Campos Oficiales UFRO)
-                </h2>
-                <p className="text-xs text-neutral-500 mt-0.5">
-                  Mínimo reglamentario en cancha: {currentMeta.minJugadores} · Máximo en plantilla:{' '}
-                  {currentMeta.maxJugadores} jugadores.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={addPlayerRow}
-                disabled={roster.length >= currentMeta.maxJugadores}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap self-start sm:self-auto"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Agregar estudiante ({roster.length}/{currentMeta.maxJugadores})</span>
-              </button>
-            </div>
-
-            {roster.map((player, idx) => (
+            {successInfo && (
               <div
-                key={player.tempId}
-                className="border border-neutral-200 bg-white p-6 space-y-5"
+                role="status"
+                className="mb-8 rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
-                <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-[#707ef9]" />
-                    <h3 className="font-display text-base font-bold uppercase tracking-wide text-[#0d0d0d]">
-                      Estudiante #{idx + 1}
-                    </h3>
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-display text-lg font-medium text-white">
+                      Equipo «{successInfo.teamName}» inscrito correctamente
+                    </p>
+                    <p className="text-xs text-emerald-200/80 mt-0.5">
+                      {successInfo.count} estudiante(s) registrados en {currentMeta.nombre}.
+                    </p>
                   </div>
-                  {roster.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removePlayerRow(player.tempId)}
-                      aria-label={`Eliminar estudiante ${idx + 1}`}
-                      className="inline-flex items-center gap-1.5 text-xs text-red-600 hover:text-red-800 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Quitar</span>
-                    </button>
-                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenSheetsSync}
+                  className="px-5 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Guardar en Google Sheets
+                </button>
+              </div>
+            )}
+
+            {errors.length > 0 && (
+              <div
+                role="alert"
+                className="mb-8 rounded-3xl border border-red-500/30 bg-red-500/10 p-5 sm:p-6 space-y-2"
+              >
+                <p className="font-display text-base font-medium text-red-200">
+                  Corrige los siguientes campos antes de inscribir el equipo
+                </p>
+                <ul className="list-disc pl-5 text-xs text-red-200/90 space-y-1">
+                  {errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} noValidate className="space-y-8">
+              {/* Team Data Block */}
+              <RevealSection className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-6 sm:p-8 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
+                  <div className="flex items-center gap-3.5">
+                    <img
+                      src={LOGO_LIGHT_SVG}
+                      alt=""
+                      aria-hidden="true"
+                      className="h-6 w-auto opacity-90"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div>
+                      <h2 className="font-display text-2xl font-medium tracking-[-0.02em] text-white">
+                        1. Datos del <span className="font-editorial text-[#c8ceff]">equipo</span>
+                      </h2>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {currentMeta.nombre} · Cupos restantes:{' '}
+                        <strong className="text-white tabular-nums">{remainingSlots}</strong> · Máx.
+                        seleccionados UFRO: {currentMeta.maxSeleccionadosPorEquipo}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-medium border ${
+                      currentConfig.inscripcionesAbiertas
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : 'border-red-500/30 bg-red-500/10 text-red-300'
+                    }`}
+                  >
+                    {currentConfig.inscripcionesAbiertas
+                      ? 'Inscripciones abiertas'
+                      : 'Inscripciones cerradas'}
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                   <div>
-                    <label htmlFor={`p-nombre-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      1. Nombre *
-                    </label>
-                    <input
-                      id={`p-nombre-${idx}`}
-                      type="text"
-                      value={player.nombre}
-                      onChange={(e) => updateDraftPlayer(player.tempId, 'nombre', e.target.value)}
-                      placeholder="Ej: Sofía"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-app-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      2. Apellido Paterno *
-                    </label>
-                    <input
-                      id={`p-app-${idx}`}
-                      type="text"
-                      value={player.apellidoPaterno}
-                      onChange={(e) =>
-                        updateDraftPlayer(player.tempId, 'apellidoPaterno', e.target.value)
-                      }
-                      placeholder="Ej: Catrileo"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-apm-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      3. Apellido Materno *
-                    </label>
-                    <input
-                      id={`p-apm-${idx}`}
-                      type="text"
-                      value={player.apellidoMaterno}
-                      onChange={(e) =>
-                        updateDraftPlayer(player.tempId, 'apellidoMaterno', e.target.value)
-                      }
-                      placeholder="Ej: Muñoz"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-rut-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      4. RUT (Chile) *
-                    </label>
-                    <input
-                      id={`p-rut-${idx}`}
-                      type="text"
-                      value={player.rut}
-                      onChange={(e) => updateDraftPlayer(player.tempId, 'rut', e.target.value)}
-                      placeholder="20.456.789-1"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor={`p-carrera-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      5. Carrera *
+                    <label
+                      htmlFor="reg-discipline"
+                      className="block text-xs text-zinc-400 mb-1.5"
+                    >
+                      Disciplina y división *
                     </label>
                     <select
-                      id={`p-carrera-${idx}`}
-                      value={player.carrera}
-                      onChange={(e) => updateDraftPlayer(player.tempId, 'carrera', e.target.value)}
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#707ef9]"
+                      id="reg-discipline"
+                      value={disciplineId}
+                      onChange={(e) => setDisciplineId(e.target.value as DisciplineId)}
+                      className={INPUT_CLASS}
+                    >
+                      {DISCIPLINES.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="reg-team-name"
+                      className="block text-xs text-zinc-400 mb-1.5"
+                    >
+                      Nombre oficial del equipo *
+                    </label>
+                    <input
+                      id="reg-team-name"
+                      type="text"
+                      value={teamName}
+                      onChange={(e) => setTeamName(e.target.value)}
+                      placeholder="Ej: Atlético Ingeniería UFRO"
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="reg-team-career"
+                      className="block text-xs text-zinc-400 mb-1.5"
+                    >
+                      Carrera representada *
+                    </label>
+                    <select
+                      id="reg-team-career"
+                      value={teamCarrera}
+                      onChange={(e) => handleTeamCarreraChange(e.target.value)}
+                      className={INPUT_CLASS}
                     >
                       {UFRO_CAREERS.map((c) => (
                         <option key={c.carrera} value={c.carrera}>
@@ -1399,146 +1240,338 @@ export function RegistrationView({
                         </option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label htmlFor={`p-facultad-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      6. Facultad (automática)
-                    </label>
-                    <input
-                      id={`p-facultad-${idx}`}
-                      type="text"
-                      value={player.facultad}
-                      readOnly
-                      className="w-full border border-neutral-200 bg-[#f5f6f8] px-3 py-2 text-sm text-neutral-600"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-mat-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      7. Número de Matrícula *
-                    </label>
-                    <input
-                      id={`p-mat-${idx}`}
-                      type="text"
-                      value={player.numeroMatricula}
-                      onChange={(e) =>
-                        updateDraftPlayer(player.tempId, 'numeroMatricula', e.target.value)
-                      }
-                      placeholder="20456789122"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-email-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      8. Correo Institucional *
-                    </label>
-                    <input
-                      id={`p-email-${idx}`}
-                      type="email"
-                      value={player.correoInstitucional}
-                      onChange={(e) =>
-                        updateDraftPlayer(player.tempId, 'correoInstitucional', e.target.value)
-                      }
-                      placeholder="s.catrileo01@ufromail.cl"
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:border-[#707ef9]"
-                    />
+                    <p className="text-[11px] text-zinc-500 mt-1 truncate">
+                      {selectedCareerObj.facultad}
+                    </p>
                   </div>
 
                   <div>
-                    <label htmlFor={`p-nivel-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      9. Pregrado / Postgrado *
-                    </label>
-                    <select
-                      id={`p-nivel-${idx}`}
-                      value={player.nivelAcademico}
-                      onChange={(e) =>
-                        updateDraftPlayer(
-                          player.tempId,
-                          'nivelAcademico',
-                          e.target.value as AcademicLevel
-                        )
-                      }
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#707ef9]"
+                    <label
+                      htmlFor="reg-captain-email"
+                      className="block text-xs text-zinc-400 mb-1.5"
                     >
-                      <option value="Pregrado">Pregrado</option>
-                      <option value="Postgrado">Postgrado</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor={`p-dob-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      10. Fecha de Nacimiento *
+                      Correo institucional capitán *
                     </label>
                     <input
-                      id={`p-dob-${idx}`}
-                      type="date"
-                      value={player.fechaNacimiento}
-                      onChange={(e) =>
-                        updateDraftPlayer(player.tempId, 'fechaNacimiento', e.target.value)
-                      }
-                      className="w-full border border-neutral-300 px-3 py-2 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                      id="reg-captain-email"
+                      type="email"
+                      value={capitanCorreo}
+                      onChange={(e) => setCapitanCorreo(e.target.value)}
+                      placeholder="capitan@ufromail.cl"
+                      className={INPUT_CLASS}
                     />
-                  </div>
-                  <div>
-                    <label htmlFor={`p-foto-${idx}`} className="block text-xs text-neutral-600 mb-1">
-                      11. Fotografía del Estudiante
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <label
-                        htmlFor={`p-foto-${idx}`}
-                        className="flex-1 inline-flex items-center justify-center gap-2 border border-neutral-300 px-3 py-2 text-xs font-medium text-neutral-700 hover:border-[#707ef9] cursor-pointer truncate"
-                      >
-                        <Upload className="w-3.5 h-3.5 shrink-0 text-[#707ef9]" />
-                        <span className="truncate">
-                          {player.fotografia ? 'Foto cargada (cambiar)' : 'Subir foto'}
-                        </span>
-                      </label>
-                      <input
-                        id={`p-foto-${idx}`}
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handlePhotoUpload(player.tempId, e)}
-                        className="sr-only"
-                      />
-                      {player.fotografia && (
-                        <img
-                          src={player.fotografia}
-                          alt="Vista previa estudiante"
-                          className="w-9 h-9 object-cover border border-neutral-200 shrink-0"
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-end pb-1">
-                    <label className="inline-flex items-center gap-2.5 text-xs font-medium text-[#0d0d0d] cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={player.esSeleccionadoUfro}
-                        onChange={(e) =>
-                          updateDraftPlayer(player.tempId, 'esSeleccionadoUfro', e.target.checked)
-                        }
-                        className="accent-[#707ef9] w-4 h-4"
-                      />
-                      <span>12. Seleccionado de la Universidad (UFRO)</span>
-                    </label>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-neutral-200">
-            <p className="text-xs text-neutral-500">
-              Al enviar, el equipo quedará asignado al grupo con menor carga de la disciplina y
-              disponible para sincronización en la plantilla de Google Sheets.
-            </p>
-            <button
-              type="submit"
-              disabled={!canManage || !currentConfig.inscripcionesAbiertas || remainingSlots <= 0}
-              className="px-7 py-3.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-sm transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-            >
-              Confirmar inscripción oficial
-            </button>
-          </div>
-        </form>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-4 border-t border-white/[0.06]">
+                  <div>
+                    <label
+                      htmlFor="reg-team-year"
+                      className="block text-xs text-zinc-400 mb-1.5"
+                    >
+                      Año de fundación (opcional)
+                    </label>
+                    <input
+                      id="reg-team-year"
+                      type="number"
+                      min={1950}
+                      max={2035}
+                      value={teamAnioFundacion}
+                      onChange={(e) => setTeamAnioFundacion(e.target.value)}
+                      placeholder="Ej: 2019"
+                      className={`${INPUT_CLASS} tabular-nums`}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label
+                      htmlFor="reg-team-logros"
+                      className="block text-xs text-zinc-400 mb-1.5"
+                    >
+                      Títulos y logros anteriores (opcional)
+                    </label>
+                    <input
+                      id="reg-team-logros"
+                      type="text"
+                      maxLength={160}
+                      value={teamLogros}
+                      onChange={(e) => setTeamLogros(e.target.value)}
+                      placeholder="Ej: Campeón 2024, 3er Lugar 2025"
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                </div>
+
+                <CrestUploader
+                  value={teamEscudo}
+                  onChange={(nextUrl) => setTeamEscudo(nextUrl ?? '')}
+                  teamName={teamName || 'Equipo'}
+                />
+              </RevealSection>
+
+              {/* Roster Builder (All 12 Mandatory Fields) */}
+              <div className="space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="font-display text-2xl font-medium tracking-[-0.02em] text-white">
+                      2. Nómina de <span className="font-editorial text-[#c8ceff]">jugadores</span>
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      12 campos oficiales · Mínimo {currentMeta.minJugadores} · Máximo{' '}
+                      {currentMeta.maxJugadores} jugadores.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addPlayerRow}
+                    disabled={roster.length >= currentMeta.maxJugadores}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.1] text-white text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#a5b0ff]" />
+                    <span>
+                      Agregar estudiante ({roster.length}/{currentMeta.maxJugadores})
+                    </span>
+                  </button>
+                </div>
+
+                {roster.map((player, idx) => (
+                  <div
+                    key={player.tempId}
+                    className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-6 space-y-5"
+                  >
+                    <div className="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <Users className="w-4 h-4 text-[#a5b0ff]" />
+                        <h3 className="font-display text-base font-medium text-white">
+                          Estudiante #{idx + 1}
+                        </h3>
+                      </div>
+                      {roster.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removePlayerRow(player.tempId)}
+                          aria-label={`Eliminar estudiante ${idx + 1}`}
+                          className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Quitar</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label htmlFor={`p-nombre-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          1. Nombre *
+                        </label>
+                        <input
+                          id={`p-nombre-${idx}`}
+                          type="text"
+                          value={player.nombre}
+                          onChange={(e) => updateDraftPlayer(player.tempId, 'nombre', e.target.value)}
+                          placeholder="Ej: Sofía"
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-app-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          2. Apellido Paterno *
+                        </label>
+                        <input
+                          id={`p-app-${idx}`}
+                          type="text"
+                          value={player.apellidoPaterno}
+                          onChange={(e) =>
+                            updateDraftPlayer(player.tempId, 'apellidoPaterno', e.target.value)
+                          }
+                          placeholder="Ej: Catrileo"
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-apm-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          3. Apellido Materno *
+                        </label>
+                        <input
+                          id={`p-apm-${idx}`}
+                          type="text"
+                          value={player.apellidoMaterno}
+                          onChange={(e) =>
+                            updateDraftPlayer(player.tempId, 'apellidoMaterno', e.target.value)
+                          }
+                          placeholder="Ej: Muñoz"
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-rut-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          4. RUT (Chile) *
+                        </label>
+                        <input
+                          id={`p-rut-${idx}`}
+                          type="text"
+                          value={player.rut}
+                          onChange={(e) => updateDraftPlayer(player.tempId, 'rut', e.target.value)}
+                          placeholder="20.456.789-1"
+                          className={`${INPUT_CLASS} tabular-nums`}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor={`p-carrera-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          5. Carrera *
+                        </label>
+                        <select
+                          id={`p-carrera-${idx}`}
+                          value={player.carrera}
+                          onChange={(e) => updateDraftPlayer(player.tempId, 'carrera', e.target.value)}
+                          className={INPUT_CLASS}
+                        >
+                          {UFRO_CAREERS.map((c) => (
+                            <option key={c.carrera} value={c.carrera}>
+                              {c.carrera}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`p-facultad-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          6. Facultad (automática)
+                        </label>
+                        <input
+                          id={`p-facultad-${idx}`}
+                          type="text"
+                          value={player.facultad}
+                          readOnly
+                          className={READONLY_INPUT_CLASS}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-mat-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          7. Número de Matrícula *
+                        </label>
+                        <input
+                          id={`p-mat-${idx}`}
+                          type="text"
+                          value={player.numeroMatricula}
+                          onChange={(e) =>
+                            updateDraftPlayer(player.tempId, 'numeroMatricula', e.target.value)
+                          }
+                          placeholder="20456789122"
+                          className={`${INPUT_CLASS} tabular-nums`}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-email-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          8. Correo Institucional *
+                        </label>
+                        <input
+                          id={`p-email-${idx}`}
+                          type="email"
+                          value={player.correoInstitucional}
+                          onChange={(e) =>
+                            updateDraftPlayer(player.tempId, 'correoInstitucional', e.target.value)
+                          }
+                          placeholder="s.catrileo01@ufromail.cl"
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor={`p-nivel-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          9. Pregrado / Postgrado *
+                        </label>
+                        <select
+                          id={`p-nivel-${idx}`}
+                          value={player.nivelAcademico}
+                          onChange={(e) =>
+                            updateDraftPlayer(
+                              player.tempId,
+                              'nivelAcademico',
+                              e.target.value as AcademicLevel
+                            )
+                          }
+                          className={INPUT_CLASS}
+                        >
+                          <option value="Pregrado">Pregrado</option>
+                          <option value="Postgrado">Postgrado</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`p-dob-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          10. Fecha de Nacimiento *
+                        </label>
+                        <input
+                          id={`p-dob-${idx}`}
+                          type="date"
+                          value={player.fechaNacimiento}
+                          onChange={(e) =>
+                            updateDraftPlayer(player.tempId, 'fechaNacimiento', e.target.value)
+                          }
+                          className={`${INPUT_CLASS} tabular-nums`}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`p-foto-${idx}`} className="block text-xs text-zinc-400 mb-1.5">
+                          11. Fotografía del Estudiante
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor={`p-foto-${idx}`}
+                            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.1] bg-[#111117] px-3 py-2.5 text-xs text-zinc-200 hover:border-[#707ef9] transition-colors cursor-pointer truncate"
+                          >
+                            <Upload className="w-3.5 h-3.5 shrink-0 text-[#a5b0ff]" />
+                            <span className="truncate">
+                              {player.fotografia ? 'Foto cargada (cambiar)' : 'Subir foto'}
+                            </span>
+                          </label>
+                          <input
+                            id={`p-foto-${idx}`}
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handlePhotoUpload(player.tempId, e)}
+                            className="sr-only"
+                          />
+                          {player.fotografia && (
+                            <img
+                              src={player.fotografia}
+                              alt="Vista previa estudiante"
+                              className="w-10 h-10 rounded-xl object-cover border border-white/[0.1] shrink-0"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="inline-flex items-center gap-2.5 text-xs text-zinc-200 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={player.esSeleccionadoUfro}
+                            onChange={(e) =>
+                              updateDraftPlayer(player.tempId, 'esSeleccionadoUfro', e.target.checked)
+                            }
+                            className="accent-[#707ef9] w-4 h-4"
+                          />
+                          <span>12. Seleccionado UFRO</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-6 border-t border-white/[0.08]">
+                <p className="text-xs text-zinc-400">
+                  El equipo se asignará al grupo con menor carga y quedará sincronizable con Sheets.
+                </p>
+                <button
+                  type="submit"
+                  disabled={!canManage || !currentConfig.inscripcionesAbiertas || remainingSlots <= 0}
+                  className="px-7 py-3 rounded-full bg-white text-[#050507] hover:bg-zinc-200 font-medium text-sm transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
+                >
+                  Confirmar inscripción oficial
+                </button>
+              </div>
+            </form>
           </>
         )}
       </div>

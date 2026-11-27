@@ -47,7 +47,6 @@ export function CrestUploader({
     const lower = file.name.toLowerCase();
     const isSvg = file.type === 'image/svg+xml' || lower.endsWith('.svg');
 
-    // Keep raw source for raster files so the delegate can toggle white-bg removal or adjust tolerance live
     if (!isSvg) {
       const reader = new FileReader();
       reader.onload = () => setRawOriginalUrl(String(reader.result || ''));
@@ -72,9 +71,9 @@ export function CrestUploader({
     onChange(res.dataUrl);
     setFormatBadge(res.format ?? null);
     if (res.format === 'svg') {
-      setStatusNote('SVG vectorial sanitizado y listo con transparencia nativa.');
+      setStatusNote('SVG vectorial listo con transparencia nativa.');
     } else if (res.removedBackground) {
-      setStatusNote('Fondo blanco removido automáticamente a PNG transparente.');
+      setStatusNote('Fondo blanco removido a PNG transparente.');
     } else {
       setStatusNote('PNG cargado conservando su transparencia original.');
     }
@@ -101,7 +100,7 @@ export function CrestUploader({
     setStatusNote(
       nextRemove
         ? 'Fondo blanco convertido a transparencia.'
-        : 'Transparencia original restaurada sin recorte.'
+        : 'Transparencia original restaurada.'
     );
   };
 
@@ -115,23 +114,25 @@ export function CrestUploader({
 
   const previewSurfaceClass =
     previewBg === 'dark'
-      ? 'bg-[#0d0d0d] border-neutral-800'
+      ? 'bg-[#050507] border-white/[0.12]'
       : previewBg === 'light'
-      ? 'bg-white border-neutral-300'
-      : 'bg-[repeating-conic-gradient(#e5e7eb_0%_25%,#ffffff_0%_50%)] [background-size:16px_16px] border-neutral-300';
+      ? 'bg-white border-white/30'
+      : 'bg-[repeating-conic-gradient(#27272a_0%_25%,#18181b_0%_50%)] [background-size:16px_16px] border-white/[0.12]';
 
   return (
-    <div className={`border border-neutral-200 bg-[#f5f6f8] ${compact ? 'p-4' : 'p-5'} space-y-4`}>
+    <div
+      className={`rounded-2xl border border-white/[0.08] bg-[#101016] ${
+        compact ? 'p-4' : 'p-5'
+      } space-y-4`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-[#0d0d0d] flex items-center gap-2">
-            <ImageIcon className="w-4 h-4 text-[#707ef9]" />
-            Escudo Oficial del Equipo (PNG transparente, SVG o fondo blanco)
+          <p className="text-sm font-medium text-white flex items-center gap-2">
+            <ImageIcon className="w-4 h-4 text-[#a5b0ff]" />
+            <span>Escudo oficial</span>
           </p>
-          <p className="text-xs text-neutral-600 mt-1">
-            Sube un <strong>PNG con transparencia</strong>, un archivo <strong>SVG</strong>, o una
-            imagen sobre <strong>fondo blanco</strong> para remover automáticamente el fondo y
-            obtener solo el escudo.
+          <p className="text-xs text-zinc-400 mt-1">
+            PNG transparente, SVG o imagen sobre fondo blanco para recorte automático.
           </p>
         </div>
 
@@ -147,28 +148,28 @@ export function CrestUploader({
             type="button"
             disabled={processing}
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] disabled:opacity-50 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 disabled:opacity-50 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
           >
             <Upload className="w-3.5 h-3.5" />
-            {value ? 'Cambiar Escudo' : 'Subir Escudo'}
+            <span>{value ? 'Cambiar escudo' : 'Subir escudo'}</span>
           </button>
           {value && (
             <button
               type="button"
               onClick={handleRemove}
-              className="inline-flex items-center gap-1.5 px-3 py-2 border border-neutral-300 bg-white hover:border-red-500 hover:text-red-600 text-neutral-700 text-xs font-medium transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-white/[0.12] bg-white/[0.04] hover:border-red-400/50 hover:text-red-300 text-zinc-300 text-xs font-medium transition-colors cursor-pointer"
               title="Quitar escudo"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              Quitar
+              <span>Quitar</span>
             </button>
           )}
         </div>
       </div>
 
       {/* White-background transparency controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-neutral-200">
-        <label className="inline-flex items-center gap-2 text-xs font-medium text-neutral-800 cursor-pointer">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/[0.06]">
+        <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
           <input
             type="checkbox"
             checked={removeWhiteBg}
@@ -176,15 +177,13 @@ export function CrestUploader({
             onChange={(e) => applyRasterReprocess(e.target.checked, threshold)}
             className="w-4 h-4 accent-[#707ef9]"
           />
-          <Eraser className="w-3.5 h-3.5 text-[#707ef9]" />
-          <span>Quitar fondo blanco automáticamente (preserva detalles blancos internos)</span>
+          <Eraser className="w-3.5 h-3.5 text-[#a5b0ff]" />
+          <span>Quitar fondo blanco automáticamente</span>
         </label>
 
         {removeWhiteBg && !isCurrentSvg && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] uppercase tracking-wider text-neutral-500 mr-1">
-              Tolerancia:
-            </span>
+            <span className="text-[11px] text-zinc-500 mr-1">Tolerancia:</span>
             {THRESHOLD_PRESETS.map((preset) => (
               <button
                 key={preset.label}
@@ -192,10 +191,10 @@ export function CrestUploader({
                 disabled={processing}
                 onClick={() => applyRasterReprocess(true, preset.value)}
                 title={preset.hint}
-                className={`px-2 py-1 text-[11px] font-medium border transition-colors cursor-pointer ${
+                className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer ${
                   threshold === preset.value
                     ? 'bg-[#707ef9] text-white border-[#707ef9]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:border-[#0d0d0d]'
+                    : 'bg-white/[0.03] text-zinc-300 border-white/[0.1] hover:border-white/[0.25]'
                 }`}
               >
                 {preset.label}
@@ -207,9 +206,9 @@ export function CrestUploader({
 
       {/* Live Preview over transparent / dark / light surfaces */}
       {value && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-2 border-t border-neutral-200">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-3 border-t border-white/[0.06]">
           <div
-            className={`w-24 h-24 p-2.5 border flex items-center justify-center shrink-0 ${previewSurfaceClass}`}
+            className={`w-24 h-24 rounded-2xl p-2.5 border flex items-center justify-center shrink-0 ${previewSurfaceClass}`}
           >
             <img
               src={value}
@@ -218,38 +217,36 @@ export function CrestUploader({
             />
           </div>
 
-          <div className="space-y-2 flex-1 min-w-0">
+          <div className="space-y-2.5 flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+              <span className="inline-flex items-center gap-1.5 text-emerald-300 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                {statusNote ?? 'Escudo cargado correctamente.'}
+                <span>{statusNote ?? 'Escudo cargado correctamente.'}</span>
               </span>
               {formatBadge && (
-                <span className="text-[11px] font-mono uppercase text-neutral-500">
+                <span className="text-[11px] font-mono uppercase text-zinc-500">
                   [{formatBadge.toUpperCase()}]
                 </span>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wider text-neutral-500">
-                Verificar transparencia sobre:
-              </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-zinc-500 mr-1">Fondo de prueba:</span>
               {(
                 [
-                  { id: 'dark', label: 'Fondo Oscuro' },
+                  { id: 'dark', label: 'Oscuro' },
                   { id: 'checker', label: 'Damero' },
-                  { id: 'light', label: 'Fondo Blanco' },
+                  { id: 'light', label: 'Claro' },
                 ] as const
               ).map((bg) => (
                 <button
                   key={bg.id}
                   type="button"
                   onClick={() => setPreviewBg(bg.id)}
-                  className={`px-2 py-0.5 text-[11px] border cursor-pointer ${
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer ${
                     previewBg === bg.id
-                      ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                      : 'bg-white text-neutral-700 border-neutral-300 hover:border-neutral-500'
+                      ? 'bg-white text-[#050507] border-white font-medium'
+                      : 'bg-white/[0.03] text-zinc-400 border-white/[0.1] hover:text-white'
                   }`}
                 >
                   {bg.label}
@@ -261,7 +258,9 @@ export function CrestUploader({
       )}
 
       {error && (
-        <p className="text-xs text-red-700 bg-red-50 border border-red-200 px-3 py-2">{error}</p>
+        <p className="text-xs text-red-300 bg-red-500/10 border border-red-500/25 rounded-xl px-3.5 py-2.5">
+          {error}
+        </p>
       )}
     </div>
   );

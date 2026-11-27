@@ -13,11 +13,8 @@ export interface MatchFilterBarProps {
   matches: Match[];
   disciplineFilter: 'ALL' | DisciplineId;
   onDisciplineChange?: (value: 'ALL' | DisciplineId) => void;
-  /** Optional custom list of disciplines (e.g. referee-authorized disciplines or a single team's discipline). */
   disciplineOptions?: DisciplineMeta[];
-  /** Whether to include "Todas las disciplinas" option. Defaults to true. */
   allowAllDisciplines?: boolean;
-  /** Locks the discipline selector visually when viewing a single fixed discipline/team. */
   disciplineLocked?: boolean;
   groupFilter: 'ALL' | string;
   onGroupChange: (value: 'ALL' | string) => void;
@@ -25,16 +22,11 @@ export interface MatchFilterBarProps {
   onStageChange: (value: 'ALL' | MatchPhase) => void;
   groupBy?: MatchGroupByMode;
   onGroupByChange?: (value: MatchGroupByMode) => void;
-  /** Chronological order: 'newest' (default, recent/scheduled first) or 'oldest'. */
   sortOrder?: MatchSortOrder;
   onSortOrderChange?: (value: MatchSortOrder) => void;
-  /** Optional additional dropdowns/inputs (e.g. Sede/Cancha, Estado, Búsqueda) rendered inside the same bar. */
   extraControls?: ReactNode;
-  /** Optional override for displayed filtered count when parent applies additional filters (e.g. venue/status/search). */
   filteredCount?: number;
-  /** Optional override for total count. Defaults to matches.length. */
   totalCount?: number;
-  /** Whether extra parent filters are active (keeps the Limpiar button enabled). */
   hasExtraActiveFilters?: boolean;
   onReset?: () => void;
   idPrefix: string;
@@ -117,20 +109,23 @@ export function MatchFilterBar({
       ? DISCIPLINE_MAP[disciplineFilter]?.nombreCorto ?? disciplineFilter
       : null;
 
+  const selectClass =
+    'w-full rounded-xl bg-[#111117] border border-white/[0.1] hover:border-white/[0.18] px-3 py-2 text-xs sm:text-sm text-zinc-100 font-normal focus:outline-none focus:border-[#707ef9] transition-colors disabled:opacity-50';
+
   return (
     <div
       data-match-filter-bar={idPrefix}
-      className={`bg-[#f5f6f8] border border-neutral-200 ${compact ? 'p-3.5 space-y-3' : 'p-4 space-y-3.5'}`}
+      className={`rounded-2xl bg-[#0c0c10] border border-white/[0.08] ${
+        compact ? 'p-4 space-y-3' : 'p-5 space-y-3.5'
+      }`}
     >
-      {/* Main Dropdown Selectors Row */}
       <div className="flex flex-wrap items-end gap-3">
-        {/* 1. DISCIPLINA */}
-        <div className="min-w-[195px] flex-1">
+        <div className="min-w-[185px] flex-1">
           <label
             htmlFor={`${idPrefix}-discipline`}
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+            className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 mb-1.5"
           >
-            <Filter className="w-3 h-3 text-[#707ef9]" />
+            <Filter className="w-3 h-3 text-[#9aa5ff]" />
             <span>Disciplina</span>
           </label>
           <select
@@ -138,12 +133,10 @@ export function MatchFilterBar({
             value={disciplineFilter}
             disabled={disciplineLocked || !onDisciplineChange}
             onChange={(e) => handleDisciplineSelect(e.target.value as 'ALL' | DisciplineId)}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9] disabled:bg-neutral-100 disabled:text-neutral-600"
+            className={selectClass}
           >
             {allowAllDisciplines && (
-              <option value="ALL">
-                Todas las disciplinas ({disciplineOptions.length})
-              </option>
+              <option value="ALL">Todas ({disciplineOptions.length})</option>
             )}
             {disciplineOptions.map((d) => {
               const count = facets.disciplineCounts[d.id] ?? 0;
@@ -156,22 +149,21 @@ export function MatchFilterBar({
           </select>
         </div>
 
-        {/* 2. GRUPO */}
-        <div className="min-w-[160px] flex-1">
+        <div className="min-w-[155px] flex-1">
           <label
             htmlFor={`${idPrefix}-group`}
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+            className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 mb-1.5"
           >
-            <Users className="w-3 h-3 text-[#707ef9]" />
+            <Users className="w-3 h-3 text-[#9aa5ff]" />
             <span>Grupo</span>
           </label>
           <select
             id={`${idPrefix}-group`}
             value={effectiveGroupValue}
             onChange={(e) => onGroupChange(e.target.value)}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+            className={selectClass}
           >
-            <option value="ALL">Todos los grupos ({facets.availableGroups.length})</option>
+            <option value="ALL">Todos ({facets.availableGroups.length})</option>
             {facets.availableGroups.map((g) => {
               const count = facets.groupCounts[g] ?? 0;
               return (
@@ -183,22 +175,21 @@ export function MatchFilterBar({
           </select>
         </div>
 
-        {/* 3. FASE */}
-        <div className="min-w-[160px] flex-1">
+        <div className="min-w-[155px] flex-1">
           <label
             htmlFor={`${idPrefix}-stage`}
-            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+            className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 mb-1.5"
           >
-            <Layers className="w-3 h-3 text-[#707ef9]" />
+            <Layers className="w-3 h-3 text-[#9aa5ff]" />
             <span>Fase</span>
           </label>
           <select
             id={`${idPrefix}-stage`}
             value={stageFilter}
             onChange={(e) => onStageChange(e.target.value as 'ALL' | MatchPhase)}
-            className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+            className={selectClass}
           >
-            <option value="ALL">Todas las fases</option>
+            <option value="ALL">Todas</option>
             {facets.availableStages.map((st) => {
               const count = facets.stageCounts[st] ?? 0;
               const label = st === 'Grupos' ? 'Fase de Grupos' : st;
@@ -211,64 +202,60 @@ export function MatchFilterBar({
           </select>
         </div>
 
-        {/* 4. OPTIONAL EXTRA CONTROLS (Sede, Estado, etc.) */}
         {extraControls}
 
-        {/* 5. OPTIONAL CHRONOLOGICAL ORDER */}
         {sortOrder !== undefined && onSortOrderChange && (
-          <div className="min-w-[195px] flex-1">
+          <div className="min-w-[180px] flex-1">
             <label
               htmlFor={`${idPrefix}-sort`}
-              className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 mb-1.5"
             >
-              <ArrowUpDown className="w-3 h-3 text-[#707ef9]" />
+              <ArrowUpDown className="w-3 h-3 text-[#9aa5ff]" />
               <span>Orden</span>
             </label>
             <select
               id={`${idPrefix}-sort`}
               value={sortOrder}
               onChange={(e) => onSortOrderChange(e.target.value as MatchSortOrder)}
-              className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+              className={selectClass}
             >
-              <option value="newest">Más recientes / programados</option>
+              <option value="newest">Recientes / próximos</option>
               <option value="oldest">Más antiguos primero</option>
             </select>
           </div>
         )}
 
-        {/* 6. OPTIONAL ORGANIZE BY */}
         {groupBy !== undefined && onGroupByChange && (
-          <div className="min-w-[170px] flex-1">
+          <div className="min-w-[165px] flex-1">
             <label
               htmlFor={`${idPrefix}-groupby`}
-              className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-600 mb-1"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 mb-1.5"
             >
-              <SlidersHorizontal className="w-3 h-3 text-[#707ef9]" />
-              <span>Organizar por</span>
+              <SlidersHorizontal className="w-3 h-3 text-[#9aa5ff]" />
+              <span>Agrupar</span>
             </label>
             <select
               id={`${idPrefix}-groupby`}
               value={groupBy}
               onChange={(e) => onGroupByChange(e.target.value as MatchGroupByMode)}
-              className="w-full bg-white border border-neutral-300 px-3 py-2 text-xs sm:text-sm text-[#0d0d0d] font-medium focus:outline-none focus:border-[#707ef9]"
+              className={selectClass}
             >
               <option value="none">Lista continua</option>
               {allowAllDisciplines && !disciplineLocked && (
-                <option value="disciplina">Agrupar por Disciplina</option>
+                <option value="disciplina">Por disciplina</option>
               )}
-              <option value="fase">Agrupar por Fase</option>
-              <option value="grupo">Agrupar por Grupo</option>
+              <option value="fase">Por fase</option>
+              <option value="grupo">Por grupo</option>
             </select>
           </div>
         )}
 
-        {/* RESET BUTTON */}
         <div className="shrink-0">
           <button
             type="button"
             onClick={handleReset}
             disabled={!hasActiveFilters}
-            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-neutral-300 hover:border-[#0d0d0d] text-xs font-medium text-[#0d0d0d] cursor-pointer disabled:opacity-40 whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/[0.1] hover:border-white/25 text-xs font-medium text-zinc-200 cursor-pointer disabled:opacity-35 transition-colors whitespace-nowrap"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Limpiar</span>
@@ -276,22 +263,21 @@ export function MatchFilterBar({
         </div>
       </div>
 
-      {/* Dynamic Active Filters & Results Counter Footer */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-neutral-200/80 text-xs">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-neutral-600 tabular-nums">
-            Mostrando <strong className="text-[#0d0d0d]">{shownCount}</strong> de{' '}
-            <strong className="text-[#0d0d0d]">{shownTotal}</strong> partidos
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-white/[0.06] text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-zinc-500 tabular-nums">
+            <strong className="text-zinc-200 font-medium">{shownCount}</strong> de{' '}
+            <strong className="text-zinc-200 font-medium">{shownTotal}</strong> partidos
           </span>
 
           {isDisciplineFiltered && activeDisciplineLabel && (
             <button
               type="button"
               onClick={() => handleDisciplineSelect('ALL')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#0d0d0d] text-white text-[11px] font-medium hover:bg-[#707ef9] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/[0.08] border border-white/[0.12] text-zinc-100 text-[11px] hover:border-white/30 transition-colors cursor-pointer"
               title="Quitar filtro de disciplina"
             >
-              <span>Disciplina: {activeDisciplineLabel}</span>
+              <span>{activeDisciplineLabel}</span>
               <X className="w-3 h-3" />
             </button>
           )}
@@ -300,10 +286,10 @@ export function MatchFilterBar({
             <button
               type="button"
               onClick={() => onGroupChange('ALL')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#707ef9] text-white text-[11px] font-medium hover:bg-[#0d0d0d] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#707ef9]/20 border border-[#707ef9]/35 text-[#c7ceff] text-[11px] hover:bg-[#707ef9]/30 transition-colors cursor-pointer"
               title="Quitar filtro de grupo"
             >
-              <span>Grupo: {effectiveGroupValue}</span>
+              <span>{effectiveGroupValue}</span>
               <X className="w-3 h-3" />
             </button>
           )}
@@ -312,10 +298,10 @@ export function MatchFilterBar({
             <button
               type="button"
               onClick={() => onStageChange('ALL')}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-[#0d0d0d] text-[#0d0d0d] text-[11px] font-medium hover:bg-[#0d0d0d] hover:text-white transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/[0.08] border border-white/[0.12] text-zinc-100 text-[11px] hover:border-white/30 transition-colors cursor-pointer"
               title="Quitar filtro de fase"
             >
-              <span>Fase: {stageFilter === 'Grupos' ? 'Fase de Grupos' : stageFilter}</span>
+              <span>{stageFilter === 'Grupos' ? 'Fase de Grupos' : stageFilter}</span>
               <X className="w-3 h-3" />
             </button>
           )}

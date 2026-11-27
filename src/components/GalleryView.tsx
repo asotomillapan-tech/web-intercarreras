@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { motion } from 'motion/react';
 import {
   AlertCircle,
   Camera,
@@ -30,6 +31,7 @@ import {
 } from '../services/googleDrive';
 import type { AppUserProfile, DriveNode, PhotoEntry, TournamentState } from '../types/tournament';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EDITORIAL_EASE, RevealSection, SectionKicker } from './MotionPrimitives';
 
 interface GalleryViewProps {
   state: TournamentState;
@@ -58,7 +60,7 @@ export function GalleryView({
 
   // Google Drive Archive Explorer State
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbNode[]>([
-    { id: UFRO_DRIVE_2025_FOLDER_ID, name: 'Archivo Intercarreras 2025 (Google Drive)' },
+    { id: UFRO_DRIVE_2025_FOLDER_ID, name: 'Archivo 2025' },
   ]);
   const [driveItems, setDriveItems] = useState<DriveNode[]>([]);
   const [driveSource, setDriveSource] = useState<'drive_api_v3' | 'public_folder' | null>(null);
@@ -74,7 +76,7 @@ export function GalleryView({
     externalUrl?: string;
   } | null>(null);
 
-  // Mandatory Delete Confirmation Dialog State (Drive + Firestore)
+  // Delete Confirmation Dialog State
   const [pendingDeletePhoto, setPendingDeletePhoto] = useState<PhotoEntry | null>(null);
   const [deletingPhoto, setDeletingPhoto] = useState(false);
 
@@ -129,14 +131,12 @@ export function GalleryView({
   const switchArchiveSeason = (nextSeason: '2025' | '2026') => {
     setArchiveSeason(nextSeason);
     if (nextSeason === '2025') {
-      setBreadcrumbs([
-        { id: UFRO_DRIVE_2025_FOLDER_ID, name: 'Archivo Intercarreras 2025 (Google Drive)' },
-      ]);
+      setBreadcrumbs([{ id: UFRO_DRIVE_2025_FOLDER_ID, name: 'Archivo 2025' }]);
     } else if (state.driveUploadRootFolderId) {
       setBreadcrumbs([
         {
           id: state.driveUploadRootFolderId,
-          name: state.driveUploadRootFolderName || `Archivo Intercarreras ${state.temporada} (Google Drive)`,
+          name: state.driveUploadRootFolderName || `Archivo ${state.temporada}`,
         },
       ]);
     }
@@ -214,7 +214,7 @@ export function GalleryView({
     setSavingFolderConfig(true);
     try {
       await onSaveDriveRootFolder(extracted, cleanName);
-      setFolderConfigSuccess(`Carpeta raíz de Google Drive guardada: ${cleanName} (${extracted}).`);
+      setFolderConfigSuccess(`Carpeta raíz guardada: ${cleanName} (${extracted}).`);
     } catch (err: unknown) {
       setFolderConfigError(
         err instanceof Error ? err.message : 'No se pudo guardar la configuración de Drive.'
@@ -253,7 +253,7 @@ export function GalleryView({
       setDriveFolderInput(folder.id);
       setDriveFolderNameInput(folder.name);
       setFolderConfigSuccess(
-        `Carpeta oficial «${folder.name}» creada en Google Drive y vinculada al campeonato. Recuerda compartirla como Editor con tus fotógrafos acreditados.`
+        `Carpeta «${folder.name}» creada en Google Drive y vinculada al campeonato.`
       );
     } catch (err: unknown) {
       setFolderConfigError(
@@ -288,7 +288,7 @@ export function GalleryView({
     if (!isPremiacion && stageLabel) {
       parts.push(stageLabel);
     }
-    parts.push(matchLabel.trim() || '[Nombre del encuentro]');
+    parts.push(matchLabel.trim() || '[Encuentro]');
     return parts.join(' / ');
   }, [state.driveUploadRootFolderName, season, state.temporada, disciplineId, isPremiacion, stageLabel, matchLabel]);
 
@@ -301,23 +301,19 @@ export function GalleryView({
       return;
     }
     if (!state.driveUploadRootFolderId) {
-      setUploadError(
-        'Un Administrador UFRO debe vincular primero la Carpeta Raíz de Google Drive 2026 antes de subir fotografías.'
-      );
+      setUploadError('Un Administrador debe vincular primero la Carpeta Raíz de Google Drive.');
       return;
     }
     if (title.trim().length < 3) {
-      setUploadError('Ingresa un título descriptivo para la fotografía (mínimo 3 caracteres).');
+      setUploadError('Ingresa un título descriptivo (mínimo 3 caracteres).');
       return;
     }
     if (matchLabel.trim().length < 3) {
-      setUploadError(
-        'Indica el nombre de la subcarpeta del encuentro (ej: Fecha 1 · Medicina vs Ingeniería).'
-      );
+      setUploadError('Indica la subcarpeta del encuentro (ej: Fecha 1 · Medicina vs Ingeniería).');
       return;
     }
     if (!selectedFile) {
-      setUploadError('Selecciona una fotografía real (JPG, PNG o WebP) desde tu dispositivo.');
+      setUploadError('Selecciona una fotografía (JPG, PNG o WebP).');
       return;
     }
 
@@ -331,14 +327,14 @@ export function GalleryView({
         setUploadError(
           err instanceof Error
             ? err.message
-            : 'Debes autorizar Google Drive para subir fotografías directamente a la carpeta oficial.'
+            : 'Autoriza Google Drive para subir fotografías a la carpeta oficial.'
         );
         return;
       }
     }
 
     if (!token) {
-      setUploadError('No se obtuvo un token de Google Drive activo. Haz clic en Conectar Google Drive.');
+      setUploadError('No se obtuvo un token de Google Drive activo.');
       return;
     }
 
@@ -381,12 +377,10 @@ export function GalleryView({
         URL.revokeObjectURL(previewObjectUrl);
         setPreviewObjectUrl('');
       }
-      setUploadSuccess(
-        `Fotografía «${newPhoto.title}» subida a Google Drive (${uploaded.folderPath}) e indexada en Firestore.`
-      );
+      setUploadSuccess(`Fotografía «${newPhoto.title}» subida a Google Drive e indexada.`);
       setActiveTab('webdb');
     } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : 'No se pudo subir la fotografía a Google Drive.');
+      setUploadError(err instanceof Error ? err.message : 'No se pudo subir la fotografía.');
     } finally {
       setUploading(false);
     }
@@ -400,13 +394,11 @@ export function GalleryView({
       if (pendingDeletePhoto.driveFileId) {
         const token = getGoogleAccessToken();
         if (token) {
-          await trashDriveFile(token, pendingDeletePhoto.driveFileId).catch(() => {
-            // Non-fatal if file was already removed or owned by another user in Drive
-          });
+          await trashDriveFile(token, pendingDeletePhoto.driveFileId).catch(() => {});
         }
       }
       await onDeletePhoto(pendingDeletePhoto.id);
-      setUploadSuccess(`Fotografía «${pendingDeletePhoto.title}» eliminada del índice oficial.`);
+      setUploadSuccess(`Fotografía «${pendingDeletePhoto.title}» eliminada.`);
       setPendingDeletePhoto(null);
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : 'No se pudo eliminar la fotografía.');
@@ -425,129 +417,106 @@ export function GalleryView({
       : UFRO_DRIVE_2025_URL;
 
   return (
-    <div className="bg-white min-h-[75vh]">
-      {/* Carbon Editorial Header */}
-      <div className="bg-[#0d0d0d] text-white border-b border-white/10">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-            Base de Datos Fotográfica Oficial · Prensa Deportes UFRO
-          </p>
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mt-2">
+    <div className="bg-[#050507] text-zinc-100 min-h-[80vh]">
+      {/* Obsidian Editorial Header */}
+      <div className="border-b border-white/[0.08]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <SectionKicker index="01" label="Archivo Visual · Prensa Deportes UFRO" />
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mt-4">
             <div>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight">
-                Galería y Archivo Fotográfico
+              <h1 className="text-4xl sm:text-5xl font-medium tracking-[-0.035em] text-white">
+                Galería <span className="font-editorial text-[#c8ceff]">fotográfica</span>
               </h1>
-              <p className="text-sm text-neutral-400 mt-2 max-w-2xl">
-                Explora el archivo histórico 2025 en Google Drive y las capturas oficiales de la
-                temporada {state.temporada} subidas directamente a Google Drive bajo el mismo orden
-                por disciplina, fase y encuentro.
+              <p className="text-sm text-zinc-400 mt-3 max-w-xl">
+                Cobertura oficial y archivo histórico por disciplina, fase y encuentro.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1 bg-white/5 p-1 self-start lg:self-auto">
-              <button
-                type="button"
-                onClick={() => setActiveTab('drive')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest cursor-pointer whitespace-nowrap ${
-                  activeTab === 'drive'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                Archivo Google Drive
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('webdb')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest cursor-pointer whitespace-nowrap ${
-                  activeTab === 'webdb'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                Índice Web {state.temporada} ({state.photos.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('studio')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest cursor-pointer whitespace-nowrap ${
-                  activeTab === 'studio'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                Estudio Fotógrafo
-              </button>
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-full bg-white/[0.03] border border-white/[0.08] p-1 self-start lg:self-auto">
+              {[
+                { id: 'drive' as const, label: 'Archivo Drive' },
+                { id: 'webdb' as const, label: `Temporada ${state.temporada} (${state.photos.length})` },
+                { id: 'studio' as const, label: 'Estudio' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    activeTab === t.id
+                      ? 'bg-white text-[#050507]'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      <RevealSection className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
         {uploadSuccess && (
           <div
             role="status"
-            className="bg-emerald-50 border border-emerald-300 p-4 text-xs text-emerald-950 flex items-center justify-between gap-3"
+            className="rounded-2xl bg-emerald-500/10 border border-emerald-500/25 p-4 text-xs text-emerald-200 flex items-center justify-between gap-3"
           >
             <span className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>{uploadSuccess}</span>
             </span>
             <button
               type="button"
               onClick={() => setUploadSuccess(null)}
-              className="text-emerald-800 hover:underline cursor-pointer"
+              className="text-emerald-300 hover:text-white cursor-pointer"
             >
               Cerrar
             </button>
           </div>
         )}
 
-        {/* TAB 1: REAL GOOGLE DRIVE ARCHIVE (2025 + 2026) */}
+        {/* TAB 1: GOOGLE DRIVE ARCHIVE */}
         {activeTab === 'drive' && (
           <div className="space-y-6">
-            {/* Season Switcher */}
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => switchArchiveSeason('2025')}
-                  className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider cursor-pointer ${
+                  className={`px-4 py-2 rounded-full text-xs font-medium cursor-pointer transition-colors border ${
                     archiveSeason === '2025'
-                      ? 'bg-[#0d0d0d] text-white'
-                      : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                      ? 'bg-white text-[#050507] border-white'
+                      : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white'
                   }`}
                 >
-                  Temporada 2025 (Archivo Histórico)
+                  Temporada 2025
                 </button>
                 {state.driveUploadRootFolderId && (
                   <button
                     type="button"
                     onClick={() => switchArchiveSeason('2026')}
-                    className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider cursor-pointer ${
+                    className={`px-4 py-2 rounded-full text-xs font-medium cursor-pointer transition-colors border ${
                       archiveSeason === '2026'
-                        ? 'bg-[#707ef9] text-white'
-                        : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                        ? 'bg-[#707ef9] text-white border-[#707ef9]'
+                        : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white'
                     }`}
                   >
-                    Temporada {state.temporada} (Carpeta Oficial Drive)
+                    Temporada {state.temporada}
                   </button>
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2.5 text-xs">
                 {driveSource && (
-                  <span className="text-neutral-500">
-                    Fuente:{' '}
-                    <strong className="text-[#0d0d0d]">
-                      {driveSource === 'drive_api_v3' ? 'Google Drive API v3' : 'Carpeta Pública Drive'}
-                    </strong>
+                  <span className="text-zinc-500 hidden sm:inline">
+                    {driveSource === 'drive_api_v3' ? 'Drive API v3' : 'Carpeta pública'}
                   </span>
                 )}
                 <button
                   type="button"
                   onClick={() => void loadDriveFolder(currentDriveFolder.id)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-neutral-300 hover:border-[#707ef9] text-[#0d0d0d] cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-white/[0.1] bg-white/[0.03] hover:bg-white/[0.08] text-zinc-200 cursor-pointer transition-colors"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${driveLoading ? 'animate-spin' : ''}`} />
                   <span>Actualizar</span>
@@ -556,26 +525,26 @@ export function GalleryView({
                   href={activeDriveExternalUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0d0d0d] text-white hover:bg-[#707ef9] transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 font-medium transition-colors"
                 >
-                  <span>Abrir en Drive</span>
+                  <span>Abrir Drive</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>
             </div>
 
             {/* Breadcrumbs */}
-            <nav aria-label="Ruta en Google Drive" className="flex flex-wrap items-center gap-1.5 text-sm">
+            <nav aria-label="Ruta en Google Drive" className="flex flex-wrap items-center gap-1.5 text-xs">
               {breadcrumbs.map((crumb, idx) => (
                 <div key={crumb.id} className="flex items-center gap-1.5">
-                  {idx > 0 && <ChevronRight className="w-4 h-4 text-neutral-400" />}
+                  {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-zinc-600" />}
                   <button
                     type="button"
                     onClick={() => handleJumpBreadcrumb(idx)}
-                    className={`cursor-pointer ${
+                    className={`cursor-pointer transition-colors ${
                       idx === breadcrumbs.length - 1
-                        ? 'font-bold text-[#0d0d0d]'
-                        : 'text-[#707ef9] hover:underline'
+                        ? 'font-medium text-white'
+                        : 'text-[#a5b0ff] hover:text-white'
                     }`}
                   >
                     {crumb.name}
@@ -585,8 +554,11 @@ export function GalleryView({
             </nav>
 
             {driveError && (
-              <div role="alert" className="bg-red-50 border border-red-300 p-4 text-xs text-red-900 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <div
+                role="alert"
+                className="rounded-2xl bg-red-500/10 border border-red-500/25 p-4 text-xs text-red-200 flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                 <span>{driveError}</span>
               </div>
             )}
@@ -594,33 +566,35 @@ export function GalleryView({
             {driveLoading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[1, 2, 3, 4].map((n) => (
-                  <div key={n} className="h-28 bg-[#f5f6f8] border border-neutral-200 animate-pulse" />
+                  <div
+                    key={n}
+                    className="h-28 rounded-2xl bg-[#0c0c10] border border-white/[0.06] animate-pulse"
+                  />
                 ))}
               </div>
             ) : (
               <div className="space-y-8">
-                {/* Subfolders (Disciplines / Stages / Matches) */}
                 {driveFolders.length > 0 && (
                   <div className="space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                      Carpetas por Disciplina / Fase / Encuentro ({driveFolders.length})
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <p className="text-xs text-zinc-500">Carpetas ({driveFolders.length})</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                       {driveFolders.map((folder) => (
                         <button
                           key={folder.id}
                           type="button"
                           onClick={() => handleOpenDriveFolder(folder)}
-                          className="group text-left p-4 border border-neutral-200 bg-white hover:border-[#707ef9] hover:bg-[#f9fafb] transition-colors flex items-start gap-3 cursor-pointer"
+                          className="group text-left p-5 rounded-2xl border border-white/[0.08] bg-[#0c0c10] hover:border-white/[0.2] hover:bg-[#111118] transition-all flex items-start gap-3.5 cursor-pointer"
                         >
-                          <Folder className="w-5 h-5 text-[#707ef9] shrink-0 mt-0.5" />
+                          <div className="w-9 h-9 rounded-xl bg-[#707ef9]/15 border border-[#707ef9]/25 flex items-center justify-center shrink-0">
+                            <Folder className="w-4 h-4 text-[#a5b0ff]" />
+                          </div>
                           <div className="min-w-0">
-                            <p className="font-display text-base font-bold uppercase tracking-wide text-[#0d0d0d] group-hover:text-[#707ef9] break-words">
+                            <p className="text-sm font-medium text-white group-hover:text-[#c8ceff] transition-colors break-words">
                               {folder.name}
                             </p>
                             {folder.modifiedDate && (
-                              <p className="text-[11px] text-neutral-500 mt-1 tabular-nums">
-                                Actualizado: {folder.modifiedDate}
+                              <p className="text-[11px] text-zinc-500 mt-1 tabular-nums">
+                                {folder.modifiedDate}
                               </p>
                             )}
                           </div>
@@ -630,13 +604,11 @@ export function GalleryView({
                   </div>
                 )}
 
-                {/* Photos inside current folder */}
+                {/* Artfolio-inspired Editorial Photo Grid */}
                 {driveFiles.length > 0 && (
                   <div className="space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-                      Fotografías del encuentro ({driveFiles.length})
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <p className="text-xs text-zinc-500">Fotografías ({driveFiles.length})</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                       {driveFiles.map((file) => (
                         <button
                           key={file.id}
@@ -649,21 +621,19 @@ export function GalleryView({
                               externalUrl: file.webViewLink,
                             })
                           }
-                          className="group text-left border border-neutral-200 bg-white overflow-hidden hover:border-[#707ef9] transition-colors cursor-pointer"
+                          className="group relative text-left rounded-3xl overflow-hidden border border-white/[0.08] hover:border-white/[0.22] bg-[#0c0c10] aspect-[4/5] transition-all cursor-pointer"
                         >
-                          <div className="h-48 w-full bg-[#0d0d0d] overflow-hidden">
-                            <img
-                              src={file.thumbnailUrl}
-                              alt={file.name}
-                              loading="lazy"
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                          <div className="p-3">
-                            <p className="text-xs font-medium text-[#0d0d0d] truncate">{file.name}</p>
-                            <p className="text-[11px] text-neutral-500 mt-0.5">
-                              Google Drive · {archiveSeason}
+                          <img
+                            src={file.thumbnailUrl}
+                            alt={file.name}
+                            loading="lazy"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-4 pt-12">
+                            <p className="text-xs font-medium text-white truncate">{file.name}</p>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                              Drive · {archiveSeason}
                             </p>
                           </div>
                         </button>
@@ -673,7 +643,7 @@ export function GalleryView({
                 )}
 
                 {driveFolders.length === 0 && driveFiles.length === 0 && !driveError && (
-                  <div className="border border-neutral-200 p-10 text-center text-sm text-neutral-600">
+                  <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center text-sm text-zinc-500">
                     Esta carpeta aún no contiene elementos visibles.
                   </div>
                 )}
@@ -682,18 +652,18 @@ export function GalleryView({
           </div>
         )}
 
-        {/* TAB 2: WEB PHOTOGRAPHY INDEX (FIRESTORE + DRIVE LINKS) */}
+        {/* TAB 2: WEB PHOTOGRAPHY INDEX */}
         {activeTab === 'webdb' && (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setDiscFilter('ALL')}
-                  className={`px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors border ${
                     discFilter === 'ALL'
-                      ? 'bg-[#0d0d0d] text-white'
-                      : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                      ? 'bg-white text-[#050507] border-white'
+                      : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white'
                   }`}
                 >
                   Todas ({state.photos.length})
@@ -703,10 +673,10 @@ export function GalleryView({
                     key={d.id}
                     type="button"
                     onClick={() => setDiscFilter(d.id)}
-                    className={`px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors border ${
                       discFilter === d.id
-                        ? 'bg-[#707ef9] text-white'
-                        : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                        ? 'bg-[#707ef9] text-white border-[#707ef9]'
+                        : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:text-white'
                     }`}
                   >
                     {d.nombreCorto}
@@ -718,39 +688,38 @@ export function GalleryView({
                 <button
                   type="button"
                   onClick={() => setActiveTab('studio')}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer self-start sm:self-auto"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium cursor-pointer self-start sm:self-auto transition-colors"
                 >
-                  <Camera className="w-4 h-4" />
-                  <span>Subir a Google Drive</span>
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Subir fotografía</span>
                 </button>
               )}
             </div>
 
             {filteredWebPhotos.length === 0 ? (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-3">
-                <ImageIcon className="w-8 h-8 text-neutral-400 mx-auto" />
-                <p className="font-display text-xl uppercase text-[#0d0d0d]">
-                  Sin fotografías indexadas en la temporada {state.temporada}
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-3">
+                <ImageIcon className="w-8 h-8 text-zinc-600 mx-auto" />
+                <p className="text-xl font-medium text-white">
+                  Sin fotografías en la temporada {state.temporada}
                 </p>
-                <p className="text-xs text-neutral-600 max-w-md mx-auto">
-                  Cuando los fotógrafos acreditados suban cobertura desde el Estudio Fotógrafo, cada
-                  imagen se guardará automáticamente en Google Drive y aparecerá aquí.
+                <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                  Las capturas subidas desde el Estudio Fotógrafo aparecen aquí automáticamente.
                 </p>
-                <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
                   <button
                     type="button"
                     onClick={() => setActiveTab('drive')}
-                    className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                    className="px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium cursor-pointer transition-colors"
                   >
-                    Explorar Archivo 2025 en Drive
+                    Explorar Archivo 2025
                   </button>
                   {isPhotographerOrAdmin && (
                     <button
                       type="button"
                       onClick={() => setActiveTab('studio')}
-                      className="px-4 py-2 border border-neutral-300 bg-white hover:border-[#707ef9] text-[#0d0d0d] text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                      className="px-4 py-2 rounded-full border border-white/[0.12] bg-white/[0.04] hover:bg-white/[0.08] text-zinc-100 text-xs font-medium cursor-pointer transition-colors"
                     >
-                      Abrir Estudio Fotógrafo
+                      Abrir Estudio
                     </button>
                   )}
                 </div>
@@ -766,56 +735,53 @@ export function GalleryView({
                   return (
                     <article
                       key={photo.id}
-                      className="border border-neutral-200 bg-white overflow-hidden flex flex-col"
+                      className="group rounded-3xl border border-white/[0.08] hover:border-white/[0.18] bg-[#0c0c10] overflow-hidden flex flex-col transition-colors"
                     >
                       <button
                         type="button"
                         onClick={() =>
                           setLightboxPhoto({
                             title: photo.title,
-                            subtitle: `${photo.driveFolderPath || `${discName} · ${photo.matchLabel}`} · Foto: ${photo.photographerName}`,
+                            subtitle: `${photo.driveFolderPath || `${discName} · ${photo.matchLabel}`} · ${photo.photographerName}`,
                             imageUrl: photo.imageUrl,
                             externalUrl: photo.driveWebViewLink,
                           })
                         }
-                        className="h-56 w-full bg-[#0d0d0d] overflow-hidden cursor-pointer block"
+                        className="relative h-64 w-full bg-[#08080c] overflow-hidden cursor-pointer block"
                       >
                         <img
                           src={photo.thumbnailUrl || photo.imageUrl}
                           alt={photo.title}
                           loading="lazy"
-                          className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           referrerPolicy="no-referrer"
                         />
+                        <span className="absolute top-3.5 left-3.5 px-3 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/[0.14] text-[11px] font-medium text-white">
+                          {discName}
+                        </span>
                       </button>
-                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
+
+                      <div className="p-5 flex-1 flex flex-col justify-between gap-4">
                         <div>
-                          <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500 uppercase">
-                            <span className="text-[#707ef9] font-bold">{discName}</span>
-                            <span className="tabular-nums">Temporada {photo.season}</span>
+                          <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+                            <span>{photo.stageLabel || 'Cobertura oficial'}</span>
+                            <span className="tabular-nums">{photo.season}</span>
                           </div>
-                          <h3 className="font-display text-lg font-bold uppercase tracking-wide text-[#0d0d0d] mt-1">
+                          <h3 className="text-base font-medium text-white mt-1 leading-snug">
                             {photo.title}
                           </h3>
-                          <p className="text-xs text-neutral-600 mt-0.5">
-                            {photo.stageLabel ? `${photo.stageLabel} · ` : ''}
-                            {photo.matchLabel}
-                          </p>
-                          {photo.driveFolderPath && (
-                            <p className="text-[11px] text-neutral-400 mt-1 truncate font-mono">
-                              Drive: {photo.driveFolderPath}
-                            </p>
-                          )}
+                          <p className="text-xs text-zinc-400 mt-0.5">{photo.matchLabel}</p>
                         </div>
-                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-neutral-100 text-xs text-neutral-500">
-                          <span className="truncate">Por {photo.photographerName}</span>
+
+                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.06] text-xs text-zinc-500">
+                          <span className="truncate">{photo.photographerName}</span>
                           <div className="flex items-center gap-3 shrink-0">
                             {photo.driveWebViewLink && (
                               <a
                                 href={photo.driveWebViewLink}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-[#707ef9] hover:text-[#0d0d0d]"
+                                className="inline-flex items-center gap-1 text-[#a5b0ff] hover:text-white transition-colors"
                               >
                                 <span>Drive</span>
                                 <ExternalLink className="w-3 h-3" />
@@ -826,7 +792,7 @@ export function GalleryView({
                                 type="button"
                                 onClick={() => setPendingDeletePhoto(photo)}
                                 aria-label={`Eliminar fotografía ${photo.title}`}
-                                className="inline-flex items-center gap-1 text-red-600 hover:text-red-800 cursor-pointer"
+                                className="inline-flex items-center gap-1 text-red-400 hover:text-red-300 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                                 <span>Eliminar</span>
@@ -843,45 +809,42 @@ export function GalleryView({
           </div>
         )}
 
-        {/* TAB 3: PHOTOGRAPHER DIRECT GOOGLE DRIVE UPLOAD STUDIO */}
+        {/* TAB 3: PHOTOGRAPHER DIRECT GOOGLE DRIVE STUDIO */}
         {activeTab === 'studio' && (
-          <div className="max-w-3xl space-y-8">
+          <div className="max-w-3xl space-y-6">
             {!isPhotographerOrAdmin ? (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-8 space-y-4">
-                <div className="flex items-center gap-2 text-[#0d0d0d]">
-                  <Lock className="w-5 h-5 text-[#707ef9]" />
-                  <h2 className="font-display text-2xl font-bold uppercase tracking-wide">
-                    Acceso exclusivo para Fotógrafos Acreditados
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-8 space-y-4">
+                <div className="flex items-center gap-2.5 text-white">
+                  <Lock className="w-5 h-5 text-[#9aa5ff]" />
+                  <h2 className="text-xl font-medium tracking-[-0.02em]">
+                    Acceso para <span className="font-editorial text-[#c8ceff]">fotógrafos acreditados</span>
                   </h2>
                 </div>
-                <p className="text-sm text-neutral-600 leading-relaxed">
-                  Solo las cuentas con rol <strong>Fotógrafo Oficial</strong> o{' '}
-                  <strong>Administrador</strong> pueden subir fotografías directamente a la carpeta
-                  oficial de Google Drive del campeonato. Un Administrador UFRO puede promover una
-                  cuenta tradicional al rol de Fotógrafo desde{' '}
-                  <strong>Panel Oficial → Usuarios y Roles</strong>.
+                <p className="text-sm text-zinc-400 leading-relaxed">
+                  Solo cuentas con rol Fotógrafo Oficial o Administrador pueden subir fotografías
+                  directamente a la carpeta de Google Drive del campeonato.
                 </p>
                 <button
                   type="button"
                   onClick={onOpenAuth}
-                  className="px-5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer"
+                  className="px-5 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium cursor-pointer transition-colors"
                 >
-                  Iniciar sesión con Google
+                  Iniciar sesión
                 </button>
               </div>
             ) : (
               <>
-                {/* Admin Drive Root Folder Configuration Box */}
-                <div className="border border-neutral-200 bg-[#f5f6f8] p-6 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 pb-3">
+                {/* Admin Drive Root Folder Config */}
+                <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
                     <div>
-                      <p className="text-[11px] font-bold uppercase tracking-widest text-[#707ef9]">
-                        Destino Google Drive · Temporada {state.temporada}
+                      <p className="text-xs text-[#9aa5ff] font-medium">
+                        Destino Google Drive · {state.temporada}
                       </p>
-                      <h2 className="font-display text-xl font-bold uppercase text-[#0d0d0d] mt-0.5">
+                      <h2 className="text-lg font-medium text-white mt-0.5">
                         {state.driveUploadRootFolderId
-                          ? state.driveUploadRootFolderName || 'Carpeta Raíz Conectada'
-                          : 'Carpeta Raíz Google Drive pendiente de vincular'}
+                          ? state.driveUploadRootFolderName || 'Carpeta raíz conectada'
+                          : 'Carpeta raíz pendiente de vincular'}
                       </h2>
                     </div>
                     {state.driveUploadRootFolderId && (
@@ -889,81 +852,86 @@ export function GalleryView({
                         href={`https://drive.google.com/drive/folders/${state.driveUploadRootFolderId}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0d0d0d] text-white hover:bg-[#707ef9] text-xs font-medium self-start sm:self-auto"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-white text-xs self-start sm:self-auto transition-colors"
                       >
-                        <span>Ver carpeta raíz</span>
+                        <span>Ver carpeta</span>
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     )}
                   </div>
 
                   {state.driveUploadRootFolderId ? (
-                    <p className="text-xs text-neutral-600">
-                      ID de carpeta activa:{' '}
-                      <code className="bg-white border border-neutral-200 px-1.5 py-0.5 text-[#0d0d0d]">
+                    <p className="text-xs text-zinc-400">
+                      ID activo:{' '}
+                      <code className="bg-white/[0.06] border border-white/[0.08] rounded px-1.5 py-0.5 text-zinc-200">
                         {state.driveUploadRootFolderId}
                       </code>
-                      . Las fotografías se organizan automáticamente en subcarpetas con el mismo
-                      esquema del archivo 2025: <strong>Disciplina / Fase / Encuentro</strong>.
                     </p>
                   ) : (
-                    <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 p-3">
+                    <p className="text-xs text-amber-200 rounded-2xl bg-amber-500/10 border border-amber-500/25 p-3.5">
                       {isAdmin
-                        ? 'Aún no hay una Carpeta Raíz de Google Drive configurada para 2026. Crea una automáticamente en tu Google Drive o pega el enlace de una carpeta compartida abajo.'
-                        : 'Un Administrador UFRO debe vincular la Carpeta Raíz de Google Drive 2026 y compartirla contigo como Editor para habilitar las subidas.'}
+                        ? 'Crea una carpeta oficial en tu Drive o pega el enlace de una carpeta compartida.'
+                        : 'Un Administrador debe vincular la Carpeta Raíz 2026 para habilitar subidas.'}
                     </p>
                   )}
 
                   {isAdmin && (
-                    <div className="space-y-3 pt-2 border-t border-neutral-200">
+                    <div className="space-y-3 pt-2 border-t border-white/[0.08]">
                       {folderConfigError && (
-                        <div role="alert" className="bg-red-50 border border-red-300 p-3 text-xs text-red-900">
+                        <div
+                          role="alert"
+                          className="rounded-xl bg-red-500/10 border border-red-500/25 p-3 text-xs text-red-200"
+                        >
                           {folderConfigError}
                         </div>
                       )}
                       {folderConfigSuccess && (
-                        <div role="status" className="bg-emerald-50 border border-emerald-300 p-3 text-xs text-emerald-950">
+                        <div
+                          role="status"
+                          className="rounded-xl bg-emerald-500/10 border border-emerald-500/25 p-3 text-xs text-emerald-200"
+                        >
                           {folderConfigSuccess}
                         </div>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          type="button"
-                          disabled={savingFolderConfig}
-                          onClick={() => void handleAutoCreateDriveRoot()}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer disabled:opacity-50"
-                        >
-                          <FolderPlus className="w-4 h-4" />
-                          <span>
-                            {savingFolderConfig
-                              ? 'Creando...'
-                              : `Crear carpeta oficial ${state.temporada} en mi Google Drive`}
-                          </span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={savingFolderConfig}
+                        onClick={() => void handleAutoCreateDriveRoot()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] text-white text-xs font-medium cursor-pointer disabled:opacity-50 transition-colors"
+                      >
+                        <FolderPlus className="w-4 h-4" />
+                        <span>
+                          {savingFolderConfig
+                            ? 'Creando...'
+                            : `Crear carpeta ${state.temporada} en Drive`}
+                        </span>
+                      </button>
 
-                      <form onSubmit={handleSaveManualDriveRoot} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                      <form
+                        onSubmit={handleSaveManualDriveRoot}
+                        className="grid grid-cols-1 sm:grid-cols-12 gap-2.5"
+                      >
                         <input
                           type="text"
                           value={driveFolderInput}
                           onChange={(e) => setDriveFolderInput(e.target.value)}
-                          placeholder="O pega URL / ID de carpeta Google Drive compartida..."
+                          placeholder="URL o ID de carpeta compartida..."
                           aria-label="URL o ID de carpeta raíz Google Drive"
-                          className="sm:col-span-6 bg-white border border-neutral-300 px-3 py-2 text-xs font-mono"
+                          className="sm:col-span-6 rounded-xl bg-[#111117] border border-white/[0.1] px-3 py-2 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
                         />
                         <input
                           type="text"
                           value={driveFolderNameInput}
                           onChange={(e) => setDriveFolderNameInput(e.target.value)}
-                          placeholder="Nombre visible (ej: Intercarreras UFRO 2026)"
+                          placeholder="Nombre visible"
                           aria-label="Nombre de la carpeta raíz"
-                          className="sm:col-span-4 bg-white border border-neutral-300 px-3 py-2 text-xs"
+                          className="sm:col-span-4 rounded-xl bg-[#111117] border border-white/[0.1] px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
                         />
                         <button
                           type="submit"
                           disabled={savingFolderConfig}
-                          className="sm:col-span-2 px-3 py-2 bg-[#0d0d0d] hover:bg-neutral-800 text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer disabled:opacity-50"
+                          className="sm:col-span-2 px-3 py-2 rounded-xl bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium cursor-pointer disabled:opacity-50 transition-colors"
                         >
                           Vincular
                         </button>
@@ -972,18 +940,18 @@ export function GalleryView({
                   )}
                 </div>
 
-                {/* Direct Google Drive Upload Form */}
+                {/* Upload Form */}
                 <form
                   onSubmit={handleUploadSubmit}
-                  className="border border-neutral-200 p-6 sm:p-8 space-y-6"
+                  className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-6 sm:p-8 space-y-6"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 pb-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
                     <div>
-                      <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                        Estudio de Fotógrafo · {currentUser?.displayName}
+                      <p className="text-xs text-[#9aa5ff] font-medium">
+                        Estudio · {currentUser?.displayName}
                       </p>
-                      <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d] mt-1">
-                        Subir Fotografía Directo a Google Drive
+                      <h2 className="text-xl font-medium text-white mt-0.5">
+                        Subir fotografía a <span className="font-editorial text-[#c8ceff]">Drive</span>
                       </h2>
                     </div>
 
@@ -992,9 +960,9 @@ export function GalleryView({
                         type="button"
                         onClick={() => void handleConnectGoogleDrive()}
                         disabled={connectingDrive}
-                        className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest cursor-pointer self-start sm:self-auto"
+                        className="px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium cursor-pointer self-start sm:self-auto transition-colors"
                       >
-                        {connectingDrive ? 'Conectando...' : 'Conectar Google Drive'}
+                        {connectingDrive ? 'Conectando...' : 'Conectar Drive'}
                       </button>
                     )}
                   </div>
@@ -1002,37 +970,37 @@ export function GalleryView({
                   {uploadError && (
                     <div
                       role="alert"
-                      className="bg-red-50 border border-red-300 p-3.5 text-xs text-red-900 flex items-center gap-2"
+                      className="rounded-2xl bg-red-500/10 border border-red-500/25 p-3.5 text-xs text-red-200 flex items-center gap-2"
                     >
-                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                       <span>{uploadError}</span>
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
-                      <label htmlFor="photo-title" className="block text-xs font-medium text-neutral-700 mb-1">
-                        Título de la fotografía *
+                      <label htmlFor="photo-title" className="block text-xs text-zinc-400 mb-1.5">
+                        Título *
                       </label>
                       <input
                         id="photo-title"
                         type="text"
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
-                        placeholder="Ej: Gol de tiro libre en Semifinal Fútbol 7 1ª División"
-                        className="w-full border border-neutral-300 px-3 py-2.5 text-sm focus:outline-none focus:border-[#707ef9]"
+                        placeholder="Ej: Gol de tiro libre en Semifinal Fútbol 7"
+                        className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
                       />
                     </div>
 
                     <div>
-                      <label htmlFor="photo-disc" className="block text-xs font-medium text-neutral-700 mb-1">
-                        Carpeta de Disciplina (Estructura 2025) *
+                      <label htmlFor="photo-disc" className="block text-xs text-zinc-400 mb-1.5">
+                        Disciplina *
                       </label>
                       <select
                         id="photo-disc"
                         value={disciplineId}
                         onChange={(e) => setDisciplineId(e.target.value)}
-                        className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm focus:outline-none focus:border-[#707ef9]"
+                        className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-[#707ef9]"
                       >
                         {DISCIPLINES.map((d) => (
                           <option key={d.id} value={d.id}>
@@ -1046,15 +1014,15 @@ export function GalleryView({
                     </div>
 
                     <div>
-                      <label htmlFor="photo-stage" className="block text-xs font-medium text-neutral-700 mb-1">
-                        Subcarpeta de Fase / Etapa
+                      <label htmlFor="photo-stage" className="block text-xs text-zinc-400 mb-1.5">
+                        Fase
                       </label>
                       <select
                         id="photo-stage"
                         disabled={isPremiacion}
                         value={stageLabel}
                         onChange={(e) => setStageLabel(e.target.value)}
-                        className="w-full bg-white border border-neutral-300 px-3 py-2.5 text-sm focus:outline-none focus:border-[#707ef9] disabled:bg-neutral-100 disabled:text-neutral-400"
+                        className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-[#707ef9] disabled:opacity-40"
                       >
                         {DRIVE_STAGE_FOLDERS.map((st) => (
                           <option key={st} value={st}>
@@ -1065,8 +1033,8 @@ export function GalleryView({
                     </div>
 
                     <div>
-                      <label htmlFor="photo-match" className="block text-xs font-medium text-neutral-700 mb-1">
-                        Subcarpeta de Encuentro / Jornada *
+                      <label htmlFor="photo-match" className="block text-xs text-zinc-400 mb-1.5">
+                        Encuentro / Jornada *
                       </label>
                       <input
                         id="photo-match"
@@ -1074,12 +1042,12 @@ export function GalleryView({
                         value={matchLabel}
                         onChange={(e) => setMatchLabel(e.target.value)}
                         placeholder="Ej: Fecha 1 · Medicina vs Kinesiología"
-                        className="w-full border border-neutral-300 px-3 py-2.5 text-sm focus:outline-none focus:border-[#707ef9]"
+                        className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
                       />
                     </div>
 
                     <div>
-                      <label htmlFor="photo-season" className="block text-xs font-medium text-neutral-700 mb-1">
+                      <label htmlFor="photo-season" className="block text-xs text-zinc-400 mb-1.5">
                         Temporada
                       </label>
                       <input
@@ -1088,34 +1056,29 @@ export function GalleryView({
                         value={season}
                         onChange={(e) => setSeason(e.target.value)}
                         placeholder="2026"
-                        className="w-full border border-neutral-300 px-3 py-2.5 text-sm tabular-nums focus:outline-none focus:border-[#707ef9]"
+                        className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-3.5 py-2.5 text-sm tabular-nums text-zinc-100 focus:outline-none focus:border-[#707ef9]"
                       />
                     </div>
                   </div>
 
-                  {/* Live Drive Folder Path Preview */}
-                  <div className="bg-[#f5f6f8] border border-neutral-200 px-4 py-3 text-xs">
-                    <span className="text-neutral-500 uppercase tracking-wider font-bold block mb-1">
-                      Ruta destino automática en Google Drive:
-                    </span>
-                    <span className="font-mono text-[#0d0d0d] break-all">{computedDrivePath}</span>
+                  <div className="rounded-2xl bg-[#101016] border border-white/[0.08] px-4 py-3 text-xs">
+                    <span className="text-zinc-500 block mb-1">Ruta destino en Drive</span>
+                    <span className="font-mono text-zinc-200 break-all">{computedDrivePath}</span>
                   </div>
 
-                  {/* Real Image File Picker */}
                   <div className="space-y-3">
                     <label
                       htmlFor="photo-file-input"
-                      className="flex flex-col items-center justify-center border border-dashed border-neutral-400 bg-[#f5f6f8] p-6 text-center cursor-pointer hover:border-[#707ef9]"
+                      className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.18] bg-[#101016] p-7 text-center cursor-pointer hover:border-[#707ef9] transition-colors"
                     >
-                      <Upload className="w-6 h-6 text-[#707ef9] mb-2" />
-                      <span className="text-sm font-medium text-[#0d0d0d]">
+                      <Upload className="w-6 h-6 text-[#9aa5ff] mb-2" />
+                      <span className="text-sm font-medium text-white">
                         {selectedFile
-                          ? `Archivo listo: ${selectedFile.name}`
-                          : 'Seleccionar fotografía original (JPG / PNG / WebP)'}
+                          ? selectedFile.name
+                          : 'Seleccionar fotografía (JPG / PNG / WebP)'}
                       </span>
-                      <span className="text-xs text-neutral-500 mt-1">
-                        Se sube en resolución original a Google Drive y se indexa automáticamente en
-                        la galería oficial
+                      <span className="text-xs text-zinc-500 mt-1">
+                        Resolución original subida a Drive e indexada automáticamente
                       </span>
                       <input
                         id="photo-file-input"
@@ -1127,28 +1090,24 @@ export function GalleryView({
                     </label>
 
                     {previewObjectUrl && (
-                      <div className="border border-neutral-200 overflow-hidden bg-[#0d0d0d]">
+                      <div className="rounded-2xl border border-white/[0.1] overflow-hidden bg-black">
                         <img
                           src={previewObjectUrl}
-                          alt="Vista previa de fotografía a subir a Google Drive"
+                          alt="Vista previa de fotografía"
                           className="w-full max-h-72 object-cover"
                         />
                       </div>
                     )}
                   </div>
 
-                  <div className="flex justify-end pt-2 border-t border-neutral-200">
+                  <div className="flex justify-end pt-3 border-t border-white/[0.08]">
                     <button
                       type="submit"
                       disabled={uploading || !state.driveUploadRootFolderId}
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-sm cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#707ef9] hover:bg-[#5c6bf0] text-white text-xs font-medium cursor-pointer disabled:opacity-45 transition-colors"
                     >
                       <Camera className="w-4 h-4" />
-                      <span>
-                        {uploading
-                          ? 'Subiendo a Google Drive...'
-                          : 'Subir a Google Drive y publicar'}
-                      </span>
+                      <span>{uploading ? 'Subiendo...' : 'Subir y publicar'}</span>
                     </button>
                   </div>
                 </form>
@@ -1156,23 +1115,31 @@ export function GalleryView({
             )}
           </div>
         )}
-      </div>
+      </RevealSection>
 
       {/* Lightbox Modal */}
       {lightboxPhoto && (
-        <div
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.22 }}
           role="dialog"
           aria-modal="true"
           aria-label="Vista ampliada de fotografía"
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightboxPhoto(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
         >
-          <div className="max-w-4xl w-full bg-[#0d0d0d] border border-white/15 overflow-hidden">
-            <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-white/10 text-white">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.28, ease: EDITORIAL_EASE }}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-4xl w-full rounded-3xl bg-[#0a0a0e] border border-white/[0.12] overflow-hidden shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-white/[0.08] text-white">
               <div className="min-w-0">
-                <p className="font-display text-lg font-bold uppercase truncate">
-                  {lightboxPhoto.title}
-                </p>
-                <p className="text-xs text-neutral-400 truncate">{lightboxPhoto.subtitle}</p>
+                <p className="text-base font-medium truncate">{lightboxPhoto.title}</p>
+                <p className="text-xs text-zinc-500 truncate">{lightboxPhoto.subtitle}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {lightboxPhoto.externalUrl && (
@@ -1180,9 +1147,9 @@ export function GalleryView({
                     href={lightboxPhoto.externalUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-[#707ef9] text-xs text-white"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.14] border border-white/[0.1] text-xs text-white transition-colors"
                   >
-                    <span>Ver original</span>
+                    <span>Original</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 )}
@@ -1190,9 +1157,9 @@ export function GalleryView({
                   type="button"
                   onClick={() => setLightboxPhoto(null)}
                   aria-label="Cerrar vista ampliada"
-                  className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+                  className="w-8 h-8 rounded-full bg-white/[0.05] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -1204,29 +1171,29 @@ export function GalleryView({
                 referrerPolicy="no-referrer"
               />
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
-      {/* Mandatory Confirmation Dialog before Deleting from Google Drive + Firestore */}
+      {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={pendingDeletePhoto !== null}
-        title="Eliminar fotografía del archivo oficial"
+        title="Eliminar fotografía"
         description={
           pendingDeletePhoto?.driveFileId
-            ? `Esta acción eliminará «${pendingDeletePhoto.title}» del índice web y enviará el archivo a la papelera de Google Drive.`
-            : `Esta acción eliminará «${pendingDeletePhoto?.title ?? ''}» del índice web oficial.`
+            ? `Se eliminará «${pendingDeletePhoto.title}» del índice web y se enviará a la papelera de Google Drive.`
+            : `Se eliminará «${pendingDeletePhoto?.title ?? ''}» del índice web oficial.`
         }
         details={
           pendingDeletePhoto
             ? [
                 `Título: ${pendingDeletePhoto.title}`,
-                `Ruta / Encuentro: ${pendingDeletePhoto.driveFolderPath || pendingDeletePhoto.matchLabel}`,
+                `Encuentro: ${pendingDeletePhoto.driveFolderPath || pendingDeletePhoto.matchLabel}`,
                 `Autor: ${pendingDeletePhoto.photographerName}`,
               ]
             : []
         }
-        confirmLabel="Confirmar eliminación"
+        confirmLabel="Eliminar"
         loading={deletingPhoto}
         onConfirm={() => void confirmAndDeletePhoto()}
         onCancel={() => setPendingDeletePhoto(null)}

@@ -4,6 +4,7 @@ import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import { buildUnifiedClubs, type UnifiedClubProfile } from '../domain/identityCrossRefEngine';
 import { computeTeamHistoricalStats } from '../domain/tournamentEngine';
 import type { DisciplineId, Team, TournamentState } from '../types/tournament';
+import { SectionKicker } from './MotionPrimitives';
 import { TeamCrest } from './TeamCrest';
 
 interface TeamsViewProps {
@@ -23,7 +24,6 @@ export function TeamsView({
   const [groupFilter, setGroupFilter] = useState<string>('ALL');
   const [queryText, setQueryText] = useState('');
 
-  // Cross-reference all clubs by name equivalence across disciplines
   const allUnifiedClubs = useMemo(
     () => buildUnifiedClubs(state.teams, state.players, state.matches),
     [state.teams, state.players, state.matches]
@@ -98,47 +98,37 @@ export function TeamsView({
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f6f8] pb-16">
-      {/* Carbon Editorial Header */}
-      <section className="bg-[#0d0d0d] text-white border-b border-white/10">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
+    <div className="min-h-screen bg-[#050507] text-zinc-100 pb-20">
+      {/* Editorial Header */}
+      <section className="border-b border-white/[0.06]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 space-y-8">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-            <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-[#707ef9] font-medium">
-                Directorio Oficial · Temporada {state.temporada}
-              </p>
-              <h1 className="font-display text-4xl sm:text-5xl font-bold uppercase tracking-tight mt-2">
-                Equipos y Clubes del Campeonato
+            <div className="space-y-3">
+              <SectionKicker index="01" label={`Directorio ${state.temporada}`} />
+              <h1 className="text-4xl sm:text-5xl font-medium tracking-[-0.035em] text-white">
+                Clubes y <span className="font-editorial text-[#c8ceff]">equipos</span>
               </h1>
-              <p className="text-sm text-neutral-300 mt-2 max-w-2xl">
-                Clubes intercarreras consolidados por nombre en todas las disciplinas: si un mismo
-                club participa en varios deportes, se presenta unificado con acceso directo a cada
-                rama y plantel.
+              <p className="text-sm text-zinc-400 max-w-lg">
+                Clubes intercarreras unificados por nombre con acceso directo a cada rama y plantel.
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-6 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-8">
+            <div className="grid grid-cols-3 gap-6 border-t md:border-t-0 md:border-l border-white/[0.08] pt-5 md:pt-0 md:pl-8">
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Clubes visibles
-                </p>
-                <p className="font-display text-3xl font-bold tabular-nums mt-0.5">
+                <p className="text-xs text-zinc-500">Clubes</p>
+                <p className="text-3xl font-light tabular-nums text-white mt-0.5">
                   {filteredClubs.length}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Multidisciplina
-                </p>
-                <p className="font-display text-3xl font-bold tabular-nums text-[#707ef9] mt-0.5">
+                <p className="text-xs text-zinc-500">Multirrama</p>
+                <p className="text-3xl font-light tabular-nums text-[#a5b0ff] mt-0.5">
                   {multiDisciplineClubCount}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-neutral-400">
-                  Planteles totales
-                </p>
-                <p className="font-display text-3xl font-bold tabular-nums mt-0.5">
+                <p className="text-xs text-zinc-500">Planteles</p>
+                <p className="text-3xl font-light tabular-nums text-white mt-0.5">
                   {state.teams.length}
                 </p>
               </div>
@@ -146,20 +136,20 @@ export function TeamsView({
           </div>
 
           {/* Discipline Switcher */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 border-t border-white/10 pt-5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-white/[0.07] pt-6">
             <button
               type="button"
               onClick={() => {
                 setShowAllDisciplines(true);
                 setGroupFilter('ALL');
               }}
-              className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap transition-colors cursor-pointer ${
+              className={`px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                 showAllDisciplines
-                  ? 'bg-[#707ef9] text-white'
-                  : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
+                  ? 'bg-white text-[#050507]'
+                  : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
               }`}
             >
-              Todos los clubes ({allUnifiedClubs.length})
+              Todos ({allUnifiedClubs.length})
             </button>
             {DISCIPLINES.map((d) => {
               const active = !showAllDisciplines && selectedDiscipline === d.id;
@@ -172,10 +162,10 @@ export function TeamsView({
                     onSelectDiscipline(d.id);
                     setGroupFilter('ALL');
                   }}
-                  className={`px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                     active
                       ? 'bg-[#707ef9] text-white'
-                      : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
                   }`}
                 >
                   {d.nombreCorto}
@@ -188,16 +178,16 @@ export function TeamsView({
 
       {/* Filter Bar + Directory Grid */}
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-6">
-        <div className="bg-white border border-neutral-200 p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="rounded-2xl bg-[#0c0c10] border border-white/[0.08] p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
-              placeholder="Buscar por club, disciplina, sigla, carrera o títulos..."
+              placeholder="Buscar club, disciplina, sigla o carrera..."
               aria-label="Buscar equipos y clubes"
-              className="w-full pl-9 pr-3 py-2 text-sm border border-neutral-300 focus:border-[#707ef9] focus:outline-none bg-white"
+              className="w-full rounded-xl pl-10 pr-3 py-2 text-sm bg-[#111117] border border-white/[0.1] text-zinc-100 placeholder:text-zinc-500 focus:border-[#707ef9] focus:outline-none transition-colors"
             />
           </div>
 
@@ -206,7 +196,7 @@ export function TeamsView({
               <select
                 value={groupFilter}
                 onChange={(e) => setGroupFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-medium border border-neutral-300 bg-white focus:border-[#707ef9] focus:outline-none"
+                className="px-3.5 py-2 rounded-xl text-xs bg-[#111117] border border-white/[0.1] text-zinc-200 focus:border-[#707ef9] focus:outline-none"
                 aria-label="Filtrar por grupo"
               >
                 <option value="ALL">Todos los grupos</option>
@@ -217,23 +207,20 @@ export function TeamsView({
                 ))}
               </select>
             )}
-            <span className="text-xs text-neutral-500 font-mono">
+            <span className="text-xs text-zinc-500 tabular-nums">
               {showAllDisciplines
-                ? `${filteredClubs.length} clubes unificados`
-                : `${activeDisciplineMeta.nombre} · ${filteredClubs.length} equipo(s)`}
+                ? `${filteredClubs.length} clubes`
+                : `${activeDisciplineMeta.nombreCorto} · ${filteredClubs.length}`}
             </span>
           </div>
         </div>
 
         {filteredClubs.length === 0 ? (
-          <div className="bg-white border border-neutral-200 p-12 text-center space-y-2">
-            <Shield className="w-10 h-10 text-neutral-300 mx-auto" />
-            <h2 className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
-              Sin equipos para los filtros seleccionados
-            </h2>
-            <p className="text-sm text-neutral-600 max-w-md mx-auto">
-              Ajusta tu búsqueda o cambia de disciplina para consultar los planteles oficiales del
-              campeonato.
+          <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-14 text-center space-y-2.5">
+            <Shield className="w-9 h-9 text-zinc-700 mx-auto" />
+            <h2 className="text-lg font-medium text-white">Sin resultados</h2>
+            <p className="text-sm text-zinc-500 max-w-sm mx-auto">
+              Ajusta tu búsqueda o cambia de disciplina para explorar los planteles.
             </p>
           </div>
         ) : (
@@ -255,10 +242,9 @@ export function TeamsView({
               return (
                 <article
                   key={club.clubKey}
-                  className="group bg-white border border-neutral-200 hover:border-[#0d0d0d] transition-colors flex flex-col justify-between"
+                  className="group rounded-3xl bg-[#0c0c10] border border-white/[0.08] hover:border-white/[0.2] transition-all duration-200 hover:-translate-y-0.5 flex flex-col justify-between overflow-hidden"
                 >
-                  <div className="p-5 space-y-4">
-                    {/* Top row: Crest + Unified Name + Year */}
+                  <div className="p-5 sm:p-6 space-y-4">
                     <button
                       type="button"
                       onClick={() => onOpenTeamProfile(targetSquad)}
@@ -269,39 +255,36 @@ export function TeamsView({
                         sigla={club.sigla}
                         nombre={club.displayName}
                         size="lg"
-                        surface="light"
+                        surface="dark"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-mono uppercase tracking-wider text-[#707ef9] font-semibold truncate">
+                          <span className="text-[11px] text-[#a5b0ff] font-medium truncate">
                             {club.sigla}
-                            {!isMulti ? ` · ${targetSquad.groupName}` : ` · ${club.disciplines.length} ramas`}
+                            {!isMulti
+                              ? ` · ${targetSquad.groupName}`
+                              : ` · ${club.disciplines.length} ramas`}
                           </span>
                           {club.anioFundacion && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500 font-mono shrink-0">
+                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 tabular-nums shrink-0">
                               <Calendar className="w-3 h-3" />
-                              Est. {club.anioFundacion}
+                              {club.anioFundacion}
                             </span>
                           )}
                         </div>
-                        <h2 className="font-display text-2xl font-bold uppercase tracking-tight text-[#0d0d0d] group-hover:text-[#707ef9] transition-colors leading-tight mt-0.5 truncate">
+                        <h2 className="text-xl font-medium tracking-[-0.02em] text-white group-hover:text-[#c8ceff] transition-colors leading-snug mt-0.5 truncate">
                           {club.displayName}
                         </h2>
-                        <p className="text-xs text-neutral-600 truncate mt-0.5">
+                        <p className="text-xs text-zinc-500 truncate mt-0.5">
                           {club.careers.join(' · ')}
                         </p>
                       </div>
                     </button>
 
-                    {/* Disciplines Breakdown (Interactive squad buttons for multi-discipline clubs) */}
-                    <div className="border-t border-neutral-100 pt-3 space-y-1.5">
-                      <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 flex items-center gap-1">
-                        <Layers className="w-3 h-3 text-[#707ef9]" />
-                        <span>
-                          {isMulti
-                            ? `Disciplinas del club (${club.teams.length})`
-                            : 'Disciplina inscrita'}
-                        </span>
+                    <div className="border-t border-white/[0.06] pt-3.5 space-y-2">
+                      <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                        <Layers className="w-3 h-3 text-[#9aa5ff]" />
+                        <span>{isMulti ? `Ramas (${club.teams.length})` : 'Disciplina'}</span>
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {club.teams.map((sq) => {
@@ -313,10 +296,10 @@ export function TeamsView({
                               key={sq.id}
                               type="button"
                               onClick={() => onOpenTeamProfile(sq)}
-                              className={`px-2 py-1 text-[11px] font-medium border transition-colors cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer ${
                                 isCurrentScope
-                                  ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                                  : 'bg-[#f5f6f8] text-[#0d0d0d] border-neutral-200 hover:border-[#707ef9] hover:text-[#707ef9]'
+                                  ? 'bg-white text-[#050507] border-white'
+                                  : 'bg-white/[0.04] text-zinc-300 border-white/[0.09] hover:border-[#707ef9] hover:text-white'
                               }`}
                               title={`Abrir ficha de ${sq.nombre} (${sqDisc.nombre})`}
                             >
@@ -327,87 +310,65 @@ export function TeamsView({
                       </div>
                     </div>
 
-                    {/* Titles / Honors */}
-                    <div className="border-t border-neutral-100 pt-3 min-h-[40px]">
-                      {club.logrosAnteriores ? (
-                        <div className="flex items-start gap-2 text-xs text-neutral-700">
-                          <Trophy className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    {club.logrosAnteriores && (
+                      <div className="border-t border-white/[0.06] pt-3">
+                        <div className="flex items-start gap-2 text-xs text-zinc-400">
+                          <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                           <p className="line-clamp-2">{club.logrosAnteriores}</p>
                         </div>
-                      ) : (
-                        <p className="text-xs text-neutral-400 italic">
-                          Sin títulos anteriores registrados en ficha.
-                        </p>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
-                    {/* Compact Campaign Strip */}
                     {showAllDisciplines && isMulti ? (
-                      <div className="grid grid-cols-4 gap-2 bg-[#f5f6f8] border border-neutral-200/80 p-2.5 text-center">
+                      <div className="grid grid-cols-4 gap-2 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Ramas
-                          </p>
-                          <p className="font-display text-base font-bold text-[#707ef9] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">Ramas</p>
+                          <p className="text-base font-medium text-[#a5b0ff] tabular-nums mt-0.5">
                             {club.disciplines.length}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Jugadores
-                          </p>
-                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">Plantel</p>
+                          <p className="text-base font-medium text-white tabular-nums mt-0.5">
                             {cardRosterCount}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            PJ Club
-                          </p>
-                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">PJ</p>
+                          <p className="text-base font-medium text-white tabular-nums mt-0.5">
                             {club.totalMatchesPlayed}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            PG Club
-                          </p>
-                          <p className="font-display text-base font-bold text-emerald-700 tabular-nums">
+                          <p className="text-[10px] text-zinc-500">PG</p>
+                          <p className="text-base font-medium text-emerald-400 tabular-nums mt-0.5">
                             {club.totalWins}
                           </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-4 gap-2 bg-[#f5f6f8] border border-neutral-200/80 p-2.5 text-center">
+                      <div className="grid grid-cols-4 gap-2 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-3 text-center">
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Plantel
-                          </p>
-                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">Plantel</p>
+                          <p className="text-base font-medium text-white tabular-nums mt-0.5">
                             {cardRosterCount}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            PJ
-                          </p>
-                          <p className="font-display text-base font-bold text-[#0d0d0d] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">PJ</p>
+                          <p className="text-base font-medium text-white tabular-nums mt-0.5">
                             {singleStats.pj}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            PG
-                          </p>
-                          <p className="font-display text-base font-bold text-emerald-700 tabular-nums">
+                          <p className="text-[10px] text-zinc-500">PG</p>
+                          <p className="text-base font-medium text-emerald-400 tabular-nums mt-0.5">
                             {singleStats.pg}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            PTS
-                          </p>
-                          <p className="font-display text-base font-bold text-[#707ef9] tabular-nums">
+                          <p className="text-[10px] text-zinc-500">PTS</p>
+                          <p className="text-base font-medium text-[#a5b0ff] tabular-nums mt-0.5">
                             {singleStats.puntos}
                           </p>
                         </div>
@@ -415,15 +376,14 @@ export function TeamsView({
                     )}
                   </div>
 
-                  {/* Card Footer */}
                   <button
                     type="button"
                     onClick={() => onOpenTeamProfile(targetSquad)}
-                    className="w-full px-5 py-3 border-t border-neutral-200 bg-neutral-50/70 flex items-center justify-between text-xs font-display font-bold uppercase tracking-wider text-[#0d0d0d] hover:bg-[#0d0d0d] hover:text-white transition-colors cursor-pointer"
+                    className="w-full px-6 py-3.5 border-t border-white/[0.07] bg-white/[0.02] flex items-center justify-between text-xs font-medium text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
                   >
                     <span className="inline-flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5" />
-                      {isMulti ? 'Ver ficha del club y ramas' : 'Ver ficha y plantel completo'}
+                      <Users className="w-3.5 h-3.5 text-[#9aa5ff]" />
+                      {isMulti ? 'Ver club y ramas' : 'Ver ficha y plantel'}
                     </span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
@@ -436,4 +396,3 @@ export function TeamsView({
     </div>
   );
 }
-

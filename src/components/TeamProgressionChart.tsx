@@ -55,11 +55,7 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
 
   const point = payload[0].payload;
   const outcomeLabel =
-    point.outcome === 'G'
-      ? 'Victoria'
-      : point.outcome === 'P'
-      ? 'Derrota'
-      : 'Empate';
+    point.outcome === 'G' ? 'Victoria' : point.outcome === 'P' ? 'Derrota' : 'Empate';
 
   const diffFormatted =
     point.diferencia > 0 ? `+${point.diferencia}` : String(point.diferencia);
@@ -69,30 +65,26 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
       : String(point.acumuladoDiferencia);
 
   return (
-    <div className="bg-[#0d0d0d] text-white border border-white/15 px-3.5 py-3 shadow-xl text-xs min-w-[225px]">
-      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-1.5 mb-2">
-        <span className="font-display text-base uppercase tracking-wider text-white">
-          {point.shortDate}
-        </span>
-        <span className="text-[11px] text-neutral-400 tabular-nums">
+    <div className="rounded-2xl bg-[#111117] text-zinc-100 border border-white/[0.14] px-4 py-3 shadow-2xl text-xs min-w-[225px]">
+      <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-1.5 mb-2">
+        <span className="font-medium text-white">{point.shortDate}</span>
+        <span className="text-[11px] text-zinc-400 tabular-nums">
           {point.fecha || point.label}
         </span>
       </div>
 
-      <p className="text-[11px] uppercase tracking-wider text-[#a5b0ff] mb-1">
-        {point.fullLabel}
-      </p>
+      <p className="text-[11px] text-[#a5b0ff] mb-1">{point.fullLabel}</p>
 
-      <p className="text-neutral-300 mb-2">
+      <p className="text-zinc-300 mb-2">
         {point.isHome ? 'Local vs ' : 'Visita vs '}
-        <strong className="text-white">{point.opponentName}</strong>
-        <span className="text-neutral-400"> · {outcomeLabel}</span>
+        <strong className="text-white font-medium">{point.opponentName}</strong>
+        <span className="text-zinc-500"> · {outcomeLabel}</span>
       </p>
 
       <div className="space-y-1 tabular-nums">
         <div className="flex items-center justify-between gap-4">
-          <span className="text-neutral-300 flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 bg-[#707ef9]" aria-hidden="true" />
+          <span className="text-zinc-400 flex items-center gap-1.5">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#707ef9]" aria-hidden="true" />
             <span>
               {mode === 'acumulado' ? `${unitPlural} a favor (acum.)` : `${unitPlural} a favor`}
             </span>
@@ -103,8 +95,8 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
         </div>
 
         <div className="flex items-center justify-between gap-4">
-          <span className="text-neutral-300 flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 bg-[#dc2626]" aria-hidden="true" />
+          <span className="text-zinc-400 flex items-center gap-1.5">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#ef4444]" aria-hidden="true" />
             <span>
               {mode === 'acumulado' ? `${unitPlural} en contra (acum.)` : `${unitPlural} en contra`}
             </span>
@@ -114,10 +106,10 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
           </strong>
         </div>
 
-        <div className="flex items-center justify-between gap-4 pt-1.5 mt-1.5 border-t border-white/15 text-[11px] text-neutral-300">
+        <div className="flex items-center justify-between gap-4 pt-1.5 mt-1.5 border-t border-white/[0.08] text-[11px] text-zinc-400">
           <span>
             {mode === 'acumulado'
-              ? `Marcador partido: ${point.favor} - ${point.contra}`
+              ? `Partido: ${point.favor} - ${point.contra}`
               : 'Balance acumulado:'}
           </span>
           <strong className="text-[#a5b0ff]">
@@ -128,9 +120,9 @@ function ProgressionTooltip({ active, payload, unitPlural, mode }: CustomTooltip
         </div>
 
         {mode === 'por_fecha' && (
-          <div className="flex items-center justify-between gap-4 text-[11px] text-neutral-400">
-            <span>Diferencia en partido</span>
-            <span className="text-white">{diffFormatted}</span>
+          <div className="flex items-center justify-between gap-4 text-[11px] text-zinc-500">
+            <span>Diferencia</span>
+            <span className="text-zinc-200">{diffFormatted}</span>
           </div>
         )}
       </div>
@@ -146,12 +138,7 @@ export function TeamProgressionChart({
   const [mode, setMode] = useState<ChartMode>('acumulado');
 
   const unitPlural =
-    sportType === 'futbol7'
-      ? 'Goles'
-      : sportType === 'voleibol'
-      ? 'Sets'
-      : 'Puntos';
-
+    sportType === 'futbol7' ? 'Goles' : sportType === 'voleibol' ? 'Sets' : 'Puntos';
   const unitLower = unitPlural.toLowerCase();
   const unitShort =
     sportType === 'futbol7' ? 'goles' : sportType === 'voleibol' ? 'sets' : 'pts';
@@ -162,13 +149,9 @@ export function TeamProgressionChart({
   const matchCount = progression.length;
   const lastPoint = matchCount > 0 ? progression[matchCount - 1] : null;
   const avgFavor =
-    matchCount > 0 && lastPoint
-      ? (lastPoint.acumuladoFavor / matchCount).toFixed(1)
-      : '0.0';
+    matchCount > 0 && lastPoint ? (lastPoint.acumuladoFavor / matchCount).toFixed(1) : '0.0';
   const avgContra =
-    matchCount > 0 && lastPoint
-      ? (lastPoint.acumuladoContra / matchCount).toFixed(1)
-      : '0.0';
+    matchCount > 0 && lastPoint ? (lastPoint.acumuladoContra / matchCount).toFixed(1) : '0.0';
 
   const pointByIndex = useMemo(
     () => new Map(progression.map((p) => [p.index, p])),
@@ -247,12 +230,10 @@ export function TeamProgressionChart({
       data-testid="team-progression-chart"
       aria-label={`Progresión de ${unitLower} de ${teamName}`}
     >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-neutral-200 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/[0.08] pb-3.5">
         <div>
-          <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-            Análisis Comparativo · Ordenado por Fecha
-          </p>
-          <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
+          <p className="text-xs text-[#a5b0ff]">Ordenado por fecha</p>
+          <h3 className="text-xl font-medium tracking-[-0.02em] text-white mt-0.5">
             Progresión de {unitPlural} a Favor vs. en Contra
           </h3>
         </div>
@@ -261,17 +242,17 @@ export function TeamProgressionChart({
           <div
             role="tablist"
             aria-label="Tipo de gráfico comparativo"
-            className="flex items-center gap-1 bg-[#f5f6f8] p-1 border border-neutral-200 self-start sm:self-auto"
+            className="inline-flex items-center gap-1 rounded-full bg-white/[0.04] p-1 border border-white/[0.08] self-start sm:self-auto"
           >
             <button
               type="button"
               role="tab"
               aria-selected={mode === 'acumulado'}
               onClick={() => setMode('acumulado')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 mode === 'acumulado'
-                  ? 'bg-[#0d0d0d] text-white'
-                  : 'text-neutral-600 hover:text-[#0d0d0d]'
+                  ? 'bg-white text-[#050507]'
+                  : 'text-zinc-400 hover:text-white'
               }`}
             >
               <TrendingUp className="w-3.5 h-3.5" aria-hidden="true" />
@@ -282,10 +263,10 @@ export function TeamProgressionChart({
               role="tab"
               aria-selected={mode === 'por_fecha'}
               onClick={() => setMode('por_fecha')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 mode === 'por_fecha'
-                  ? 'bg-[#0d0d0d] text-white'
-                  : 'text-neutral-600 hover:text-[#0d0d0d]'
+                  ? 'bg-white text-[#050507]'
+                  : 'text-zinc-400 hover:text-white'
               }`}
             >
               <BarChart3 className="w-3.5 h-3.5" aria-hidden="true" />
@@ -296,54 +277,47 @@ export function TeamProgressionChart({
       </div>
 
       {matchCount === 0 ? (
-        <div className="border border-neutral-200 bg-[#f5f6f8] px-6 py-8 text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-10 h-10 bg-white border border-neutral-200 text-[#707ef9] mx-auto">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#101016] px-6 py-8 text-center space-y-2">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] border border-white/[0.08] text-[#9aa5ff] mx-auto">
             <TrendingUp className="w-5 h-5" aria-hidden="true" />
           </div>
-          <p className="font-display text-xl uppercase tracking-wide text-[#0d0d0d]">
-            Sin fechas disputadas registradas
-          </p>
-          <p className="text-xs text-neutral-600 max-w-md mx-auto leading-relaxed">
-            La curva comparativa de {unitLower} a favor y en contra se generará automáticamente cuando {teamName} finalice su primer encuentro oficial.
+          <p className="text-base font-medium text-white">Sin fechas disputadas</p>
+          <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+            La progresión se generará al finalizar el primer encuentro oficial de {teamName}.
           </p>
         </div>
       ) : (
-        <div className="border border-neutral-200 bg-white p-4 sm:p-5 space-y-4">
-          {/* Legend & Compact Comparative Metrics */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-neutral-100 pb-3 text-xs">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-4 sm:p-5 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-white/[0.07] pb-3 text-xs">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
-              <span className="inline-flex items-center gap-2 text-[#0d0d0d] font-medium">
-                <span className="inline-block w-3.5 h-1 bg-[#707ef9]" aria-hidden="true" />
+              <span className="inline-flex items-center gap-2 text-zinc-200 font-medium">
+                <span className="inline-block w-3.5 h-1 rounded-full bg-[#707ef9]" aria-hidden="true" />
                 <span>{favorSeriesName}</span>
               </span>
-              <span className="inline-flex items-center gap-2 text-[#0d0d0d] font-medium">
+              <span className="inline-flex items-center gap-2 text-zinc-200 font-medium">
                 <span
-                  className="inline-block w-3.5 h-0 border-t-2 border-dashed border-[#dc2626]"
+                  className="inline-block w-3.5 h-0 border-t-2 border-dashed border-[#ef4444]"
                   aria-hidden="true"
                 />
                 <span>{contraSeriesName}</span>
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-neutral-600 tabular-nums">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-zinc-400 tabular-nums">
               <span>
-                Prom. favor:{' '}
-                <strong className="text-[#0d0d0d]">{avgFavor}</strong> / partido
+                Prom. favor: <strong className="text-white">{avgFavor}</strong>
               </span>
-              <span aria-hidden="true" className="text-neutral-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
               <span>
-                Prom. contra:{' '}
-                <strong className="text-[#0d0d0d]">{avgContra}</strong> / partido
+                Prom. contra: <strong className="text-white">{avgContra}</strong>
               </span>
-              <span aria-hidden="true" className="text-neutral-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
               <span>
-                Partidos:{' '}
-                <strong className="text-[#0d0d0d]">{matchCount}</strong>
+                Partidos: <strong className="text-white">{matchCount}</strong>
               </span>
             </div>
           </div>
 
-          {/* Recharts Visualization */}
           <div className="w-full min-w-0 h-[260px]">
             <ResponsiveContainer width="100%" height={260} minWidth={0}>
               {mode === 'acumulado' ? (
@@ -353,27 +327,27 @@ export function TeamProgressionChart({
                 >
                   <defs>
                     <linearGradient id="ufroFavorFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#707ef9" stopOpacity={0.28} />
+                      <stop offset="5%" stopColor="#707ef9" stopOpacity={0.34} />
                       <stop offset="95%" stopColor="#707ef9" stopOpacity={0.02} />
                     </linearGradient>
                     <linearGradient id="ufroContraFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#dc2626" stopOpacity={0.14} />
-                      <stop offset="95%" stopColor="#dc2626" stopOpacity={0.01} />
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.01} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" vertical={false} />
                   <XAxis
                     dataKey="index"
                     tickFormatter={formatXAxisTick}
                     interval="preserveStartEnd"
                     minTickGap={18}
-                    tick={{ fill: '#525252', fontSize: 12 }}
-                    axisLine={{ stroke: '#d4d4d4' }}
+                    tick={{ fill: '#a1a1aa', fontSize: 12 }}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.12)' }}
                     tickLine={false}
                   />
                   <YAxis
                     allowDecimals={false}
-                    tick={{ fill: '#525252', fontSize: 12 }}
+                    tick={{ fill: '#a1a1aa', fontSize: 12 }}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -396,20 +370,20 @@ export function TeamProgressionChart({
                     stroke="#707ef9"
                     strokeWidth={2.5}
                     fill="url(#ufroFavorFill)"
-                    dot={{ r: 4, fill: '#707ef9', stroke: '#ffffff', strokeWidth: 2 }}
-                    activeDot={{ r: 6, fill: '#707ef9', stroke: '#0d0d0d', strokeWidth: 2 }}
+                    dot={{ r: 4, fill: '#707ef9', stroke: '#101016', strokeWidth: 2 }}
+                    activeDot={{ r: 6, fill: '#707ef9', stroke: '#ffffff', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
                   <Area
                     type="monotone"
                     dataKey="acumuladoContra"
                     name={contraSeriesName}
-                    stroke="#dc2626"
+                    stroke="#ef4444"
                     strokeWidth={2.2}
                     strokeDasharray="5 4"
                     fill="url(#ufroContraFill)"
-                    dot={{ r: 4, fill: '#dc2626', stroke: '#ffffff', strokeWidth: 2 }}
-                    activeDot={{ r: 6, fill: '#dc2626', stroke: '#0d0d0d', strokeWidth: 2 }}
+                    dot={{ r: 4, fill: '#ef4444', stroke: '#101016', strokeWidth: 2 }}
+                    activeDot={{ r: 6, fill: '#ef4444', stroke: '#ffffff', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
                 </AreaChart>
@@ -419,24 +393,24 @@ export function TeamProgressionChart({
                   margin={{ top: 10, right: 16, left: -12, bottom: 4 }}
                   barGap={6}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" vertical={false} />
                   <XAxis
                     dataKey="index"
                     tickFormatter={formatXAxisTick}
                     interval="preserveStartEnd"
                     minTickGap={18}
-                    tick={{ fill: '#525252', fontSize: 12 }}
-                    axisLine={{ stroke: '#d4d4d4' }}
+                    tick={{ fill: '#a1a1aa', fontSize: 12 }}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.12)' }}
                     tickLine={false}
                   />
                   <YAxis
                     allowDecimals={false}
-                    tick={{ fill: '#525252', fontSize: 12 }}
+                    tick={{ fill: '#a1a1aa', fontSize: 12 }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <Tooltip
-                    cursor={{ fill: '#f5f6f8' }}
+                    cursor={{ fill: 'rgba(255,255,255,0.04)' }}
                     content={(tooltipProps) => (
                       <ProgressionTooltip
                         active={tooltipProps.active}
@@ -452,13 +426,15 @@ export function TeamProgressionChart({
                     dataKey="favor"
                     name={favorSeriesName}
                     fill="#707ef9"
+                    radius={[6, 6, 0, 0]}
                     maxBarSize={32}
                     isAnimationActive={false}
                   />
                   <Bar
                     dataKey="contra"
                     name={contraSeriesName}
-                    fill="#dc2626"
+                    fill="#ef4444"
+                    radius={[6, 6, 0, 0]}
                     maxBarSize={32}
                     isAnimationActive={false}
                   />
@@ -467,23 +443,22 @@ export function TeamProgressionChart({
             </ResponsiveContainer>
           </div>
 
-          {/* Biggest Win / Most Scored vs. Worst Defeat / Most Conceded Cards */}
+          {/* Scoring Extremes Cards (clean hairline borders, no thick left stripe) */}
           <div
             data-testid="team-scoring-extremes"
-            className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-4 border-t border-neutral-200"
+            className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-4 border-t border-white/[0.07]"
           >
-            {/* A quién han goleado más / metido más puntos */}
             <div
               data-testid="extreme-for-card"
-              className="border border-neutral-200 border-l-4 border-l-[#707ef9] bg-[#f8f9ff] p-3.5 space-y-2"
+              className="rounded-2xl border border-[#707ef9]/25 bg-[#707ef9]/[0.06] p-4 space-y-2"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] uppercase tracking-widest text-[#707ef9] font-semibold flex items-center gap-1.5">
+                <p className="text-xs text-[#a5b0ff] font-medium flex items-center gap-1.5">
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>{forCardTitle}</span>
                 </p>
                 {primaryFor && (
-                  <span className="font-display text-lg leading-none tabular-nums px-2 py-0.5 bg-[#0d0d0d] text-white shrink-0">
+                  <span className="text-sm font-semibold tabular-nums px-2.5 py-0.5 rounded-full bg-white/[0.1] text-white shrink-0">
                     {primaryFor.favor} — {primaryFor.contra}
                   </span>
                 )}
@@ -491,14 +466,14 @@ export function TeamProgressionChart({
 
               {primaryFor ? (
                 <div className="space-y-1">
-                  <p className="text-sm font-bold text-[#0d0d0d] leading-snug">
+                  <p className="text-sm font-medium text-white leading-snug">
                     vs {primaryFor.opponentName}
                   </p>
-                  <p className="text-xs text-neutral-600 tabular-nums">
+                  <p className="text-xs text-zinc-400 tabular-nums">
                     {extremes.biggestWin ? (
                       <>
                         Diferencia{' '}
-                        <strong className="text-[#0d0d0d]">
+                        <strong className="text-white">
                           +{primaryFor.diferencia} {unitShort}
                         </strong>
                         {formatVolleyPeriodTag(primaryFor, sportType)
@@ -508,7 +483,7 @@ export function TeamProgressionChart({
                     ) : (
                       <>
                         Anotaron{' '}
-                        <strong className="text-[#0d0d0d]">
+                        <strong className="text-white">
                           {primaryFor.favor} {unitShort}
                         </strong>
                       </>
@@ -517,9 +492,9 @@ export function TeamProgressionChart({
                   </p>
 
                   {secondaryMostScored && (
-                    <p className="text-[11px] text-neutral-600 pt-2 mt-1.5 border-t border-neutral-200/80 tabular-nums">
+                    <p className="text-[11px] text-zinc-400 pt-2 mt-1.5 border-t border-white/[0.08] tabular-nums">
                       Más {unitLower} en un partido:{' '}
-                      <strong className="text-[#0d0d0d]">
+                      <strong className="text-white">
                         {sportType === 'voleibol' && secondaryMostScored.periodPointsFavor
                           ? `${secondaryMostScored.periodPointsFavor} pts`
                           : `${secondaryMostScored.favor} ${unitShort}`}{' '}
@@ -531,19 +506,18 @@ export function TeamProgressionChart({
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-neutral-500">
-                  Sin {unitLower} a favor registrados todavía en encuentros finalizados.
+                <p className="text-xs text-zinc-500">
+                  Sin {unitLower} a favor registrados todavía.
                 </p>
               )}
             </div>
 
-            {/* Quién los ha goleado / les ha metido más puntos */}
             <div
               data-testid="extreme-against-card"
-              className="border border-neutral-200 border-l-4 border-l-[#dc2626] bg-[#fef7f7] p-3.5 space-y-2"
+              className="rounded-2xl border border-red-500/25 bg-red-500/[0.06] p-4 space-y-2"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] uppercase tracking-widest text-[#dc2626] font-semibold flex items-center gap-1.5">
+                <p className="text-xs text-red-400 font-medium flex items-center gap-1.5">
                   {primaryAgainst ? (
                     <ArrowDownRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   ) : (
@@ -552,7 +526,7 @@ export function TeamProgressionChart({
                   <span>{againstCardTitle}</span>
                 </p>
                 {primaryAgainst && (
-                  <span className="font-display text-lg leading-none tabular-nums px-2 py-0.5 bg-[#dc2626] text-white shrink-0">
+                  <span className="text-sm font-semibold tabular-nums px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-200 shrink-0">
                     {primaryAgainst.favor} — {primaryAgainst.contra}
                   </span>
                 )}
@@ -560,14 +534,14 @@ export function TeamProgressionChart({
 
               {primaryAgainst ? (
                 <div className="space-y-1">
-                  <p className="text-sm font-bold text-[#0d0d0d] leading-snug">
+                  <p className="text-sm font-medium text-white leading-snug">
                     vs {primaryAgainst.opponentName}
                   </p>
-                  <p className="text-xs text-neutral-600 tabular-nums">
+                  <p className="text-xs text-zinc-400 tabular-nums">
                     {extremes.worstDefeat ? (
                       <>
                         Diferencia{' '}
-                        <strong className="text-[#dc2626]">
+                        <strong className="text-red-300">
                           {primaryAgainst.diferencia} {unitShort}
                         </strong>
                         {formatVolleyPeriodTag(primaryAgainst, sportType)
@@ -577,7 +551,7 @@ export function TeamProgressionChart({
                     ) : (
                       <>
                         Recibieron{' '}
-                        <strong className="text-[#dc2626]">
+                        <strong className="text-red-300">
                           {primaryAgainst.contra} {unitShort}
                         </strong>{' '}
                         (Invicto)
@@ -587,9 +561,9 @@ export function TeamProgressionChart({
                   </p>
 
                   {secondaryMostConceded && (
-                    <p className="text-[11px] text-neutral-600 pt-2 mt-1.5 border-t border-neutral-200/80 tabular-nums">
-                      Más {unitLower} recibidos en un partido:{' '}
-                      <strong className="text-[#0d0d0d]">
+                    <p className="text-[11px] text-zinc-400 pt-2 mt-1.5 border-t border-white/[0.08] tabular-nums">
+                      Más {unitLower} recibidos:{' '}
+                      <strong className="text-white">
                         {sportType === 'voleibol' && secondaryMostConceded.periodPointsContra
                           ? `${secondaryMostConceded.periodPointsContra} pts`
                           : `${secondaryMostConceded.contra} ${unitShort}`}{' '}
@@ -601,9 +575,9 @@ export function TeamProgressionChart({
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-neutral-600 tabular-nums">
+                <p className="text-xs text-zinc-400 tabular-nums">
                   0 {unitLower} recibidos en {matchCount}{' '}
-                  {matchCount === 1 ? 'partido finalizado' : 'partidos finalizados'}.
+                  {matchCount === 1 ? 'partido' : 'partidos'}.
                 </p>
               )}
             </div>

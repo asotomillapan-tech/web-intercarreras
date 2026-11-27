@@ -39,19 +39,19 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-[#0d0d0d] text-white flex items-center justify-center p-6">
-          <div className="max-w-lg w-full border border-white/15 bg-[#141418] p-8 space-y-4">
-            <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+        <div className="min-h-screen bg-[#050507] text-zinc-100 flex items-center justify-center p-6">
+          <div className="max-w-lg w-full rounded-3xl border border-white/[0.1] bg-[#0c0c10] p-8 space-y-5">
+            <p className="text-xs text-[#a5b0ff] tracking-wide">
               Campeonato Intercarreras UFRO
             </p>
-            <h1 className="font-display text-2xl font-bold uppercase tracking-tight">
-              No se pudo completar la operación
+            <h1 className="font-display text-2xl sm:text-3xl font-medium tracking-[-0.03em] text-white">
+              No se pudo completar la <span className="font-editorial text-[#c8ceff]">operación</span>
             </h1>
-            <p className="text-sm text-neutral-300 leading-relaxed break-words">{displayDetail}</p>
+            <p className="text-sm text-zinc-400 leading-relaxed break-words">{displayDetail}</p>
             <button
               type="button"
               onClick={() => this.setState({ hasError: false, message: '' })}
-              className="px-5 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-widest text-xs cursor-pointer"
+              className="px-6 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 font-medium text-xs transition-colors cursor-pointer"
             >
               Reintentar
             </button>

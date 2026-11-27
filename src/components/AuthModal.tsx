@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { motion } from 'motion/react';
 import { AlertCircle, LogOut, ShieldCheck, X } from 'lucide-react';
 import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
 import { ROLE_META } from '../domain/rbacEngine';
 import type { AppUserProfile } from '../types/tournament';
+import { EDITORIAL_EASE } from './MotionPrimitives';
 
 interface AuthModalProps {
   open: boolean;
@@ -42,32 +44,48 @@ export function AuthModal({
   };
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.22 }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 overflow-y-auto"
+      onClick={onClose}
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto"
     >
-      <div className="bg-white w-full max-w-lg border border-neutral-200 shadow-2xl my-8 overflow-hidden">
-        {/* Carbon Editorial Header */}
-        <div className="bg-[#0d0d0d] text-white px-6 py-5 flex items-center justify-between gap-4 border-b border-white/10">
-          <div className="flex items-center gap-3">
+      <motion.div
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.3, ease: EDITORIAL_EASE }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[#0a0a0e] text-zinc-100 w-full max-w-md rounded-3xl border border-white/[0.1] shadow-[0_32px_90px_rgba(0,0,0,0.85)] my-8 overflow-hidden"
+      >
+        {/* Header */}
+        <div className="px-6 py-5 flex items-center justify-between gap-4 border-b border-white/[0.08]">
+          <div className="flex items-center gap-3 min-w-0">
             <img
               src={LOGO_LIGHT_SVG}
               alt=""
               aria-hidden="true"
-              className="h-6 w-auto shrink-0"
+              className="h-6 w-auto shrink-0 opacity-90"
               referrerPolicy="no-referrer"
             />
-            <div>
-              <p className="text-[11px] uppercase tracking-widest text-[#707ef9] font-medium">
-                Autenticación Oficial · Intercarreras UFRO
-              </p>
+            <div className="min-w-0">
+              <p className="text-[11px] text-[#9aa5ff] font-medium">Intercarreras UFRO</p>
               <h2
                 id="auth-modal-title"
-                className="font-display text-2xl font-bold uppercase tracking-tight"
+                className="text-xl sm:text-2xl font-medium tracking-[-0.02em] text-white"
               >
-                {currentUser ? 'Sesión Activa UFRO' : 'Iniciar Sesión'}
+                {currentUser ? (
+                  <>
+                    Sesión <span className="font-editorial text-[#c8ceff]">activa</span>
+                  </>
+                ) : (
+                  <>
+                    Iniciar <span className="font-editorial text-[#c8ceff]">sesión</span>
+                  </>
+                )}
               </h2>
             </div>
           </div>
@@ -75,61 +93,61 @@ export function AuthModal({
             type="button"
             onClick={onClose}
             aria-label="Cerrar ventana de acceso"
-            className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+            className="w-9 h-9 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-5">
           {/* Active Session Summary */}
           {currentUser && (
-            <div className="bg-[#f5f6f8] border border-neutral-200 p-4 space-y-4">
+            <div className="rounded-2xl bg-[#101016] border border-white/[0.08] p-4 space-y-4">
               <div className="flex items-center gap-3.5 min-w-0">
                 {currentUser.photoURL ? (
                   <img
                     src={currentUser.photoURL}
                     alt={currentUser.displayName}
-                    className="w-11 h-11 object-cover border border-neutral-300 shrink-0"
+                    className="w-11 h-11 rounded-full object-cover border border-white/[0.14] shrink-0"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-11 h-11 bg-[#0d0d0d] text-white font-display text-sm font-bold flex items-center justify-center shrink-0">
+                  <div className="w-11 h-11 rounded-full bg-white/[0.08] border border-white/[0.14] text-white text-sm font-medium flex items-center justify-center shrink-0">
                     {currentUser.displayName.slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-bold text-sm text-[#0d0d0d] truncate">
+                    <p className="font-medium text-sm text-white truncate">
                       {currentUser.displayName}
                     </p>
-                    <span className="text-[11px] font-display font-bold uppercase tracking-wider px-2 py-0.5 bg-[#707ef9] text-white">
+                    <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-[#707ef9]/20 border border-[#707ef9]/35 text-[#c8ceff]">
                       {ROLE_META[currentUser.role].label}
                     </span>
                   </div>
-                  <p className="text-xs text-neutral-500 truncate mt-0.5">{currentUser.email}</p>
+                  <p className="text-xs text-zinc-500 truncate mt-0.5">{currentUser.email}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-3 border-t border-neutral-200">
+              <div className="flex items-center gap-2 pt-3 border-t border-white/[0.08]">
                 <button
                   type="button"
                   onClick={() => {
                     onClose();
                     onOpenAccountHub();
                   }}
-                  className="flex-1 px-3.5 py-2.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer"
+                  className="flex-1 px-4 py-2.5 rounded-full bg-white text-[#050507] hover:bg-zinc-200 text-xs font-medium transition-colors cursor-pointer"
                 >
-                  Ir a Mi Cuenta
+                  Ir a mi cuenta
                 </button>
                 <button
                   type="button"
                   onClick={handleSignOutClick}
                   disabled={signingOut}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-neutral-300 text-xs font-medium text-neutral-700 hover:border-red-500 hover:text-red-700 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full bg-white/[0.04] hover:bg-red-500/15 border border-white/[0.1] hover:border-red-500/35 text-xs font-medium text-zinc-300 hover:text-red-300 transition-colors cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>{signingOut ? 'Saliendo...' : 'Cerrar sesión'}</span>
+                  <span>{signingOut ? 'Saliendo...' : 'Salir'}</span>
                 </button>
               </div>
             </div>
@@ -137,23 +155,18 @@ export function AuthModal({
 
           {/* Official Firebase Google Sign-In */}
           <div className="space-y-4">
-            <div>
-              <h3 className="font-display text-base font-bold uppercase tracking-wide text-[#0d0d0d]">
-                {currentUser ? 'Cambiar o reconectar cuenta Google' : 'Acceso con Cuenta Google'}
-              </h3>
-              <p className="text-xs text-neutral-600 mt-1 leading-relaxed">
-                Inicia sesión de forma segura con tu cuenta Google (institucional UFRO o personal).
-                Las cuentas nuevas se registran automáticamente como{' '}
-                <strong>Usuario Tradicional</strong> (favoritos, notificaciones y votación MVP).
-              </p>
-            </div>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              {currentUser
+                ? 'Reconecta o cambia tu cuenta Google institucional o personal.'
+                : 'Accede con tu cuenta Google para seguir equipos, votar MVP y gestionar tu perfil.'}
+            </p>
 
             {googleAuthError && (
               <div
                 role="alert"
-                className="bg-red-50 border border-red-300 p-3 text-xs text-red-900 flex items-start gap-2"
+                className="rounded-2xl bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-200 flex items-start gap-2"
               >
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <span>{googleAuthError}</span>
               </div>
             )}
@@ -162,7 +175,7 @@ export function AuthModal({
               type="button"
               onClick={onGoogleSignIn}
               disabled={googleAuthLoading}
-              className="w-full inline-flex items-center justify-center gap-3 bg-white hover:bg-neutral-50 border border-neutral-300 px-5 py-3 text-sm font-medium text-[#1f1f1f] transition-colors cursor-pointer disabled:opacity-50"
+              className="w-full inline-flex items-center justify-center gap-3 rounded-full bg-white hover:bg-zinc-200 px-5 py-3 text-sm font-medium text-[#050507] transition-colors cursor-pointer disabled:opacity-50"
             >
               <svg
                 version="1.1"
@@ -189,21 +202,18 @@ export function AuthModal({
                 />
                 <path fill="none" d="M0 0h48v48H0z" />
               </svg>
-              <span>{googleAuthLoading ? 'Conectando con Google...' : 'Sign in with Google'}</span>
+              <span>{googleAuthLoading ? 'Conectando...' : 'Continuar con Google'}</span>
             </button>
 
-            <div className="bg-[#f5f6f8] border border-neutral-200 p-3.5 flex items-start gap-2.5 text-xs text-neutral-600">
-              <ShieldCheck className="w-4 h-4 text-[#707ef9] shrink-0 mt-0.5" />
+            <div className="rounded-2xl bg-[#101016] border border-white/[0.06] p-3.5 flex items-start gap-2.5 text-xs text-zinc-400">
+              <ShieldCheck className="w-4 h-4 text-[#9aa5ff] shrink-0 mt-0.5" />
               <p className="leading-relaxed">
-                Los roles de <strong>Administrador</strong>, <strong>Árbitro</strong>,{' '}
-                <strong>Fotógrafo</strong>, <strong>Delegado</strong> y <strong>Jugador</strong> son
-                asignados exclusivamente por la administración oficial del campeonato una vez que la
-                persona ha iniciado sesión por primera vez.
+                Los roles administrativos, arbitrales y de prensa se asignan desde la organización oficial.
               </p>
             </div>
 
-            <p className="text-[11px] text-neutral-500 text-center">
-              Al iniciar sesión, aceptas el tratamiento de datos descrito en nuestra{' '}
+            <p className="text-[11px] text-zinc-500 text-center">
+              Al continuar aceptas nuestra{' '}
               <a
                 href="/privacidad"
                 onClick={(e) => {
@@ -213,7 +223,7 @@ export function AuthModal({
                     onOpenPrivacy();
                   }
                 }}
-                className="text-[#707ef9] font-medium underline"
+                className="text-zinc-300 hover:text-white underline underline-offset-4 transition-colors"
               >
                 Política de Privacidad
               </a>
@@ -221,7 +231,7 @@ export function AuthModal({
             </p>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

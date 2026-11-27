@@ -10,6 +10,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { DISCIPLINE_MAP } from '../data/ufroSeed';
 import {
   findClubSquadsForTeam,
@@ -36,6 +37,7 @@ import type {
   Team,
 } from '../types/tournament';
 import { MatchFilterBar } from './MatchFilterBar';
+import { EDITORIAL_EASE } from './MotionPrimitives';
 import { TeamCrest } from './TeamCrest';
 
 interface TeamProfileModalProps {
@@ -189,15 +191,26 @@ export function TeamProfileModal({
   };
 
   return (
-    <div
+    <motion.div
       role="dialog"
       aria-modal="true"
       aria-labelledby="team-profile-title"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/75 p-4 overflow-y-auto"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto"
     >
-      <div className="bg-white w-full max-w-4xl border border-neutral-200 shadow-2xl my-6 overflow-hidden">
-        {/* Carbon Editorial Team Header */}
-        <div className="bg-[#0d0d0d] text-white p-6 sm:p-8 space-y-5">
+      <motion.div
+        initial={{ opacity: 0, y: 14, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.28, ease: EDITORIAL_EASE }}
+        className="rounded-3xl bg-[#0a0a0e] text-zinc-100 w-full max-w-4xl border border-white/[0.1] shadow-2xl shadow-black my-6 overflow-hidden"
+      >
+        {/* Obsidian Header */}
+        <div className="bg-[#0e0e14] border-b border-white/[0.08] p-6 sm:p-8 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div className="flex items-start gap-4">
               <TeamCrest
@@ -208,26 +221,26 @@ export function TeamProfileModal({
                 surface="dark"
               />
               <div>
-                <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
+                <p className="text-xs text-[#a5b0ff] font-medium">
                   {disciplineMeta.nombre} · {activeTeam.groupName}
-                  {activeTeam.anioFundacion ? ` · Fundado en ${activeTeam.anioFundacion}` : ''}
+                  {activeTeam.anioFundacion ? ` · Est. ${activeTeam.anioFundacion}` : ''}
                 </p>
                 <h2
                   id="team-profile-title"
-                  className="font-display text-3xl sm:text-4xl uppercase tracking-wide mt-1 leading-none"
+                  className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white mt-1 leading-tight"
                 >
                   {clubSquads.length > 1 ? unifiedClubName : activeTeam.nombre}
                 </h2>
                 {clubSquads.length > 1 && activeTeam.nombre !== unifiedClubName && (
-                  <p className="text-xs text-neutral-400 mt-1">
-                    Plantel inscrito como: <span className="text-white">{activeTeam.nombre}</span>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Plantel: <span className="text-white">{activeTeam.nombre}</span>
                   </p>
                 )}
-                <p className="text-xs text-neutral-300 mt-2">
+                <p className="text-xs text-zinc-500 mt-1.5">
                   {activeTeam.carrera} · {activeTeam.facultad}
                 </p>
                 {activeTeam.logrosAnteriores && (
-                  <p className="text-xs text-[#707ef9] mt-1 flex items-center gap-1.5">
+                  <p className="text-xs text-amber-300 mt-1.5 flex items-center gap-1.5">
                     <Trophy className="w-3.5 h-3.5 shrink-0" />
                     <span>{activeTeam.logrosAnteriores}</span>
                   </p>
@@ -239,31 +252,30 @@ export function TeamProfileModal({
               <button
                 type="button"
                 onClick={() => onToggleFavoriteTeam(activeTeam.id)}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display uppercase tracking-widest border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   isFavorite
                     ? 'bg-[#707ef9] border-[#707ef9] text-white'
-                    : 'border-white/25 text-white hover:border-[#707ef9]'
+                    : 'bg-white/[0.04] border-white/[0.14] text-zinc-200 hover:border-white/30'
                 }`}
               >
                 <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-white' : ''}`} />
-                <span>{isFavorite ? 'En favoritos' : 'Seguir equipo'}</span>
+                <span>{isFavorite ? 'Siguiendo' : 'Seguir'}</span>
               </button>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Cerrar perfil del equipo"
-                className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+                className="w-9 h-9 rounded-full inline-flex items-center justify-center bg-white/[0.04] border border-white/[0.1] text-zinc-400 hover:text-white cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Multi-Discipline Club Switcher Tabs */}
           {clubSquads.length > 1 && (
-            <div className="pt-4 border-t border-white/10 space-y-2">
-              <p className="text-[11px] uppercase tracking-widest text-neutral-400">
-                Club Multidisciplina · {clubSquads.length} disciplinas activas
+            <div className="pt-4 border-t border-white/[0.08] space-y-2">
+              <p className="text-xs text-zinc-500">
+                Ramas del club ({clubSquads.length})
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 {clubSquads.map((squad) => {
@@ -280,10 +292,10 @@ export function TeamProfileModal({
                         setStageFilter('ALL');
                         setStatusFilter('ALL');
                       }}
-                      className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         selected
-                          ? 'bg-[#707ef9] text-white font-bold'
-                          : 'bg-white/10 text-neutral-300 hover:bg-white/20 hover:text-white'
+                          ? 'bg-white text-[#050507]'
+                          : 'bg-white/[0.05] text-zinc-300 hover:bg-white/[0.12] hover:text-white'
                       }`}
                     >
                       {squadMeta.nombreCorto} ({squad.groupName})
@@ -296,31 +308,27 @@ export function TeamProfileModal({
         </div>
 
         <div className="p-6 sm:p-8 space-y-8">
-          {/* HISTORICAL STATISTICS SECTION */}
+          {/* HISTORICAL STATISTICS */}
           <section className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-neutral-200 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-white/[0.08] pb-3">
               <div>
-                <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                  Rendimiento Acumulado
-                </p>
-                <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
-                  Estadísticas Históricas del Equipo
+                <p className="text-xs text-[#a5b0ff]">Rendimiento acumulado</p>
+                <h3 className="text-xl font-medium tracking-[-0.02em] text-white mt-0.5">
+                  Estadísticas históricas
                 </h3>
               </div>
               {historicalStats.racha.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-neutral-500 mr-1">
-                    Racha reciente:
-                  </span>
+                  <span className="text-xs text-zinc-500 mr-1">Racha:</span>
                   {historicalStats.racha.map((r, i) => (
                     <span
                       key={i}
-                      className={`w-6 h-6 text-[11px] font-bold flex items-center justify-center ${
+                      className={`w-6 h-6 rounded-full text-[11px] font-semibold flex items-center justify-center ${
                         r === 'G'
-                          ? 'bg-[#0d0d0d] text-white'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                           : r === 'E'
-                          ? 'bg-neutral-200 text-[#0d0d0d]'
-                          : 'bg-neutral-100 text-neutral-500 border border-neutral-200'
+                          ? 'bg-white/[0.1] text-zinc-200'
+                          : 'bg-red-500/15 text-red-300 border border-red-500/25'
                       }`}
                     >
                       {r}
@@ -330,144 +338,134 @@ export function TeamProfileModal({
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">PJ</p>
-                <p className="font-display text-3xl tabular-nums text-[#0d0d0d]">
-                  {historicalStats.pj}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+              {[
+                { label: 'PJ', val: historicalStats.pj, cls: 'text-white' },
+                { label: 'PG', val: historicalStats.pg, cls: 'text-emerald-400' },
+                { label: 'PE', val: historicalStats.pe, cls: 'text-zinc-300' },
+                { label: 'PP', val: historicalStats.pp, cls: 'text-red-400' },
+                {
+                  label: favorLabel,
+                  val:
+                    disciplineMeta.sportType === 'voleibol'
+                      ? historicalStats.setsFavor ?? 0
+                      : historicalStats.favor,
+                  cls: 'text-white',
+                },
+                {
+                  label: contraLabel,
+                  val:
+                    disciplineMeta.sportType === 'voleibol'
+                      ? historicalStats.setsContra ?? 0
+                      : historicalStats.contra,
+                  cls: 'text-white',
+                },
+                {
+                  label: 'DIF',
+                  val:
+                    historicalStats.diferencia > 0
+                      ? `+${historicalStats.diferencia}`
+                      : historicalStats.diferencia,
+                  cls: 'text-white',
+                },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-2xl border border-white/[0.08] bg-[#101016] p-3"
+                >
+                  <p className="text-[11px] text-zinc-500">{stat.label}</p>
+                  <p className={`text-2xl font-medium tabular-nums mt-0.5 ${stat.cls}`}>
+                    {stat.val}
+                  </p>
+                </div>
+              ))}
+              <div className="rounded-2xl border border-[#707ef9]/35 bg-[#707ef9]/15 p-3">
+                <p className="text-[11px] text-[#c7ceff]">Puntos</p>
+                <p className="text-2xl font-semibold tabular-nums text-white mt-0.5">
+                  {historicalStats.puntos}
                 </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">PG</p>
-                <p className="font-display text-3xl tabular-nums text-emerald-700">
-                  {historicalStats.pg}
-                </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">PE</p>
-                <p className="font-display text-3xl tabular-nums text-neutral-700">
-                  {historicalStats.pe}
-                </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">PP</p>
-                <p className="font-display text-3xl tabular-nums text-red-700">
-                  {historicalStats.pp}
-                </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">{favorLabel}</p>
-                <p className="font-display text-3xl tabular-nums text-[#0d0d0d]">
-                  {disciplineMeta.sportType === 'voleibol'
-                    ? historicalStats.setsFavor ?? 0
-                    : historicalStats.favor}
-                </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">{contraLabel}</p>
-                <p className="font-display text-3xl tabular-nums text-[#0d0d0d]">
-                  {disciplineMeta.sportType === 'voleibol'
-                    ? historicalStats.setsContra ?? 0
-                    : historicalStats.contra}
-                </p>
-              </div>
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-3">
-                <p className="text-[11px] uppercase tracking-wider text-neutral-500">DIF</p>
-                <p className="font-display text-3xl tabular-nums text-[#0d0d0d]">
-                  {historicalStats.diferencia > 0
-                    ? `+${historicalStats.diferencia}`
-                    : historicalStats.diferencia}
-                </p>
-              </div>
-              <div className="border border-[#707ef9] bg-[#0d0d0d] text-white p-3">
-                <p className="text-[11px] uppercase tracking-wider text-[#707ef9]">Puntos</p>
-                <p className="font-display text-3xl tabular-nums">{historicalStats.puntos}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div className="border border-neutral-200 p-3.5 flex items-center justify-between">
-                <span className="text-neutral-600 flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-[#707ef9]" />
-                  <span>Efectividad de victorias</span>
+              <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-3.5 flex items-center justify-between">
+                <span className="text-zinc-400 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-[#9aa5ff]" />
+                  <span>Efectividad</span>
                 </span>
-                <strong className="font-display text-xl tabular-nums text-[#0d0d0d]">
+                <strong className="text-lg font-medium tabular-nums text-white">
                   {historicalStats.winRatePct}%
                 </strong>
               </div>
-              <div className="border border-neutral-200 p-3.5 flex items-center justify-between">
-                <span className="text-neutral-600 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-[#707ef9]" />
-                  <span>Plantel inscrito (Selec. UFRO)</span>
+              <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-3.5 flex items-center justify-between">
+                <span className="text-zinc-400 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#9aa5ff]" />
+                  <span>Plantel (Selec. UFRO)</span>
                 </span>
-                <strong className="font-display text-xl tabular-nums text-[#0d0d0d]">
+                <strong className="text-lg font-medium tabular-nums text-white">
                   {roster.length} ({selectedUfroCount})
                 </strong>
               </div>
-              <div className="border border-neutral-200 p-3.5 flex items-center justify-between">
-                <span className="text-neutral-600 flex items-center gap-2">
-                  <Award className="w-4 h-4 text-[#707ef9]" />
-                  <span>Premios MVP del equipo</span>
+              <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-3.5 flex items-center justify-between">
+                <span className="text-zinc-400 flex items-center gap-2">
+                  <Award className="w-4 h-4 text-[#9aa5ff]" />
+                  <span>Premios MVP</span>
                 </span>
-                <strong className="font-display text-xl tabular-nums text-[#0d0d0d]">
+                <strong className="text-lg font-medium tabular-nums text-white">
                   {mvpAwardsCount}
                 </strong>
               </div>
             </div>
           </section>
 
-          {/* COMPARATIVE PROGRESSION CHART (RECHARTS) */}
+          {/* COMPARATIVE PROGRESSION CHART */}
           <TeamProgressionChart
             progression={matchProgression}
             sportType={disciplineMeta.sportType}
             teamName={activeTeam.nombre}
           />
 
-          {/* COMPLETE MATCH HISTORY SECTION */}
+          {/* MATCH HISTORY */}
           <section className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-neutral-200 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-white/[0.08] pb-3">
               <div>
-                <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                  Registro Oficial de Encuentros
-                </p>
-                <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
-                  Historial Completo de Partidos ({historicalStats.history.length})
+                <p className="text-xs text-[#a5b0ff]">Encuentros</p>
+                <h3 className="text-xl font-medium tracking-[-0.02em] text-white mt-0.5">
+                  Historial ({historicalStats.history.length})
                 </h3>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex flex-wrap items-center gap-1 bg-[#f5f6f8] p-1 border border-neutral-200">
-                  {(
-                    [
-                      { id: 'ALL', label: `Todos (${historicalStats.history.length})` },
-                      {
-                        id: 'FINALIZADO',
-                        label: `Finalizados (${historicalStats.history.filter((h) => h.match.status === 'FINALIZADO').length})`,
-                      },
-                      {
-                        id: 'EN_VIVO',
-                        label: `En juego (${historicalStats.history.filter((h) => h.match.status === 'EN_VIVO').length})`,
-                      },
-                      {
-                        id: 'PROGRAMADO',
-                        label: `Programados (${historicalStats.history.filter((h) => h.match.status === 'PROGRAMADO').length})`,
-                      },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setStatusFilter(tab.id)}
-                      className={`px-3 py-1.5 text-xs font-display uppercase tracking-wider transition-colors cursor-pointer ${
-                        statusFilter === tab.id
-                          ? 'bg-[#0d0d0d] text-white'
-                          : 'text-neutral-600 hover:text-[#0d0d0d]'
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap items-center gap-1 rounded-full bg-white/[0.04] p-1 border border-white/[0.08]">
+                {(
+                  [
+                    { id: 'ALL', label: `Todos (${historicalStats.history.length})` },
+                    {
+                      id: 'FINALIZADO',
+                      label: `Finalizados (${historicalStats.history.filter((h) => h.match.status === 'FINALIZADO').length})`,
+                    },
+                    {
+                      id: 'EN_VIVO',
+                      label: `En juego (${historicalStats.history.filter((h) => h.match.status === 'EN_VIVO').length})`,
+                    },
+                    {
+                      id: 'PROGRAMADO',
+                      label: `Programados (${historicalStats.history.filter((h) => h.match.status === 'PROGRAMADO').length})`,
+                    },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setStatusFilter(tab.id)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+                      statusFilter === tab.id
+                        ? 'bg-white text-[#050507]'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -497,11 +495,11 @@ export function TeamProfileModal({
             />
 
             {filteredHistory.length === 0 ? (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-8 text-center text-xs text-neutral-600">
-                No hay encuentros registrados para este equipo con el filtro seleccionado.
+              <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-8 text-center text-xs text-zinc-500">
+                Sin encuentros para el filtro seleccionado.
               </div>
             ) : (
-              <div className="divide-y divide-neutral-200 border border-neutral-200">
+              <div className="rounded-2xl divide-y divide-white/[0.06] border border-white/[0.08] bg-[#101016] overflow-hidden">
                 {filteredHistory.map((item) => {
                   const { match, isHome, opponentTeamId, outcome } = item;
                   const homeTeam = teamMap.get(match.homeTeamId);
@@ -514,56 +512,53 @@ export function TeamProfileModal({
 
                   const outcomeBadge =
                     outcome === 'G'
-                      ? { text: 'VICTORIA', cls: 'bg-[#0d0d0d] text-white' }
+                      ? { text: 'Victoria', cls: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25' }
                       : outcome === 'E'
-                      ? { text: 'EMPATE', cls: 'bg-neutral-200 text-[#0d0d0d]' }
+                      ? { text: 'Empate', cls: 'bg-white/[0.08] text-zinc-200' }
                       : outcome === 'P'
-                      ? { text: 'DERROTA', cls: 'bg-red-50 text-red-800 border border-red-200' }
+                      ? { text: 'Derrota', cls: 'bg-red-500/15 text-red-300 border border-red-500/25' }
                       : outcome === 'EN_VIVO'
-                      ? { text: 'EN JUEGO', cls: 'bg-[#707ef9] text-white' }
-                      : { text: 'PROGRAMADO', cls: 'bg-[#f5f6f8] text-neutral-600 border border-neutral-200' };
+                      ? { text: 'En juego', cls: 'bg-[#707ef9]/20 text-[#c7ceff]' }
+                      : { text: 'Programado', cls: 'bg-white/[0.05] text-zinc-400' };
 
                   return (
                     <div
                       key={match.id}
-                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#f9fafb]"
+                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-white/[0.03] transition-colors"
                     >
                       <div className="space-y-1.5 min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span
-                            className={`px-2 py-0.5 font-display uppercase tracking-wider text-[11px] ${outcomeBadge.cls}`}
-                          >
+                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${outcomeBadge.cls}`}>
                             {outcomeBadge.text}
                           </span>
-                          <span className="text-neutral-500 uppercase font-medium">
-                            {match.fase} · Jornada {match.jornada} · {match.groupName}
+                          <span className="text-zinc-400">
+                            {match.fase} · J{match.jornada} · {match.groupName}
                           </span>
-                          <span className="text-neutral-400 inline-flex items-center gap-1 tabular-nums">
+                          <span className="text-zinc-500 inline-flex items-center gap-1 tabular-nums">
                             <Calendar className="w-3 h-3" />
                             {match.fecha} {match.hora}
                           </span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2 text-sm">
-                          <span className={isHome ? 'font-bold text-[#0d0d0d]' : 'text-neutral-700'}>
+                          <span className={isHome ? 'font-medium text-white' : 'text-zinc-400'}>
                             {homeTeam?.nombre ?? match.homeTeamId}
                           </span>
-                          <span className="font-display text-xl tabular-nums px-2 py-0.5 bg-[#0d0d0d] text-white">
-                            {revealScore ? `${match.homeScore} — ${match.awayScore}` : 'VS'}
+                          <span className="text-sm font-semibold tabular-nums px-2.5 py-0.5 rounded-full bg-white/[0.08] text-white">
+                            {revealScore ? `${match.homeScore} — ${match.awayScore}` : 'vs'}
                           </span>
-                          <span className={!isHome ? 'font-bold text-[#0d0d0d]' : 'text-neutral-700'}>
+                          <span className={!isHome ? 'font-medium text-white' : 'text-zinc-400'}>
                             {awayTeam?.nombre ?? opponent?.nombre ?? match.awayTeamId}
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
                           <span className="inline-flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-[#707ef9]" />
+                            <MapPin className="w-3 h-3 text-[#9aa5ff]" />
                             {match.cancha}
                           </span>
                           {revealScore && match.periods.length > 0 && (
                             <span className="tabular-nums">
-                              Parciales:{' '}
                               {match.periods
                                 .map((p, idx) =>
                                   disciplineMeta.sportType === 'voleibol'
@@ -575,9 +570,7 @@ export function TeamProfileModal({
                                 .join(' · ')}
                             </span>
                           )}
-                          {topMvp && (
-                            <span className="text-[#707ef9] font-medium">MVP: {topMvp}</span>
-                          )}
+                          {topMvp && <span className="text-[#a5b0ff]">MVP: {topMvp}</span>}
                         </div>
                       </div>
 
@@ -588,7 +581,7 @@ export function TeamProfileModal({
                             onClose();
                             onOpenMatchModal(match);
                           }}
-                          className="px-3 py-1.5 border border-neutral-300 hover:border-[#707ef9] text-xs font-display uppercase tracking-wider text-[#0d0d0d] cursor-pointer"
+                          className="px-3.5 py-1.5 rounded-full border border-white/[0.12] hover:border-white/30 text-xs text-zinc-200 cursor-pointer transition-colors"
                         >
                           Acta / MVP
                         </button>
@@ -599,7 +592,7 @@ export function TeamProfileModal({
                               onClose();
                               onAdminEditMatch(match.id);
                             }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0d0d0d] hover:bg-[#707ef9] text-white text-xs font-display uppercase tracking-wider cursor-pointer"
+                            className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full bg-[#707ef9] hover:bg-[#5f6ef5] text-white text-xs cursor-pointer transition-colors"
                           >
                             <Edit3 className="w-3 h-3" />
                             <span>Editar</span>
@@ -613,20 +606,18 @@ export function TeamProfileModal({
             )}
           </section>
 
-          {/* TEAM ROSTER SECTION */}
+          {/* TEAM ROSTER */}
           <section className="space-y-4">
-            <div className="border-b border-neutral-200 pb-3">
-              <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-                Nómina Oficial UFRO
-              </p>
-              <h3 className="font-display text-2xl uppercase tracking-wide text-[#0d0d0d]">
-                Plantel de Jugadores ({roster.length})
+            <div className="border-b border-white/[0.08] pb-3">
+              <p className="text-xs text-[#a5b0ff]">Nómina oficial</p>
+              <h3 className="text-xl font-medium tracking-[-0.02em] text-white mt-0.5">
+                Plantel ({roster.length})
               </h3>
             </div>
 
             {roster.length === 0 ? (
-              <p className="text-xs text-neutral-500 bg-[#f5f6f8] border border-neutral-200 p-4">
-                Aún no hay jugadores registrados en el plantel de este equipo.
+              <p className="text-xs text-zinc-500 rounded-2xl bg-[#101016] border border-white/[0.08] p-4">
+                Sin jugadores registrados en este plantel.
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -645,27 +636,27 @@ export function TeamProfileModal({
                         onClose();
                         onInspectPlayer(player);
                       }}
-                      className="text-left border border-neutral-200 hover:border-[#707ef9] p-3.5 transition-colors flex items-center justify-between gap-3 cursor-pointer"
+                      className="text-left rounded-2xl border border-white/[0.08] bg-[#101016] hover:border-white/[0.2] p-3.5 transition-colors flex items-center justify-between gap-3 cursor-pointer"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="w-8 h-8 bg-[#0d0d0d] text-white font-display text-lg flex items-center justify-center shrink-0 tabular-nums">
+                        <span className="w-8 h-8 rounded-xl bg-white/[0.08] text-white text-sm font-medium flex items-center justify-center shrink-0 tabular-nums">
                           {player.dorsal}
                         </span>
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-[#0d0d0d] truncate">
+                          <p className="text-sm font-medium text-white truncate">
                             {player.nombre} {player.apellidoPaterno}
                           </p>
-                          <p className="text-xs text-neutral-500 truncate">
+                          <p className="text-xs text-zinc-500 truncate">
                             {player.posicion}
                             {player.esSeleccionadoUfro && (
-                              <span className="text-[#707ef9] font-medium"> · Selec. UFRO</span>
+                              <span className="text-[#a5b0ff]"> · UFRO</span>
                             )}
                           </p>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs font-medium text-[#0d0d0d] tabular-nums">{mainStat}</p>
-                        <p className="text-[11px] text-neutral-500 tabular-nums">
+                        <p className="text-xs font-medium text-zinc-200 tabular-nums">{mainStat}</p>
+                        <p className="text-[11px] text-zinc-500 tabular-nums">
                           {player.stats.partidosJugados} PJ
                         </p>
                       </div>
@@ -676,21 +667,21 @@ export function TeamProfileModal({
             )}
           </section>
 
-          <div className="flex items-center justify-between pt-4 border-t border-neutral-200 text-xs text-neutral-500">
+          <div className="flex items-center justify-between pt-4 border-t border-white/[0.08] text-xs text-zinc-500">
             <span className="inline-flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-[#707ef9]" />
-              <span>Estadísticas oficiales sincronizadas desde Firestore · UFRO</span>
+              <Shield className="w-3.5 h-3.5 text-[#9aa5ff]" />
+              <span>Estadísticas oficiales UFRO</span>
             </span>
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-[#0d0d0d] hover:bg-[#707ef9] text-white font-display uppercase tracking-widest text-xs cursor-pointer"
+              className="px-4 py-2 rounded-full bg-white text-[#050507] hover:bg-zinc-200 font-medium text-xs cursor-pointer transition-colors"
             >
-              Cerrar perfil
+              Cerrar
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState, type MouseEvent } from 'react';
 import { Bell, LogIn, Menu, Shield, User, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
 import {
   getSectionPath,
@@ -15,6 +16,7 @@ import {
 } from '../domain/rbacEngine';
 import { getDelegateTransferActionRole } from '../domain/transfersEngine';
 import type { AppUserProfile, Match, TournamentState } from '../types/tournament';
+import { EDITORIAL_EASE } from './MotionPrimitives';
 
 export type { NavSection };
 
@@ -86,28 +88,31 @@ export function Navbar({
   }, [isDelegadoUser, currentUser, state.transfers]);
 
   return (
-    <header className="sticky top-0 z-40 bg-[#0d0d0d] text-white border-b border-white/10">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 lg:gap-6">
-        {/* Zone 1: Single-line Brand Lockup (Primary route: /) */}
+    <header className="sticky top-0 z-40 bg-[#050507]/80 backdrop-blur-xl border-b border-white/[0.06] text-zinc-100">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4">
+        {/* Brand Lockup (Primary route: /) */}
         <a
           href={getSectionPath('inicio')}
           aria-current={activeSection === 'inicio' ? 'page' : undefined}
           onClick={(e) => handleLinkClick(e, 'inicio')}
-          className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#707ef9]"
+          className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer group focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#707ef9]"
         >
           <img
             src={LOGO_LIGHT_SVG}
             alt="Isotipo Campeonato Intercarreras UFRO"
-            className="h-7 w-auto shrink-0"
+            className="h-7 w-auto shrink-0 transition-transform duration-300 group-hover:scale-105"
             referrerPolicy="no-referrer"
           />
-          <span className="font-display text-base lg:text-lg font-bold tracking-wider uppercase text-white">
-            Intercarreras
+          <span className="text-[17px] font-medium tracking-[-0.02em] text-white">
+            Inter<span className="font-editorial text-[19px] text-zinc-300">carreras</span>
           </span>
         </a>
 
-        {/* Zone 2: Concise single-line nav links (Transferencias visible exclusively to Delegados) */}
-        <nav aria-label="Navegación principal" className="hidden xl:flex items-center gap-4">
+        {/* Centered floating glass navigation capsule (Artfolio reference rhythm) */}
+        <nav
+          aria-label="Navegación principal"
+          className="hidden lg:flex items-center p-1 rounded-full bg-white/[0.03] border border-white/[0.08]"
+        >
           {visibleNavItems.map((item) => {
             const isActive = activeSection === item.id;
             const showPendingCount =
@@ -118,63 +123,33 @@ export function Navbar({
                 href={item.href}
                 aria-current={isActive ? 'page' : undefined}
                 onClick={(e) => handleLinkClick(e, item.id)}
-                className={`relative h-16 flex items-center gap-1.5 text-[13px] font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
-                  isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
+                className={`relative px-3.5 xl:px-4 py-1.5 rounded-full text-[13px] font-normal transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#707ef9] ${
+                  isActive ? 'text-white' : 'text-zinc-400 hover:text-zinc-100'
                 }`}
               >
-                <span>{item.label}</span>
-                {showPendingCount && (
-                  <span className="min-w-[18px] h-[18px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
-                    {pendingDelegateTransferCount}
-                  </span>
-                )}
                 {isActive && (
-                  <span
+                  <motion.span
+                    layoutId="nav-active-capsule"
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    className="absolute inset-0 rounded-full bg-white/[0.09] border border-white/[0.15]"
                     aria-hidden="true"
-                    className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
                   />
                 )}
+                <span className="relative z-10 inline-flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {showPendingCount && (
+                    <span className="min-w-[17px] h-[17px] px-1 rounded-full bg-[#707ef9] text-white text-[10px] font-semibold tabular-nums inline-flex items-center justify-center">
+                      {pendingDelegateTransferCount}
+                    </span>
+                  )}
+                </span>
               </a>
             );
           })}
         </nav>
 
-        {/* Medium desktop nav (compact spacing) */}
-        <nav aria-label="Navegación principal compacta" className="hidden lg:flex xl:hidden items-center gap-2.5">
-          {visibleNavItems.map((item) => {
-            const isActive = activeSection === item.id;
-            const showPendingCount =
-              item.id === 'transferencias' && pendingDelegateTransferCount > 0;
-            return (
-              <a
-                key={item.id}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                onClick={(e) => handleLinkClick(e, item.id)}
-                className={`relative h-16 flex items-center gap-1 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  isActive ? 'text-white' : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                <span>{item.label}</span>
-                {showPendingCount && (
-                  <span className="min-w-[16px] h-[16px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
-                    {pendingDelegateTransferCount}
-                  </span>
-                )}
-                {isActive && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#707ef9]"
-                  />
-                )}
-              </a>
-            );
-          })}
-        </nav>
-
-        {/* Zone 3: Notifications + Account/Login + Panel Oficial */}
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Notifications Bell (visible when signed in) */}
+        {/* Right Controls: Notifications + Account / Login + Panel */}
+        <div className="flex items-center gap-2 shrink-0">
           {currentUser && (
             <div className="relative">
               <button
@@ -182,84 +157,91 @@ export function Navbar({
                 onClick={() => setNotifOpen((prev) => !prev)}
                 aria-label="Abrir notificaciones de equipos favoritos"
                 aria-expanded={notifOpen}
-                className="relative inline-flex items-center justify-center w-9 h-9 border border-white/15 hover:border-[#707ef9] text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                className="relative inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.03] border border-white/[0.1] hover:border-white/25 text-zinc-300 hover:text-white transition-colors cursor-pointer"
               >
                 <Bell className="w-4 h-4" />
                 {notifications.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#707ef9] text-white text-[10px] font-semibold tabular-nums flex items-center justify-center">
                     {notifications.length}
                   </span>
                 )}
               </button>
 
-              {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white text-[#0d0d0d] border border-neutral-200 shadow-2xl z-50">
-                  <div className="bg-[#0d0d0d] text-white px-4 py-3 flex items-center justify-between border-b border-white/10">
-                    <span className="font-display text-xs font-bold uppercase tracking-widest">
-                      Notificaciones Favoritos ({notifications.length})
-                    </span>
-                    <a
-                      href={getSectionPath('cuenta')}
-                      onClick={(e) => handleLinkClick(e, 'cuenta')}
-                      className="text-[11px] text-[#707ef9] hover:underline cursor-pointer"
-                    >
-                      Gestionar
-                    </a>
-                  </div>
-                  <div className="max-h-80 overflow-y-auto divide-y divide-neutral-200">
-                    {notifications.length === 0 ? (
-                      <p className="p-4 text-xs text-neutral-500">
-                        Guarda equipos en favoritos desde Mi Cuenta o Posiciones para recibir alertas.
-                      </p>
-                    ) : (
-                      notifications.slice(0, 6).map((n) => {
-                        const m = matchMap.get(n.matchId);
-                        return (
-                          <button
-                            key={n.id}
-                            type="button"
-                            onClick={() => {
-                              setNotifOpen(false);
-                              if (m) onOpenMatchModal(m);
-                            }}
-                            className="w-full text-left p-3.5 hover:bg-[#f5f6f8] transition-colors block cursor-pointer"
-                          >
-                            <p
-                              className={`text-[11px] font-bold uppercase tracking-wider ${
-                                n.isLiveMvp ? 'text-[#707ef9]' : 'text-[#0d0d0d]'
-                              }`}
+              <AnimatePresence>
+                {notifOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                    transition={{ duration: 0.18, ease: EDITORIAL_EASE }}
+                    className="absolute right-0 mt-2.5 w-80 sm:w-96 rounded-2xl bg-[#0e0e13] text-zinc-100 border border-white/[0.1] shadow-2xl shadow-black/80 overflow-hidden z-50"
+                  >
+                    <div className="px-4 py-3 flex items-center justify-between border-b border-white/[0.08] bg-white/[0.02]">
+                      <span className="text-xs font-medium text-zinc-200">
+                        Notificaciones ({notifications.length})
+                      </span>
+                      <a
+                        href={getSectionPath('cuenta')}
+                        onClick={(e) => handleLinkClick(e, 'cuenta')}
+                        className="text-xs text-[#9aa5ff] hover:text-white transition-colors cursor-pointer"
+                      >
+                        Gestionar
+                      </a>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto divide-y divide-white/[0.06]">
+                      {notifications.length === 0 ? (
+                        <p className="p-4 text-xs text-zinc-500">
+                          Sigue equipos en favoritos para recibir alertas de partidos.
+                        </p>
+                      ) : (
+                        notifications.slice(0, 6).map((n) => {
+                          const m = matchMap.get(n.matchId);
+                          return (
+                            <button
+                              key={n.id}
+                              type="button"
+                              onClick={() => {
+                                setNotifOpen(false);
+                                if (m) onOpenMatchModal(m);
+                              }}
+                              className="w-full text-left p-3.5 hover:bg-white/[0.04] transition-colors block cursor-pointer"
                             >
-                              {n.title}
-                            </p>
-                            <p className="text-xs text-neutral-600 mt-1 line-clamp-2">{n.detail}</p>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
+                              <p
+                                className={`text-xs font-medium ${
+                                  n.isLiveMvp ? 'text-[#9aa5ff]' : 'text-white'
+                                }`}
+                              >
+                                {n.title}
+                              </p>
+                              <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{n.detail}</p>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
 
-          {/* Account / Login & Official Panel CTAs */}
           {currentUser ? (
             <>
               <a
                 href={getSectionPath('cuenta')}
                 aria-current={activeSection === 'cuenta' ? 'page' : undefined}
                 onClick={(e) => handleLinkClick(e, 'cuenta')}
-                className={`hidden sm:inline-flex items-center gap-2 px-3 py-2 border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-full border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   activeSection === 'cuenta'
-                    ? 'bg-white text-[#0d0d0d] border-white'
-                    : 'border-white/20 text-white hover:border-[#707ef9]'
+                    ? 'bg-white text-[#050507] border-white'
+                    : 'bg-white/[0.03] border-white/[0.12] text-zinc-200 hover:border-white/30 hover:text-white'
                 }`}
               >
                 <User className="w-3.5 h-3.5 text-[#707ef9] shrink-0" />
-                <span className="max-w-[110px] truncate">
+                <span className="max-w-[100px] truncate">
                   {currentUser.displayName.split(' ')[0]}
                 </span>
-                <span className="text-[10px] uppercase tracking-wider text-[#707ef9] font-display font-bold">
+                <span className="text-[11px] text-zinc-400">
                   {ROLE_META[currentUser.role].shortLabel}
                 </span>
               </a>
@@ -269,14 +251,14 @@ export function Navbar({
                   href={getSectionPath('panel')}
                   aria-current={activeSection === 'panel' ? 'page' : undefined}
                   onClick={(e) => handleLinkClick(e, 'panel')}
-                  className={`hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`hidden sm:inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     activeSection === 'panel'
-                      ? 'bg-white text-[#0d0d0d]'
-                      : 'bg-[#707ef9] text-white hover:bg-[#5766eb]'
+                      ? 'bg-white text-[#050507]'
+                      : 'bg-[#707ef9] text-white hover:bg-[#5f6ef5]'
                   }`}
                 >
                   <Shield className="w-3.5 h-3.5" />
-                  <span>{currentUser.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}</span>
+                  <span>{currentUser.role === 'prensa' ? 'Prensa' : 'Panel'}</span>
                 </a>
               )}
             </>
@@ -284,9 +266,9 @@ export function Navbar({
             <button
               type="button"
               onClick={onOpenAuth}
-              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-[#707ef9] hover:bg-[#5766eb] text-white text-xs font-display font-bold uppercase tracking-widest transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.14] hover:border-white/30 text-zinc-100 text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <LogIn className="w-3.5 h-3.5" />
+              <LogIn className="w-3.5 h-3.5 text-[#9aa5ff]" />
               <span>Iniciar Sesión</span>
             </button>
           )}
@@ -296,91 +278,100 @@ export function Navbar({
             onClick={() => setMobileOpen((prev) => !prev)}
             aria-label={mobileOpen ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'}
             aria-expanded={mobileOpen}
-            className="lg:hidden inline-flex items-center justify-center w-10 h-10 text-white hover:text-[#707ef9] transition-colors cursor-pointer"
+            className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] text-zinc-200 hover:text-white transition-colors cursor-pointer"
           >
-            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
       {/* Mobile Navigation Drawer */}
-      {mobileOpen && (
-        <nav
-          aria-label="Navegación móvil"
-          className="lg:hidden bg-[#0d0d0d] border-t border-white/10 px-4 py-3 space-y-1"
-        >
-          {visibleNavItems.map((item) => {
-            const isActive = activeSection === item.id;
-            const showPendingCount =
-              item.id === 'transferencias' && pendingDelegateTransferCount > 0;
-            return (
-              <a
-                key={item.id}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                onClick={(e) => handleLinkClick(e, item.id)}
-                className={`w-full text-left px-3 py-3 text-sm font-medium transition-colors flex items-center justify-between cursor-pointer ${
-                  isActive
-                    ? 'text-white bg-white/5 border-b border-[#707ef9]'
-                    : 'text-neutral-300 hover:text-white'
-                }`}
-              >
-                <span>{item.label}</span>
-                {showPendingCount && (
-                  <span className="min-w-[18px] h-[18px] px-1.5 bg-[#707ef9] text-white text-[10px] font-bold tabular-nums inline-flex items-center justify-center">
-                    {pendingDelegateTransferCount}
-                  </span>
-                )}
-              </a>
-            );
-          })}
-          <div className="pt-2 space-y-2 border-t border-white/10">
-            {currentUser ? (
-              <>
-                <a
-                  href={getSectionPath('cuenta')}
-                  onClick={(e) => handleLinkClick(e, 'cuenta')}
-                  className="w-full py-2.5 px-3 border border-white/20 text-white text-left text-xs font-display font-bold uppercase tracking-widest flex items-center justify-between"
-                >
-                  <span>Mi Cuenta · {currentUser.displayName}</span>
-                  <span className="text-[#707ef9]">{ROLE_META[currentUser.role].shortLabel}</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileOpen(false);
-                    onOpenAuth();
-                  }}
-                  className="w-full py-2.5 px-3 bg-white/10 text-white font-display font-bold uppercase tracking-widest text-xs"
-                >
-                  Cambiar cuenta / Cerrar sesión
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileOpen(false);
-                  onOpenAuth();
-                }}
-                className="w-full py-3 bg-[#707ef9] text-white font-display font-bold uppercase tracking-widest text-sm"
-              >
-                Iniciar Sesión UFRO
-              </button>
-            )}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.nav
+            aria-label="Navegación móvil"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.24, ease: EDITORIAL_EASE }}
+            className="lg:hidden overflow-hidden bg-[#08080c] border-t border-white/[0.08]"
+          >
+            <div className="px-4 py-4 space-y-1">
+              {visibleNavItems.map((item) => {
+                const isActive = activeSection === item.id;
+                const showPendingCount =
+                  item.id === 'transferencias' && pendingDelegateTransferCount > 0;
+                return (
+                  <a
+                    key={item.id}
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={(e) => handleLinkClick(e, item.id)}
+                    className={`w-full text-left px-4 py-3 rounded-xl text-sm font-normal transition-colors flex items-center justify-between cursor-pointer ${
+                      isActive
+                        ? 'text-white bg-white/[0.08] border border-white/[0.12]'
+                        : 'text-zinc-400 hover:text-white hover:bg-white/[0.03]'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    {showPendingCount && (
+                      <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#707ef9] text-white text-[10px] font-semibold tabular-nums inline-flex items-center justify-center">
+                        {pendingDelegateTransferCount}
+                      </span>
+                    )}
+                  </a>
+                );
+              })}
 
-            {hasOfficialAccess && (
-              <a
-                href={getSectionPath('panel')}
-                onClick={(e) => handleLinkClick(e, 'panel')}
-                className="block w-full py-3 bg-[#707ef9] text-white text-center font-display font-bold uppercase tracking-widest text-sm"
-              >
-                {currentUser?.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}
-              </a>
-            )}
-          </div>
-        </nav>
-      )}
+              <div className="pt-3 mt-2 space-y-2 border-t border-white/[0.08]">
+                {currentUser ? (
+                  <>
+                    <a
+                      href={getSectionPath('cuenta')}
+                      onClick={(e) => handleLinkClick(e, 'cuenta')}
+                      className="w-full py-3 px-4 rounded-xl border border-white/[0.12] bg-white/[0.03] text-white text-left text-xs font-medium flex items-center justify-between"
+                    >
+                      <span>Mi Cuenta · {currentUser.displayName}</span>
+                      <span className="text-[#9aa5ff]">{ROLE_META[currentUser.role].shortLabel}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileOpen(false);
+                        onOpenAuth();
+                      }}
+                      className="w-full py-2.5 px-4 rounded-xl bg-white/[0.06] text-zinc-200 font-medium text-xs cursor-pointer"
+                    >
+                      Cambiar cuenta / Cerrar sesión
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileOpen(false);
+                      onOpenAuth();
+                    }}
+                    className="w-full py-3 rounded-full bg-white text-[#050507] font-medium text-sm cursor-pointer"
+                  >
+                    Iniciar Sesión UFRO
+                  </button>
+                )}
+
+                {hasOfficialAccess && (
+                  <a
+                    href={getSectionPath('panel')}
+                    onClick={(e) => handleLinkClick(e, 'panel')}
+                    className="block w-full py-3 rounded-full bg-[#707ef9] text-white text-center font-medium text-sm"
+                  >
+                    {currentUser?.role === 'prensa' ? 'Sala de Prensa' : 'Panel Oficial'}
+                  </a>
+                )}
+              </div>
+            </div>
+          </motion.nav>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

@@ -14,9 +14,9 @@ export function Footer({ onNavigate }: FooterProps) {
   };
 
   return (
-    <footer className="bg-[#0d0d0d] text-white border-t border-white/10">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-white/10">
+    <footer className="bg-[#050507] text-zinc-300 border-t border-white/[0.08]">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-14">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-10 pb-10 border-b border-white/[0.07]">
           <div className="md:col-span-5 space-y-4">
             <a
               href={getSectionPath('inicio')}
@@ -26,156 +26,150 @@ export function Footer({ onNavigate }: FooterProps) {
               <img
                 src={LOGO_LIGHT_SVG}
                 alt="Isotipo Intercarreras UFRO"
-                className="h-8 w-auto"
+                className="h-7 w-auto"
                 referrerPolicy="no-referrer"
               />
-              <span className="font-display text-xl font-bold uppercase tracking-wider">
-                Campeonato Intercarreras UFRO
+              <span className="text-lg font-medium tracking-[-0.02em] text-white">
+                Campeonato <span className="font-editorial text-xl text-zinc-300">Intercarreras</span>
               </span>
             </a>
-            <p className="text-sm text-neutral-400 max-w-md leading-relaxed">
-              Competencia deportiva oficial de la Universidad de La Frontera, Temuco. Integrando
-              Fútbol 7, Básquetbol y Voleibol para toda la comunidad estudiantil de pregrado y
-              postgrado.
+            <p className="text-sm text-zinc-500 max-w-sm leading-relaxed">
+              Universidad de La Frontera, Temuco. Fútbol 7, Básquetbol y Voleibol oficial.
             </p>
           </div>
 
           <div className="md:col-span-3 space-y-3">
-            <h3 className="font-display text-xs font-bold uppercase tracking-widest text-neutral-400">
-              Competencia
-            </h3>
-            <ul className="space-y-2 text-sm text-neutral-300">
+            <h3 className="text-xs font-medium text-zinc-500">Competencia</h3>
+            <ul className="space-y-2.5 text-sm text-zinc-400">
               <li>
                 <a
                   href={getSectionPath('inicio')}
                   onClick={(e) => handleLinkClick(e, 'inicio')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Inicio y calendario oficial
+                  Inicio
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('posiciones')}
                   onClick={(e) => handleLinkClick(e, 'posiciones')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Tablas de posiciones y playoffs
+                  Posiciones y playoffs
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('equipos')}
                   onClick={(e) => handleLinkClick(e, 'equipos')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Equipos, escudos e historia
+                  Equipos
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('jugadores')}
                   onClick={(e) => handleLinkClick(e, 'jugadores')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Perfiles de jugadores
+                  Jugadores
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('votaciones')}
                   onClick={(e) => handleLinkClick(e, 'votaciones')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Votaciones (POTM, MVP y TOTY)
+                  Votaciones
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('minijuegos')}
                   onClick={(e) => handleLinkClick(e, 'minijuegos')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Minijuegos (Fantasy 2027 y Leyendas)
+                  Minijuegos
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('galeria')}
                   onClick={(e) => handleLinkClick(e, 'galeria')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Galería fotográfica 2025/2026
+                  Galería
                 </a>
               </li>
             </ul>
           </div>
 
           <div className="md:col-span-4 space-y-3">
-            <h3 className="font-display text-xs font-bold uppercase tracking-widest text-neutral-400">
-              Gestión y Reglamentos
-            </h3>
-            <ul className="space-y-2 text-sm text-neutral-300">
+            <h3 className="text-xs font-medium text-zinc-500">Gestión</h3>
+            <ul className="space-y-2.5 text-sm text-zinc-400">
               <li>
                 <a
                   href={getSectionPath('cuenta')}
                   onClick={(e) => handleLinkClick(e, 'cuenta')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Mi Cuenta, favoritos y notificaciones
+                  Mi Cuenta
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('inscripciones')}
                   onClick={(e) => handleLinkClick(e, 'inscripciones')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Inscripción de equipos y cupos
+                  Inscripciones
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('transferencias-publicas')}
                   onClick={(e) => handleLinkClick(e, 'transferencias-publicas')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Transferencias oficiales efectuadas
+                  Transferencias oficiales
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('panel')}
                   onClick={(e) => handleLinkClick(e, 'panel')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Panel de arbitraje, roles y Google Sheets
+                  Panel Oficial
                 </a>
               </li>
               <li>
                 <a
                   href={getSectionPath('privacidad')}
                   onClick={(e) => handleLinkClick(e, 'privacidad')}
-                  className="hover:text-[#707ef9] cursor-pointer"
+                  className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Política de Privacidad
+                  Privacidad
                 </a>
               </li>
             </ul>
           </div>
         </div>
 
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
-          <span>© 2026 Campeonato Intercarreras · Universidad de La Frontera, Temuco, Chile</span>
-          <div className="flex flex-wrap items-center gap-4">
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-600">
+          <span>© 2026 Campeonato Intercarreras · UFRO, Temuco</span>
+          <div className="flex flex-wrap items-center gap-5">
             <a
               href={getSectionPath('privacidad')}
               onClick={(e) => handleLinkClick(e, 'privacidad')}
-              className="text-neutral-300 hover:text-[#707ef9] underline"
+              className="text-zinc-400 hover:text-white transition-colors"
             >
               Política de Privacidad
             </a>
-            <span>Dirección de Desarrollo Estudiantil · División de Deportes</span>
+            <span>División de Deportes UFRO</span>
           </div>
         </div>
       </div>

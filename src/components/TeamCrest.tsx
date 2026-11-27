@@ -8,11 +8,11 @@ interface TeamCrestProps {
 }
 
 const SIZE_CLASSES: Record<NonNullable<TeamCrestProps['size']>, { box: string; text: string }> = {
-  xs: { box: 'w-6 h-6', text: 'text-[10px]' },
-  sm: { box: 'w-8 h-8', text: 'text-[11px]' },
-  md: { box: 'w-11 h-11', text: 'text-xs' },
-  lg: { box: 'w-14 h-14', text: 'text-sm' },
-  xl: { box: 'w-20 h-20', text: 'text-lg' },
+  xs: { box: 'w-6 h-6 rounded-lg', text: 'text-[10px]' },
+  sm: { box: 'w-8 h-8 rounded-lg', text: 'text-[11px]' },
+  md: { box: 'w-11 h-11 rounded-xl', text: 'text-xs' },
+  lg: { box: 'w-14 h-14 rounded-2xl', text: 'text-sm' },
+  xl: { box: 'w-20 h-20 rounded-2xl', text: 'text-lg' },
 };
 
 export function TeamCrest({
@@ -20,7 +20,7 @@ export function TeamCrest({
   sigla,
   nombre,
   size = 'md',
-  surface = 'light',
+  surface = 'dark',
   className = '',
 }: TeamCrestProps) {
   const dim = SIZE_CLASSES[size];
@@ -44,10 +44,10 @@ export function TeamCrest({
 
   return (
     <div
-      className={`${dim.box} shrink-0 flex items-center justify-center font-display font-bold uppercase tracking-wider border ${
-        surface === 'dark'
-          ? 'bg-white/10 text-white border-white/15'
-          : 'bg-[#0d0d0d] text-white border-neutral-800'
+      className={`${dim.box} shrink-0 flex items-center justify-center font-semibold tracking-tight border ${
+        surface === 'light'
+          ? 'bg-zinc-900 text-white border-zinc-800'
+          : 'bg-white/[0.06] text-zinc-100 border-white/[0.12]'
       } ${dim.text} ${className}`}
       title={nombre}
       aria-label={`Monograma ${nombre}`}

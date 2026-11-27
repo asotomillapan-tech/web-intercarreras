@@ -20,6 +20,7 @@ import type {
   TournamentState,
 } from '../types/tournament';
 import { MatchFilterBar } from './MatchFilterBar';
+import { SectionKicker } from './MotionPrimitives';
 
 interface StandingsViewProps {
   state: TournamentState;
@@ -42,7 +43,7 @@ function formatShortMatchDate(fecha: string): string {
   if (dmy) {
     return `${dmy[1].padStart(2, '0')}/${dmy[2].padStart(2, '0')}`;
   }
-  return trimmed || 'Fecha por confirmar';
+  return trimmed || 'Por confirmar';
 }
 
 export function StandingsView({
@@ -158,58 +159,66 @@ export function StandingsView({
   const isBasket = meta.sportType === 'basquetbol' || meta.sportType === 'basquetbol3x3';
 
   return (
-    <div className="bg-white min-h-[75vh]">
-      {/* Carbon Sub-header */}
-      <div className="bg-[#0d0d0d] text-white border-b border-white/10">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <p className="text-xs uppercase tracking-widest text-[#707ef9] font-medium">
-            Tablas oficiales · Temporada {state.temporada}
-          </p>
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mt-2">
+    <div className="bg-[#050507] text-zinc-100 min-h-[75vh] pb-20">
+      {/* Obsidian Header */}
+      <div className="border-b border-white/[0.06]">
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+          <SectionKicker index="01" label={`Posiciones · ${state.temporada}`} />
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mt-3">
             <div>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight">
-                {meta.nombre}
+              <h1 className="text-4xl sm:text-5xl font-medium tracking-[-0.035em] text-white">
+                {meta.nombre.includes(' — ') ? (
+                  <>
+                    {meta.nombre.split(' — ')[0]}{' '}
+                    <span className="font-editorial text-[#c8ceff] font-normal">
+                      {meta.nombre.split(' — ')[1]}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {meta.nombre.split(' ').slice(0, -1).join(' ')}{' '}
+                    <span className="font-editorial text-[#c8ceff] font-normal">
+                      {meta.nombre.split(' ').slice(-1)[0]}
+                    </span>
+                  </>
+                )}
               </h1>
-              <p className="text-sm text-neutral-400 mt-2">
-                {disciplineTeams.length} equipos distribuidos equitativamente en {groups.length}{' '}
-                grupos · Clasifican {config.clasificadosPorGrupo} por grupo a llave de{' '}
-                {config.formatoPlayoff}
-                {config.playoffsIdaYVuelta ? ' (Ida y Vuelta)' : ''}
-                {config.incluyeTercerLugar !== false ? ' + 3° Lugar' : ''} · Sede:{' '}
-                {meta.sedePrincipal}
+              <p className="text-sm text-zinc-400 mt-2.5">
+                {disciplineTeams.length} equipos · {groups.length} grupos · Top {config.formatoPlayoff}
+                {config.playoffsIdaYVuelta ? ' (Ida y Vuelta)' : ''} · {meta.sedePrincipal}
               </p>
             </div>
 
-            <div className="flex flex-wrap lg:flex-nowrap items-center gap-1 bg-white/5 p-1 self-start lg:self-auto shrink-0">
+            <div className="inline-flex flex-wrap lg:flex-nowrap items-center gap-1 rounded-full bg-white/[0.04] border border-white/[0.08] p-1 self-start lg:self-auto shrink-0">
               <button
                 type="button"
                 onClick={() => setSubTab('grupos')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   subTab === 'grupos'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
+                    ? 'bg-white text-[#050507]'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Fase de Grupos
+                Grupos
               </button>
               <button
                 type="button"
                 onClick={() => setSubTab('playoffs')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   subTab === 'playoffs'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
+                    ? 'bg-white text-[#050507]'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Llave de Playoffs (Top {config.formatoPlayoff})
+                Playoffs (Top {config.formatoPlayoff})
               </button>
               <button
                 type="button"
                 onClick={() => setSubTab('partidos')}
-                className={`px-4 py-2 text-xs font-display font-bold uppercase tracking-widest transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                   subTab === 'partidos'
-                    ? 'bg-[#707ef9] text-white'
-                    : 'text-neutral-300 hover:text-white'
+                    ? 'bg-white text-[#050507]'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Partidos ({disciplineMatches.length})
@@ -217,8 +226,7 @@ export function StandingsView({
             </div>
           </div>
 
-          {/* Discipline Switcher Bar */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-6 mt-6 border-t border-white/10">
+          <div className="flex flex-wrap items-center gap-1.5 pt-6 mt-7 border-t border-white/[0.07]">
             {DISCIPLINES.map((d) => {
               const active = d.id === selectedDiscipline;
               return (
@@ -232,10 +240,10 @@ export function StandingsView({
                     setMatchGroupFilter('ALL');
                     setMatchStageFilter('ALL');
                   }}
-                  className={`px-3.5 py-2 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                     active
-                      ? 'bg-white text-[#0d0d0d] font-bold'
-                      : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white'
+                      ? 'bg-[#707ef9] text-white'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
                   }`}
                 >
                   {d.nombreCorto}
@@ -250,29 +258,28 @@ export function StandingsView({
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {subTab === 'grupos' ? (
           <div className="space-y-10">
-            {/* Group Filter Tabs & Legend */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setSelectedGroup('ALL')}
-                  className={`px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                     selectedGroup === 'ALL'
-                      ? 'bg-[#0d0d0d] text-white'
-                      : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                      ? 'bg-white text-[#050507]'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Todos los grupos ({groups.length})
+                  Todos ({groups.length})
                 </button>
                 {groups.map((g) => (
                   <button
                     key={g}
                     type="button"
                     onClick={() => setSelectedGroup(g)}
-                    className={`px-3 py-1.5 text-xs font-medium cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                       selectedGroup === g
                         ? 'bg-[#707ef9] text-white'
-                        : 'bg-[#f5f6f8] text-neutral-700 hover:text-[#0d0d0d]'
+                        : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
                     }`}
                   >
                     {g}
@@ -280,32 +287,29 @@ export function StandingsView({
                 ))}
               </div>
 
-              <div className="text-xs text-neutral-600 flex items-center gap-4">
+              <div className="text-xs text-zinc-500 flex flex-wrap items-center gap-3">
                 <span>
-                  <strong className="text-[#707ef9]">Pos. 1–{config.clasificadosPorGrupo}:</strong>{' '}
-                  Zona de clasificación a Playoffs
+                  <strong className="text-[#a5b0ff] font-medium">
+                    Top {config.clasificadosPorGrupo}:
+                  </strong>{' '}
+                  clasifican
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>
                   {isVolley
-                    ? 'Pts: 3 (2-0), 2 (2-1), 1 (1-2)'
+                    ? '3 (2-0) · 2 (2-1) · 1 (1-2)'
                     : isBasket
-                    ? 'Pts: 2 victoria, 1 derrota'
-                    : 'Pts: 3 victoria, 1 empate'}
+                    ? '2 victoria · 1 derrota'
+                    : '3 victoria · 1 empate'}
                 </span>
               </div>
             </div>
 
             {displayedGroups.length === 0 && (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-3">
-                <p className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-                  Sin equipos inscritos en {meta.nombre}
-                </p>
-                <p className="text-sm text-neutral-600 max-w-xl mx-auto">
-                  Cupos habilitados para la temporada {state.temporada}:{' '}
-                  <strong>{config.maxCupos} equipos</strong> distribuidos en{' '}
-                  <strong>{config.numGrupos} grupos equitativos</strong>. Las tablas se activarán
-                  automáticamente a medida que se inscriban las nóminas oficiales.
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-2.5">
+                <p className="text-xl font-medium text-white">Sin equipos en {meta.nombre}</p>
+                <p className="text-sm text-zinc-500 max-w-md mx-auto">
+                  {config.maxCupos} cupos habilitados en {config.numGrupos} grupos.
                 </p>
               </div>
             )}
@@ -319,20 +323,16 @@ export function StandingsView({
 
               return (
                 <section key={group} className="space-y-4">
-                  <div className="flex items-baseline justify-between border-b border-neutral-200 pb-2">
-                    <h2 className="font-display text-2xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                      {group}
-                    </h2>
-                    <span className="text-xs text-neutral-500 tabular-nums">
-                      {rows.length} equipos · Todos contra todos
-                    </span>
+                  <div className="flex items-baseline justify-between border-b border-white/[0.07] pb-2.5">
+                    <h2 className="text-2xl font-medium tracking-[-0.02em] text-white">{group}</h2>
+                    <span className="text-xs text-zinc-500 tabular-nums">{rows.length} equipos</span>
                   </div>
 
-                  <div className="border border-neutral-200 overflow-x-auto">
+                  <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c10] overflow-x-auto">
                     <table className="w-full text-left border-collapse text-sm">
                       <thead>
-                        <tr className="bg-[#f5f6f8] border-b border-neutral-200 text-xs text-neutral-500 uppercase">
-                          <th className="py-3 px-3 w-12 font-medium">Pos</th>
+                        <tr className="border-b border-white/[0.07] text-[11px] text-zinc-500">
+                          <th className="py-3 px-4 w-12 font-medium">#</th>
                           <th className="py-3 px-3 font-medium">Equipo</th>
                           <th className="py-3 px-3 hidden md:table-cell font-medium">Carrera</th>
                           <th className="py-3 px-3 text-right font-medium tabular-nums">PJ</th>
@@ -348,25 +348,33 @@ export function StandingsView({
                             {isVolley ? 'SC' : isBasket ? 'PC' : 'GC'}
                           </th>
                           <th className="py-3 px-3 text-right font-medium tabular-nums">DIF</th>
-                          <th className="py-3 px-3 text-right font-bold text-[#0d0d0d] tabular-nums">PTS</th>
-                          <th className="py-3 px-3 text-right hidden sm:table-cell font-medium">Estado / Racha</th>
+                          <th className="py-3 px-3 text-right font-medium text-zinc-200 tabular-nums">
+                            PTS
+                          </th>
+                          <th className="py-3 px-4 text-right hidden sm:table-cell font-medium">
+                            Racha
+                          </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-neutral-200">
+                      <tbody className="divide-y divide-white/[0.05]">
                         {rows.map((row, idx) => {
                           const qualifies = idx < config.clasificadosPorGrupo;
                           return (
                             <tr
                               key={row.teamId}
-                              className={qualifies ? 'bg-[#707ef9]/[0.03] hover:bg-[#707ef9]/[0.06]' : 'hover:bg-[#f9fafb]'}
+                              className={
+                                qualifies
+                                  ? 'bg-[#707ef9]/[0.06] hover:bg-[#707ef9]/[0.1]'
+                                  : 'hover:bg-white/[0.03]'
+                              }
                             >
-                              <td className="py-3 px-3 tabular-nums font-bold">
-                                <span className={qualifies ? 'text-[#707ef9]' : 'text-neutral-500'}>
+                              <td className="py-3.5 px-4 tabular-nums font-medium">
+                                <span className={qualifies ? 'text-[#a5b0ff]' : 'text-zinc-500'}>
                                   {idx + 1}
                                 </span>
                               </td>
-                              <td className="py-3 px-3 font-medium text-[#0d0d0d]">
-                                <div className="flex items-center gap-2">
+                              <td className="py-3.5 px-3 font-medium text-zinc-100">
+                                <div className="flex items-center gap-2.5">
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -377,7 +385,7 @@ export function StandingsView({
                                         ? `Quitar ${row.teamName} de favoritos`
                                         : `Guardar ${row.teamName} en favoritos`
                                     }
-                                    className="text-neutral-400 hover:text-[#707ef9] cursor-pointer shrink-0"
+                                    className="text-zinc-600 hover:text-[#9aa5ff] cursor-pointer shrink-0 transition-colors"
                                   >
                                     <Star
                                       className={`w-3.5 h-3.5 ${
@@ -392,42 +400,50 @@ export function StandingsView({
                                     onClick={() => onInspectTeam(row.teamId)}
                                     className="text-left group cursor-pointer"
                                   >
-                                    <span className="group-hover:text-[#707ef9] transition-colors underline-offset-2 group-hover:underline">
+                                    <span className="group-hover:text-[#c8ceff] transition-colors">
                                       {row.teamName}
                                     </span>
-                                    <span className="md:hidden block text-xs font-normal text-neutral-500">
+                                    <span className="md:hidden block text-xs font-normal text-zinc-500">
                                       {row.carrera}
                                     </span>
                                   </button>
                                 </div>
                               </td>
-                              <td className="py-3 px-3 hidden md:table-cell text-xs text-neutral-500">
+                              <td className="py-3.5 px-3 hidden md:table-cell text-xs text-zinc-500">
                                 {row.carrera}
                               </td>
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">{row.pj}</td>
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">{row.pg}</td>
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
+                                {row.pj}
+                              </td>
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
+                                {row.pg}
+                              </td>
                               {!isVolley && !isBasket && (
-                                <td className="py-3 px-3 text-right tabular-nums text-neutral-700">{row.pe}</td>
+                                <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
+                                  {row.pe}
+                                </td>
                               )}
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">{row.pp}</td>
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
+                                {row.pp}
+                              </td>
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
                                 {isVolley ? row.setsFavor : row.favor}
                               </td>
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
                                 {isVolley ? row.setsContra : row.contra}
                               </td>
-                              <td className="py-3 px-3 text-right tabular-nums text-neutral-700">
+                              <td className="py-3.5 px-3 text-right tabular-nums text-zinc-300">
                                 {row.diferencia > 0 ? `+${row.diferencia}` : row.diferencia}
                               </td>
-                              <td className="py-3 px-3 text-right tabular-nums font-bold text-[#0d0d0d]">
+                              <td className="py-3.5 px-3 text-right tabular-nums font-semibold text-white">
                                 {row.puntos}
                               </td>
-                              <td className="py-3 px-3 text-right hidden sm:table-cell text-xs">
-                                <span className="font-mono tracking-widest text-neutral-600">
+                              <td className="py-3.5 px-4 text-right hidden sm:table-cell text-xs">
+                                <span className="font-mono tracking-widest text-zinc-500">
                                   {row.racha.length > 0 ? row.racha.join(' ') : '—'}
                                 </span>
                                 {qualifies && (
-                                  <span className="ml-2 text-[#707ef9] font-medium">Clasifica</span>
+                                  <span className="ml-2 text-[#a5b0ff] font-medium">Q</span>
                                 )}
                               </td>
                             </tr>
@@ -437,7 +453,6 @@ export function StandingsView({
                     </table>
                   </div>
 
-                  {/* Recent Group Fixtures Strip */}
                   {gMatches.length > 0 && (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                       {gMatches.map((m) => {
@@ -448,23 +463,23 @@ export function StandingsView({
                             key={m.id}
                             type="button"
                             onClick={() => onOpenMatchModal(m)}
-                            className="text-left border border-neutral-200 p-3.5 hover:border-[#707ef9] transition-colors bg-white cursor-pointer"
+                            className="text-left rounded-2xl border border-white/[0.08] bg-[#0c0c10] p-4 hover:border-white/[0.2] transition-colors cursor-pointer"
                           >
-                            <div className="flex items-center justify-between text-[11px] text-neutral-500 mb-2 gap-2">
+                            <div className="flex items-center justify-between text-[11px] text-zinc-500 mb-2 gap-2">
                               <span className="tabular-nums truncate">
-                                {m.fase} · {m.fecha} · {m.hora}
+                                {m.fecha} · {m.hora}
                               </span>
                               <span
                                 className={
                                   votingOpen
-                                    ? 'text-[#707ef9] font-bold inline-flex items-center gap-1'
+                                    ? 'text-[#a5b0ff] font-medium inline-flex items-center gap-1'
                                     : ''
                                 }
                               >
                                 {votingOpen ? (
                                   <>
                                     <Award className="w-3 h-3" />
-                                    <span>Votar MVP</span>
+                                    <span>MVP</span>
                                   </>
                                 ) : reveal ? (
                                   'Final'
@@ -473,20 +488,32 @@ export function StandingsView({
                                 )}
                               </span>
                             </div>
-                            <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d]">
+                            <div className="flex items-center justify-between text-xs font-medium text-zinc-100">
                               <span className="truncate pr-2">
                                 {teamMap.get(m.homeTeamId)?.nombre}
                               </span>
-                              <span className="tabular-nums font-bold">
-                                {reveal ? m.homeScore : votingOpen ? <Lock className="w-3 h-3 text-neutral-400" /> : '—'}
+                              <span className="tabular-nums font-semibold">
+                                {reveal ? (
+                                  m.homeScore
+                                ) : votingOpen ? (
+                                  <Lock className="w-3 h-3 text-zinc-500" />
+                                ) : (
+                                  '—'
+                                )}
                               </span>
                             </div>
-                            <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d] mt-1">
+                            <div className="flex items-center justify-between text-xs font-medium text-zinc-100 mt-1">
                               <span className="truncate pr-2">
                                 {teamMap.get(m.awayTeamId)?.nombre}
                               </span>
-                              <span className="tabular-nums font-bold">
-                                {reveal ? m.awayScore : votingOpen ? <Lock className="w-3 h-3 text-neutral-400" /> : '—'}
+                              <span className="tabular-nums font-semibold">
+                                {reveal ? (
+                                  m.awayScore
+                                ) : votingOpen ? (
+                                  <Lock className="w-3 h-3 text-zinc-500" />
+                                ) : (
+                                  '—'
+                                )}
                               </span>
                             </div>
                           </button>
@@ -500,18 +527,15 @@ export function StandingsView({
           </div>
         ) : subTab === 'partidos' ? (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.07] pb-4">
               <div>
-                <h2 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-wide text-[#0d0d0d]">
+                <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
                   {matchDisciplineFilter === 'ALL'
-                    ? 'Partidos de Todas las Disciplinas'
-                    : `Partidos de ${meta.nombre}`}
+                    ? 'Todos los partidos'
+                    : `Partidos · ${meta.nombreCorto}`}
                 </h2>
-                <p className="text-sm text-neutral-600 mt-1">
-                  Filtra y organiza simultáneamente los encuentros por disciplina, grupo y fase.
-                </p>
               </div>
-              <span className="text-xs font-mono text-neutral-500 tabular-nums">
+              <span className="text-xs text-zinc-500 tabular-nums">
                 {totalFilteredMatches} de{' '}
                 {matchDisciplineFilter === 'ALL' ? state.matches.length : disciplineMatches.length}{' '}
                 encuentros
@@ -549,30 +573,24 @@ export function StandingsView({
             />
 
             {organizedDisciplineMatches.length === 0 ? (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-2">
-                <p className="font-display text-2xl font-bold uppercase text-[#0d0d0d]">
-                  Sin encuentros con los filtros actuales
-                </p>
-                <p className="text-xs text-neutral-600">
-                  Cambia el grupo o la fase para revisar el fixture de {meta.nombre}.
-                </p>
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-2">
+                <p className="text-lg font-medium text-white">Sin encuentros</p>
+                <p className="text-xs text-zinc-500">Prueba ajustando el grupo o la fase.</p>
               </div>
             ) : (
               <div className="space-y-8">
                 {organizedDisciplineMatches.map((section) => (
                   <section key={section.key} className="space-y-3">
                     {matchGroupBy !== 'none' && (
-                      <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
-                        <h3 className="font-display text-xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                          {section.label}
-                        </h3>
-                        <span className="text-xs font-mono text-neutral-500 tabular-nums">
+                      <div className="flex items-center justify-between border-b border-white/[0.07] pb-2">
+                        <h3 className="text-lg font-medium text-white">{section.label}</h3>
+                        <span className="text-xs text-zinc-500 tabular-nums">
                           {section.matches.length}{' '}
                           {section.matches.length === 1 ? 'partido' : 'partidos'}
                         </span>
                       </div>
                     )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
                       {section.matches.map((m) => {
                         const reveal = shouldRevealPublicMatchData(m);
                         const votingOpen = canVoteMatchMvp(m);
@@ -581,10 +599,10 @@ export function StandingsView({
                             key={m.id}
                             type="button"
                             onClick={() => onOpenMatchModal(m)}
-                            className="text-left border border-neutral-200 p-4 hover:border-[#707ef9] transition-colors bg-white cursor-pointer space-y-2.5"
+                            className="text-left rounded-2xl border border-white/[0.08] bg-[#0c0c10] p-4 hover:border-white/[0.2] transition-colors cursor-pointer space-y-3"
                           >
-                            <div className="flex items-center justify-between text-[11px] text-neutral-500 gap-2">
-                              <span className="truncate font-medium text-[#0d0d0d]">
+                            <div className="flex items-center justify-between text-[11px] text-zinc-500 gap-2">
+                              <span className="truncate text-zinc-300">
                                 {m.fase}
                                 {m.groupName && m.groupName !== '-' ? ` · ${m.groupName}` : ''}
                                 {m.fase !== 'Grupos' &&
@@ -595,14 +613,14 @@ export function StandingsView({
                               <span
                                 className={
                                   votingOpen
-                                    ? 'text-[#707ef9] font-bold inline-flex items-center gap-1 shrink-0'
+                                    ? 'text-[#a5b0ff] font-medium inline-flex items-center gap-1 shrink-0'
                                     : 'shrink-0'
                                 }
                               >
                                 {votingOpen ? (
                                   <>
                                     <Award className="w-3 h-3" />
-                                    <span>Votar MVP</span>
+                                    <span>MVP</span>
                                   </>
                                 ) : reveal ? (
                                   'Final'
@@ -612,30 +630,30 @@ export function StandingsView({
                               </span>
                             </div>
 
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d]">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-sm font-medium text-white">
                                 <span className="truncate pr-2">
                                   {teamMap.get(m.homeTeamId)?.nombre ?? m.homeTeamId}
                                 </span>
-                                <span className="tabular-nums font-bold text-sm">
+                                <span className="tabular-nums font-semibold">
                                   {reveal ? (
                                     m.homeScore
                                   ) : votingOpen ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                    <Lock className="w-3 h-3 text-zinc-500" />
                                   ) : (
                                     '—'
                                   )}
                                 </span>
                               </div>
-                              <div className="flex items-center justify-between text-xs font-medium text-[#0d0d0d]">
+                              <div className="flex items-center justify-between text-sm font-medium text-white">
                                 <span className="truncate pr-2">
                                   {teamMap.get(m.awayTeamId)?.nombre ?? m.awayTeamId}
                                 </span>
-                                <span className="tabular-nums font-bold text-sm">
+                                <span className="tabular-nums font-semibold">
                                   {reveal ? (
                                     m.awayScore
                                   ) : votingOpen ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
+                                    <Lock className="w-3 h-3 text-zinc-500" />
                                   ) : (
                                     '—'
                                   )}
@@ -643,7 +661,7 @@ export function StandingsView({
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-2 border-t border-neutral-100 tabular-nums">
+                            <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2.5 border-t border-white/[0.06] tabular-nums">
                               <span>
                                 {formatShortMatchDate(m.fecha)} · {m.hora}
                               </span>
@@ -659,88 +677,75 @@ export function StandingsView({
             )}
           </div>
         ) : (
-          /* Full Single-Elimination Playoff Bracket Tree + 3rd Place Match */
+          /* Playoff Bracket Tree */
           <div className="space-y-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.07] pb-4">
               <div>
-                <h2 className="font-display text-2xl sm:text-3xl font-bold uppercase tracking-wide text-[#0d0d0d]">
-                  Cuadro Completo de Eliminación Directa · Top {config.formatoPlayoff}
+                <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
+                  Eliminación <span className="font-editorial text-[#c8ceff]">directa</span> · Top{' '}
+                  {config.formatoPlayoff}
                 </h2>
-                <p className="text-sm text-neutral-600 mt-1">
-                  {fullBracket.isTwoLegged
-                    ? `Series a doble partido (Ida y Vuelta) con definición por marcador global desde ${fullBracket.rounds[0]?.title ?? 'Playoffs'} hasta la Gran Final${fullBracket.thirdPlace ? ' y el Partido por el Tercer Lugar' : ''}.`
-                    : `Visualización completa de todas las fases eliminatorias desde ${fullBracket.rounds[0]?.title ?? 'Playoffs'} hasta la Gran Final${fullBracket.thirdPlace ? ' y el Partido por el Tercer Lugar' : ''}.`}
-                </p>
               </div>
-              <div className="flex flex-wrap items-center sm:justify-end gap-2.5 text-xs text-neutral-600 shrink-0">
-                <span className="inline-flex items-center gap-1.5">
-                  <Trophy className="w-4 h-4 text-[#707ef9]" />
-                  <span>
-                    Clasifican {config.clasificadosPorGrupo} por grupo · Cuadro de{' '}
-                    {config.formatoPlayoff}
-                  </span>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400 shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08]">
+                  <Trophy className="w-3.5 h-3.5 text-[#9aa5ff]" />
+                  <span>{config.clasificadosPorGrupo} por grupo</span>
                 </span>
                 {fullBracket.isTwoLegged && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#707ef9]/10 border border-[#707ef9]/35 text-[#4250d6] font-bold uppercase tracking-wider text-[11px]">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#707ef9]/15 border border-[#707ef9]/30 text-[#c7ceff]">
                     <ArrowLeftRight className="w-3.5 h-3.5" />
-                    <span>Ida y Vuelta · Global</span>
+                    <span>Ida y Vuelta</span>
                   </span>
                 )}
                 {fullBracket.thirdPlace && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#f5f6f8] border border-neutral-200 text-[#0d0d0d] font-medium">
-                    <Medal className="w-3.5 h-3.5 text-[#707ef9]" />
-                    <span>Incluye 3° Lugar</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08]">
+                    <Medal className="w-3.5 h-3.5 text-[#9aa5ff]" />
+                    <span>3° Lugar</span>
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Podium Banner when Champion or 3rd Place is defined */}
             {(fullBracket.championName || fullBracket.thirdPlaceWinnerName) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {fullBracket.championName && (
-                  <div className="bg-[#0d0d0d] text-white p-5 border-l-4 border-[#707ef9] flex items-center justify-between gap-4">
+                  <div className="rounded-3xl bg-[#707ef9]/12 border border-[#707ef9]/35 p-6 flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-[11px] uppercase tracking-widest text-[#707ef9] font-bold">
-                        Campeón Oficial · {meta.nombreCorto}
+                      <p className="text-xs text-[#a5b0ff] font-medium">
+                        Campeón · {meta.nombreCorto}
                       </p>
-                      <p className="font-display text-3xl uppercase tracking-wide mt-1">
+                      <p className="text-2xl sm:text-3xl font-medium tracking-[-0.02em] text-white mt-1">
                         {fullBracket.championName}
                       </p>
                     </div>
-                    <Trophy className="w-8 h-8 text-[#707ef9] shrink-0" />
+                    <Trophy className="w-8 h-8 text-[#9aa5ff] shrink-0" />
                   </div>
                 )}
                 {fullBracket.thirdPlaceWinnerName && (
-                  <div className="bg-[#f5f6f8] text-[#0d0d0d] p-5 border border-neutral-300 border-l-4 border-l-[#0d0d0d] flex items-center justify-between gap-4">
+                  <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.1] p-6 flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-[11px] uppercase tracking-widest text-neutral-500 font-bold">
-                        Tercer Lugar · Podio {meta.nombreCorto}
-                      </p>
-                      <p className="font-display text-3xl uppercase tracking-wide mt-1">
+                      <p className="text-xs text-zinc-400">Tercer lugar · {meta.nombreCorto}</p>
+                      <p className="text-2xl sm:text-3xl font-medium tracking-[-0.02em] text-white mt-1">
                         {fullBracket.thirdPlaceWinnerName}
                       </p>
                     </div>
-                    <Medal className="w-8 h-8 text-[#0d0d0d] shrink-0" />
+                    <Medal className="w-8 h-8 text-zinc-400 shrink-0" />
                   </div>
                 )}
               </div>
             )}
 
             {fullBracket.rounds.length === 0 ? (
-              <div className="border border-neutral-200 bg-[#f5f6f8] p-12 text-center space-y-2">
-                <p className="font-display text-xl font-bold uppercase text-[#0d0d0d]">
-                  Llave de Playoffs pendiente de fase de grupos
-                </p>
-                <p className="text-xs text-neutral-600 max-w-md mx-auto">
-                  Los cruces de eliminación directa (Top {config.formatoPlayoff}) se generarán
-                  automáticamente en cuanto existan equipos inscritos en los grupos.
+              <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-2">
+                <p className="text-lg font-medium text-white">Llave pendiente de fase de grupos</p>
+                <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                  Los cruces Top {config.formatoPlayoff} se generarán al completarse los grupos.
                 </p>
               </div>
             ) : (
               <div className="overflow-x-auto pb-4">
                 <div
-                  className={`grid gap-6 ${
+                  className={`grid gap-5 ${
                     fullBracket.rounds.length === 4
                       ? fullBracket.isTwoLegged
                         ? 'grid-cols-4 min-w-[1160px]'
@@ -769,9 +774,13 @@ export function StandingsView({
                         const votingSecond = secondLeg ? canVoteMatchMvp(secondLeg) : false;
                         const anyVotingOpen = votingFirst || votingSecond;
                         const hasRevealedFirst =
-                          revealFirst && slot.homeFirstLegScore !== undefined && slot.awayFirstLegScore !== undefined;
+                          revealFirst &&
+                          slot.homeFirstLegScore !== undefined &&
+                          slot.awayFirstLegScore !== undefined;
                         const hasRevealedSecond =
-                          revealSecond && slot.homeSecondLegScore !== undefined && slot.awaySecondLegScore !== undefined;
+                          revealSecond &&
+                          slot.homeSecondLegScore !== undefined &&
+                          slot.awaySecondLegScore !== undefined;
                         const hasAnyRevealedLeg = hasRevealedFirst || hasRevealedSecond;
                         const visibleHomeGlobal =
                           (hasRevealedFirst ? slot.homeFirstLegScore ?? 0 : 0) +
@@ -781,221 +790,164 @@ export function StandingsView({
                           (hasRevealedSecond ? slot.awaySecondLegScore ?? 0 : 0);
 
                         const headerStatus = slot.isAggregateDraw
-                          ? 'EMPATE GLOBAL'
+                          ? 'Empate global'
                           : hasRevealedFirst && hasRevealedSecond
-                          ? 'GLOBAL FINAL'
+                          ? 'Global final'
                           : anyVotingOpen
-                          ? 'EN HORARIO'
+                          ? 'En juego'
                           : hasRevealedFirst
-                          ? 'IDA JUGADA'
-                          : 'IDA Y VUELTA';
+                          ? 'Ida jugada'
+                          : 'Ida y vuelta';
 
                         return (
                           <div
                             key={slot.id}
-                            className={`border bg-white transition-colors ${
-                              accentThirdPlace
-                                ? 'border-[#0d0d0d]'
-                                : isFinalColumn
-                                ? 'border-[#707ef9] shadow-sm'
-                                : 'border-neutral-300'
+                            className={`rounded-2xl border bg-[#0c0c10] overflow-hidden transition-colors ${
+                              isFinalColumn
+                                ? 'border-[#707ef9]/45'
+                                : accentThirdPlace
+                                ? 'border-white/[0.16]'
+                                : 'border-white/[0.08]'
                             }`}
                           >
                             <div
                               className={`px-3.5 py-2 border-b flex items-center justify-between gap-2 text-[11px] ${
-                                accentThirdPlace
-                                  ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                                  : isFinalColumn
-                                  ? 'bg-[#707ef9] text-white border-[#707ef9]'
-                                  : 'bg-[#f5f6f8] text-neutral-600 border-neutral-200'
+                                isFinalColumn
+                                  ? 'bg-[#707ef9]/20 text-[#d4daff] border-[#707ef9]/30'
+                                  : 'bg-white/[0.03] text-zinc-400 border-white/[0.07]'
                               }`}
                             >
-                              <span className="font-display font-bold uppercase tracking-wider truncate">
+                              <span className="font-medium truncate">
                                 {accentThirdPlace
-                                  ? '3° Lugar · Ida y Vuelta'
+                                  ? '3° Lugar'
                                   : isFinalColumn
-                                  ? 'Gran Final · Ida y Vuelta'
-                                  : `${slot.round} · Llave ${slot.slot}`}
+                                  ? 'Gran Final'
+                                  : `${slot.round} · #${slot.slot}`}
                               </span>
-                              <span className="tabular-nums shrink-0 opacity-90 font-semibold">
-                                {headerStatus}
-                              </span>
+                              <span className="tabular-nums shrink-0">{headerStatus}</span>
                             </div>
 
-                            {/* Column header for IDA / VTA / GLB */}
-                            <div className="grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-1 bg-[#f9fafb] border-b border-neutral-200 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                            <div className="grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-1.5 bg-white/[0.015] border-b border-white/[0.06] text-[10px] text-zinc-500">
                               <span>Equipo</span>
                               <span className="text-center">Ida</span>
                               <span className="text-center">Vta</span>
-                              <span className="text-center font-bold text-[#0d0d0d]">Glb</span>
+                              <span className="text-center text-zinc-300 font-medium">Glb</span>
                             </div>
 
-                            <div className="divide-y divide-neutral-200">
-                              {/* Home / Seed A Row */}
-                              <div
-                                className={`grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-2.5 ${
-                                  isHomeWinner ? 'bg-[#707ef9]/10' : ''
-                                }`}
-                              >
-                                <div className="min-w-0 pr-1">
-                                  <p
-                                    className={`text-sm truncate ${
-                                      isHomeWinner
-                                        ? 'font-bold text-[#0d0d0d]'
-                                        : slot.homeTeamId
-                                        ? 'font-medium text-[#0d0d0d]'
-                                        : 'text-neutral-500 italic'
-                                    }`}
-                                  >
-                                    {slot.homeTeamName}
-                                  </p>
-                                  <p className="text-[10px] font-mono text-neutral-400 truncate">
-                                    {slot.homeSeed}
-                                  </p>
-                                </div>
-
-                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
-                                  {hasRevealedFirst ? (
-                                    slot.homeFirstLegScore
-                                  ) : votingFirst ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-
-                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
-                                  {hasRevealedSecond ? (
-                                    slot.homeSecondLegScore
-                                  ) : votingSecond ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-
-                                <span
-                                  className={`text-center font-display text-xl tabular-nums flex justify-center ${
-                                    isHomeWinner
-                                      ? 'text-[#707ef9] font-bold'
-                                      : 'text-[#0d0d0d] font-bold'
+                            <div className="divide-y divide-white/[0.06]">
+                              {[
+                                {
+                                  name: slot.homeTeamName,
+                                  seed: slot.homeSeed,
+                                  id: slot.homeTeamId,
+                                  winner: isHomeWinner,
+                                  s1: slot.homeFirstLegScore,
+                                  s2: slot.homeSecondLegScore,
+                                  glb: visibleHomeGlobal,
+                                },
+                                {
+                                  name: slot.awayTeamName,
+                                  seed: slot.awaySeed,
+                                  id: slot.awayTeamId,
+                                  winner: isAwayWinner,
+                                  s1: slot.awayFirstLegScore,
+                                  s2: slot.awaySecondLegScore,
+                                  glb: visibleAwayGlobal,
+                                },
+                              ].map((side, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-2.5 ${
+                                    side.winner ? 'bg-[#707ef9]/10' : ''
                                   }`}
                                 >
-                                  {hasAnyRevealedLeg ? (
-                                    visibleHomeGlobal
-                                  ) : anyVotingOpen ? (
-                                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-                              </div>
-
-                              {/* Away / Seed B Row */}
-                              <div
-                                className={`grid grid-cols-[minmax(0,1fr)_2rem_2rem_2.5rem] items-center gap-1 px-3 py-2.5 ${
-                                  isAwayWinner ? 'bg-[#707ef9]/10' : ''
-                                }`}
-                              >
-                                <div className="min-w-0 pr-1">
-                                  <p
-                                    className={`text-sm truncate ${
-                                      isAwayWinner
-                                        ? 'font-bold text-[#0d0d0d]'
-                                        : slot.awayTeamId
-                                        ? 'font-medium text-[#0d0d0d]'
-                                        : 'text-neutral-500 italic'
+                                  <div className="min-w-0 pr-1">
+                                    <p
+                                      className={`text-sm truncate ${
+                                        side.winner
+                                          ? 'font-semibold text-white'
+                                          : side.id
+                                          ? 'text-zinc-200'
+                                          : 'text-zinc-500 italic'
+                                      }`}
+                                    >
+                                      {side.name}
+                                    </p>
+                                    <p className="text-[10px] text-zinc-600 truncate">{side.seed}</p>
+                                  </div>
+                                  <span className="text-center text-xs tabular-nums text-zinc-400 flex justify-center">
+                                    {hasRevealedFirst ? (
+                                      side.s1
+                                    ) : votingFirst ? (
+                                      <Lock className="w-3 h-3 text-zinc-600" />
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </span>
+                                  <span className="text-center text-xs tabular-nums text-zinc-400 flex justify-center">
+                                    {hasRevealedSecond ? (
+                                      side.s2
+                                    ) : votingSecond ? (
+                                      <Lock className="w-3 h-3 text-zinc-600" />
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </span>
+                                  <span
+                                    className={`text-center text-base font-semibold tabular-nums flex justify-center ${
+                                      side.winner ? 'text-[#a5b0ff]' : 'text-white'
                                     }`}
                                   >
-                                    {slot.awayTeamName}
-                                  </p>
-                                  <p className="text-[10px] font-mono text-neutral-400 truncate">
-                                    {slot.awaySeed}
-                                  </p>
+                                    {hasAnyRevealedLeg ? (
+                                      side.glb
+                                    ) : anyVotingOpen ? (
+                                      <Lock className="w-3.5 h-3.5 text-zinc-600" />
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </span>
                                 </div>
-
-                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
-                                  {hasRevealedFirst ? (
-                                    slot.awayFirstLegScore
-                                  ) : votingFirst ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-
-                                <span className="text-center font-mono text-xs tabular-nums text-neutral-700 flex justify-center">
-                                  {hasRevealedSecond ? (
-                                    slot.awaySecondLegScore
-                                  ) : votingSecond ? (
-                                    <Lock className="w-3 h-3 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-
-                                <span
-                                  className={`text-center font-display text-xl tabular-nums flex justify-center ${
-                                    isAwayWinner
-                                      ? 'text-[#707ef9] font-bold'
-                                      : 'text-[#0d0d0d] font-bold'
-                                  }`}
-                                >
-                                  {hasAnyRevealedLeg ? (
-                                    visibleAwayGlobal
-                                  ) : anyVotingOpen ? (
-                                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
-                                  ) : (
-                                    '—'
-                                  )}
-                                </span>
-                              </div>
+                              ))}
                             </div>
 
                             {slot.isAggregateDraw && (
-                              <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-200 text-[10px] font-medium text-amber-900">
-                                Empate en marcador global — definición por penales / criterio oficial
+                              <div className="px-3 py-1.5 bg-amber-500/10 border-t border-amber-500/20 text-[10px] text-amber-300">
+                                Empate global — definición oficial
                               </div>
                             )}
 
-                            {/* Interactive Ida & Vuelta Footer Buttons */}
-                            <div className="grid grid-cols-2 divide-x divide-neutral-200 border-t border-neutral-200 bg-[#f9fafb] text-[11px]">
+                            <div className="grid grid-cols-2 divide-x divide-white/[0.06] border-t border-white/[0.06] bg-white/[0.02] text-[11px]">
                               {firstLeg ? (
                                 <button
                                   type="button"
                                   onClick={() => onOpenMatchModal(firstLeg)}
-                                  className="px-2.5 py-2 text-left hover:bg-[#707ef9]/10 transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
+                                  className="px-2.5 py-2 text-left hover:bg-white/[0.05] transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
                                 >
-                                  <span className="truncate text-neutral-700 font-medium">
+                                  <span className="truncate text-zinc-300">
                                     Ida · {formatShortMatchDate(firstLeg.fecha)}
                                   </span>
-                                  <span className="text-[#707ef9] font-bold shrink-0">
-                                    {votingFirst ? 'MVP →' : '→'}
+                                  <span className="text-[#a5b0ff] shrink-0">
+                                    {votingFirst ? 'MVP' : '→'}
                                   </span>
                                 </button>
                               ) : (
-                                <div className="px-2.5 py-2 text-neutral-400 truncate">
-                                  Ida · Por programar
-                                </div>
+                                <div className="px-2.5 py-2 text-zinc-600 truncate">Ida · —</div>
                               )}
-
                               {secondLeg ? (
                                 <button
                                   type="button"
                                   onClick={() => onOpenMatchModal(secondLeg)}
-                                  className="px-2.5 py-2 text-left hover:bg-[#707ef9]/10 transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
+                                  className="px-2.5 py-2 text-left hover:bg-white/[0.05] transition-colors cursor-pointer flex items-center justify-between gap-1 min-w-0"
                                 >
-                                  <span className="truncate text-neutral-700 font-medium">
+                                  <span className="truncate text-zinc-300">
                                     Vta · {formatShortMatchDate(secondLeg.fecha)}
                                   </span>
-                                  <span className="text-[#707ef9] font-bold shrink-0">
-                                    {votingSecond ? 'MVP →' : '→'}
+                                  <span className="text-[#a5b0ff] shrink-0">
+                                    {votingSecond ? 'MVP' : '→'}
                                   </span>
                                 </button>
                               ) : (
-                                <div className="px-2.5 py-2 text-neutral-400 truncate">
-                                  Vta · Por programar
-                                </div>
+                                <div className="px-2.5 py-2 text-zinc-600 truncate">Vta · —</div>
                               )}
                             </div>
                           </div>
@@ -1009,124 +961,98 @@ export function StandingsView({
 
                       const cardInner = (
                         <div
-                          className={`border bg-white transition-colors ${
-                            accentThirdPlace
-                              ? 'border-[#0d0d0d]'
-                              : isFinalColumn
-                              ? 'border-[#707ef9] shadow-sm'
-                              : 'border-neutral-300'
-                          } ${isClickable ? 'hover:border-[#707ef9]' : ''}`}
+                          className={`rounded-2xl border bg-[#0c0c10] overflow-hidden transition-colors ${
+                            isFinalColumn
+                              ? 'border-[#707ef9]/45'
+                              : accentThirdPlace
+                              ? 'border-white/[0.16]'
+                              : 'border-white/[0.08]'
+                          } ${isClickable ? 'hover:border-white/[0.25]' : ''}`}
                         >
                           <div
                             className={`px-3.5 py-2 border-b flex items-center justify-between gap-2 text-[11px] ${
-                              accentThirdPlace
-                                ? 'bg-[#0d0d0d] text-white border-[#0d0d0d]'
-                                : isFinalColumn
-                                ? 'bg-[#707ef9] text-white border-[#707ef9]'
-                                : 'bg-[#f5f6f8] text-neutral-600 border-neutral-200'
+                              isFinalColumn
+                                ? 'bg-[#707ef9]/20 text-[#d4daff] border-[#707ef9]/30'
+                                : 'bg-white/[0.03] text-zinc-400 border-white/[0.07]'
                             }`}
                           >
-                            <span className="font-display font-bold uppercase tracking-wider truncate">
+                            <span className="font-medium truncate">
                               {accentThirdPlace
-                                ? 'Partido por el 3° Lugar'
+                                ? '3° Lugar'
                                 : isFinalColumn
                                 ? 'Gran Final'
-                                : `${slot.round} · Llave ${slot.slot}`}
+                                : `${slot.round} · #${slot.slot}`}
                             </span>
-                            <span className="tabular-nums shrink-0 opacity-90">
+                            <span className="tabular-nums shrink-0">
                               {linkedMatch
                                 ? votingOpen
-                                  ? 'EN HORARIO'
+                                  ? 'En juego'
                                   : revealScore
-                                  ? 'FINAL'
+                                  ? 'Final'
                                   : `${formatShortMatchDate(linkedMatch.fecha)} ${linkedMatch.hora}`
                                 : 'Proyectado'}
                             </span>
                           </div>
 
-                          <div className="divide-y divide-neutral-200">
-                            <div
-                              className={`px-3.5 py-2.5 flex items-center justify-between gap-2 ${
-                                isHomeWinner ? 'bg-[#707ef9]/10' : ''
-                              }`}
-                            >
-                              <div className="min-w-0">
-                                <p
-                                  className={`text-sm truncate ${
-                                    isHomeWinner
-                                      ? 'font-bold text-[#0d0d0d]'
-                                      : slot.homeTeamId
-                                      ? 'font-medium text-[#0d0d0d]'
-                                      : 'text-neutral-500 italic'
-                                  }`}
-                                >
-                                  {slot.homeTeamName}
-                                </p>
-                                <p className="text-[10px] font-mono text-neutral-400 truncate">
-                                  {slot.homeSeed}
-                                </p>
-                              </div>
-                              <span
-                                className={`font-display text-xl tabular-nums shrink-0 px-1.5 ${
-                                  isHomeWinner
-                                    ? 'text-[#707ef9] font-bold'
-                                    : 'text-[#0d0d0d] font-bold'
+                          <div className="divide-y divide-white/[0.06]">
+                            {[
+                              {
+                                name: slot.homeTeamName,
+                                seed: slot.homeSeed,
+                                id: slot.homeTeamId,
+                                winner: isHomeWinner,
+                                score: slot.homeScore,
+                              },
+                              {
+                                name: slot.awayTeamName,
+                                seed: slot.awaySeed,
+                                id: slot.awayTeamId,
+                                winner: isAwayWinner,
+                                score: slot.awayScore,
+                              },
+                            ].map((side, idx) => (
+                              <div
+                                key={idx}
+                                className={`px-3.5 py-2.5 flex items-center justify-between gap-2 ${
+                                  side.winner ? 'bg-[#707ef9]/10' : ''
                                 }`}
                               >
-                                {revealScore && slot.homeScore !== undefined ? (
-                                  slot.homeScore
-                                ) : votingOpen ? (
-                                  <Lock className="w-3.5 h-3.5 text-neutral-400" />
-                                ) : (
-                                  '—'
-                                )}
-                              </span>
-                            </div>
-
-                            <div
-                              className={`px-3.5 py-2.5 flex items-center justify-between gap-2 ${
-                                isAwayWinner ? 'bg-[#707ef9]/10' : ''
-                              }`}
-                            >
-                              <div className="min-w-0">
-                                <p
-                                  className={`text-sm truncate ${
-                                    isAwayWinner
-                                      ? 'font-bold text-[#0d0d0d]'
-                                      : slot.awayTeamId
-                                      ? 'font-medium text-[#0d0d0d]'
-                                      : 'text-neutral-500 italic'
+                                <div className="min-w-0">
+                                  <p
+                                    className={`text-sm truncate ${
+                                      side.winner
+                                        ? 'font-semibold text-white'
+                                        : side.id
+                                        ? 'text-zinc-200'
+                                        : 'text-zinc-500 italic'
+                                    }`}
+                                  >
+                                    {side.name}
+                                  </p>
+                                  <p className="text-[10px] text-zinc-600 truncate">{side.seed}</p>
+                                </div>
+                                <span
+                                  className={`text-base font-semibold tabular-nums shrink-0 px-1.5 ${
+                                    side.winner ? 'text-[#a5b0ff]' : 'text-white'
                                   }`}
                                 >
-                                  {slot.awayTeamName}
-                                </p>
-                                <p className="text-[10px] font-mono text-neutral-400 truncate">
-                                  {slot.awaySeed}
-                                </p>
+                                  {revealScore && side.score !== undefined ? (
+                                    side.score
+                                  ) : votingOpen ? (
+                                    <Lock className="w-3.5 h-3.5 text-zinc-600" />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
                               </div>
-                              <span
-                                className={`font-display text-xl tabular-nums shrink-0 px-1.5 ${
-                                  isAwayWinner
-                                    ? 'text-[#707ef9] font-bold'
-                                    : 'text-[#0d0d0d] font-bold'
-                                }`}
-                              >
-                                {revealScore && slot.awayScore !== undefined ? (
-                                  slot.awayScore
-                                ) : votingOpen ? (
-                                  <Lock className="w-3.5 h-3.5 text-neutral-400" />
-                                ) : (
-                                  '—'
-                                )}
-                              </span>
-                            </div>
+                            ))}
                           </div>
 
                           {linkedMatch && (
-                            <div className="px-3.5 py-1.5 bg-[#f9fafb] border-t border-neutral-200 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+                            <div className="px-3.5 py-2 bg-white/[0.02] border-t border-white/[0.06] flex items-center justify-between gap-2 text-[11px] text-zinc-500">
                               <span className="truncate">{linkedMatch.cancha}</span>
-                              <span className="text-[#707ef9] font-medium shrink-0">
-                                {votingOpen ? 'Votar MVP →' : 'Ficha →'}
+                              <span className="text-[#a5b0ff] shrink-0">
+                                {votingOpen ? 'MVP →' : 'Ficha →'}
                               </span>
                             </div>
                           )}
@@ -1151,17 +1077,10 @@ export function StandingsView({
 
                     return (
                       <div key={col.round} className="flex flex-col">
-                        <div className="bg-[#0d0d0d] text-white px-3.5 py-2.5 mb-4 flex items-center justify-between gap-2">
-                          <span className="font-display text-base font-bold uppercase tracking-wider">
-                            {col.title}
-                          </span>
-                          <span className="text-[11px] text-neutral-400 tabular-nums">
-                            {col.slots.length}{' '}
-                            {col.slots.length === 1
-                              ? fullBracket.isTwoLegged
-                                ? 'llave'
-                                : 'partido'
-                              : 'llaves'}
+                        <div className="rounded-full bg-white/[0.05] border border-white/[0.08] text-white px-4 py-2 mb-4 flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium">{col.title}</span>
+                          <span className="text-[11px] text-zinc-500 tabular-nums">
+                            {col.slots.length}
                           </span>
                         </div>
 
@@ -1173,10 +1092,10 @@ export function StandingsView({
                           {col.slots.map((slot) => renderSlotCard(slot, false))}
 
                           {isFinalColumn && fullBracket.thirdPlace && (
-                            <div className="pt-4 border-t border-dashed border-neutral-300 space-y-2">
-                              <p className="text-[11px] font-bold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5">
-                                <Medal className="w-3.5 h-3.5 text-[#707ef9]" />
-                                <span>Definición del Bronce</span>
+                            <div className="pt-4 border-t border-dashed border-white/[0.1] space-y-2">
+                              <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                                <Medal className="w-3.5 h-3.5 text-[#9aa5ff]" />
+                                <span>Tercer lugar</span>
                               </p>
                               {renderSlotCard(fullBracket.thirdPlace, true)}
                             </div>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, X } from 'lucide-react';
+import { AnimatePresence, MotionConfig } from 'motion/react';
+import { PageTransition } from './components/MotionPrimitives';
 import { createInitialTournamentState, DISCIPLINE_MAP } from './data/ufroSeed';
 import {
   getSectionPath,
@@ -1717,7 +1719,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-[#0d0d0d]">
+    <div className="min-h-screen flex flex-col bg-[#050507] text-zinc-100">
       <Navbar
         activeSection={activeSection}
         currentUser={currentUser}
@@ -1730,18 +1732,18 @@ function AppContent() {
       {cloudError && (
         <div
           role="alert"
-          className="bg-red-50 border-b border-red-300 text-red-900 px-4 py-2.5 text-xs"
+          className="bg-red-950/60 border-b border-red-500/30 text-red-200 px-4 py-2.5 text-xs backdrop-blur-md"
         >
           <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-3">
             <span className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
               <span>{cloudError}</span>
             </span>
             <button
               type="button"
               onClick={() => setCloudError(null)}
               aria-label="Cerrar alerta"
-              className="p-1 text-red-700 hover:text-red-950 cursor-pointer"
+              className="p-1 text-red-300 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1757,7 +1759,8 @@ function AppContent() {
             onRetry={handleRetryInitialSync}
           />
         ) : (
-          <>
+          <AnimatePresence mode="wait">
+            <PageTransition key={activeSection}>
             {activeSection === 'inicio' && (
               <HomeView
                 state={state}
@@ -1938,7 +1941,8 @@ function AppContent() {
             {activeSection === 'privacidad' && (
               <PrivacyPolicyView onNavigate={handleNavigate} />
             )}
-          </>
+            </PageTransition>
+          </AnimatePresence>
         )}
       </main>
 
@@ -1994,7 +1998,9 @@ function AppContent() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppContent />
+      <MotionConfig reducedMotion="user">
+        <AppContent />
+      </MotionConfig>
     </ErrorBoundary>
   );
 }
