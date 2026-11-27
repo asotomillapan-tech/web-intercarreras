@@ -47,7 +47,7 @@ export function HomeTransfersSection({
       <RevealSection>
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
           <div className="space-y-2.5">
-            <SectionKicker index="04" label="Mercado Oficial" />
+            <SectionKicker index="05" label="Mercado Oficial" />
             <h2
               id="home-transfers-heading"
               className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white"

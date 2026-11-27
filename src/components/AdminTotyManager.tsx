@@ -348,15 +348,15 @@ export function AdminTotyManager({
       <div className="rounded-3xl border border-white/[0.08] bg-[#101016] p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="space-y-1">
           <p className="text-[11px] uppercase tracking-[0.2em] text-[#a5b0ff]">
-            Equipo Ideal (TOTY) · Escrutinio en Vivo
+            TOTYs · Escrutinio en Vivo
           </p>
           <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white">
             Formaciones{' '}
-            <span className="font-editorial italic font-normal text-[#c8ceff]">TOTY</span>
+            <span className="font-editorial italic font-normal text-[#c8ceff]">TOTYs</span>
           </h2>
           <p className="text-xs text-zinc-400 max-w-xl">
-            Configura los puestos titulares del Equipo Ideal por disciplina y revisa el escrutinio
-            en tiempo real.
+            Configura los puestos titulares de los TOTYs por disciplina y revisa el escrutinio en
+            tiempo real.
           </p>
         </div>
 

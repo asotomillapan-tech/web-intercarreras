@@ -47,6 +47,7 @@ import type {
   TournamentState,
 } from '../types/tournament';
 import { HomeMatchCalendar } from './HomeMatchCalendar';
+import { HomeTotySpotlight } from './HomeTotySpotlight';
 import { HomeTransfersSection } from './HomeTransfersSection';
 import { MatchFilterBar } from './MatchFilterBar';
 import { EDITORIAL_EASE, RevealSection, SectionKicker } from './MotionPrimitives';
@@ -525,7 +526,14 @@ export function HomeView({
         </div>
       </section>
 
-      {/* (02) Noticias del Campeonato */}
+      {/* (02) TOTYs Spotlight */}
+      <HomeTotySpotlight
+        state={state}
+        onNavigate={onNavigate}
+        onSelectDiscipline={onSelectDiscipline}
+      />
+
+      {/* (03) Noticias del Campeonato */}
       <section
         aria-labelledby="home-news-heading"
         className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 border-b border-white/[0.06]"
@@ -533,7 +541,7 @@ export function HomeView({
         <RevealSection>
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
             <div className="space-y-2.5">
-              <SectionKicker index="02" label="Sala de Prensa" />
+              <SectionKicker index="03" label="Sala de Prensa" />
               <h2
                 id="home-news-heading"
                 className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white"
@@ -740,13 +748,13 @@ export function HomeView({
         onNavigate={onNavigate}
       />
 
-      {/* (05) Centro de Encuentros */}
+      {/* (06) Centro de Encuentros */}
       <section className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 border-b border-white/[0.06]">
         <RevealSection>
           <div className="space-y-6 mb-8">
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div className="space-y-2.5">
-                <SectionKicker index="05" label="Centro de Encuentros" />
+                <SectionKicker index="06" label="Centro de Encuentros" />
                 <h2 className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white">
                   Resultados y <span className="font-editorial text-[#c8ceff]">votación MVP</span>
                 </h2>
@@ -993,12 +1001,12 @@ export function HomeView({
         </RevealSection>
       </section>
 
-      {/* (06) Panorama: Quick Standings + Individual Leaders */}
+      {/* (07) Panorama: Quick Standings + Individual Leaders */}
       <section className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 border-b border-white/[0.06]">
         <RevealSection>
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
             <div className="space-y-2.5">
-              <SectionKicker index="06" label="Panorama" />
+              <SectionKicker index="07" label="Panorama" />
               <h2 className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white">
                 {activeDisciplineMeta.nombre}
               </h2>
@@ -1181,13 +1189,13 @@ export function HomeView({
         </RevealSection>
       </section>
 
-      {/* (07) Artfolio-style Editorial Discipline Collections */}
+      {/* (08) Artfolio-style Editorial Discipline Collections */}
       <section className="py-16 sm:py-22">
         <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
           <RevealSection>
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
               <div className="space-y-2.5">
-                <SectionKicker index="07" label="Categorías" />
+                <SectionKicker index="08" label="Categorías" />
                 <h2 className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white">
                   Las 8 <span className="font-editorial text-[#c8ceff]">disciplinas</span>
                 </h2>

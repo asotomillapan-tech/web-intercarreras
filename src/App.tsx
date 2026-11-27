@@ -1215,7 +1215,7 @@ function AppContent() {
     try {
       await saveFirestoreTotyBallot(ballot);
     } catch (err) {
-      reportCloudError('Error guardando boleta de Equipo Ideal (TOTY)', err);
+      reportCloudError('Error guardando papeleta de TOTYs', err);
     }
   };
 

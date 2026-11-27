@@ -214,7 +214,7 @@ export function HomeMatchCalendar({
       <RevealSection>
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-8">
           <div className="space-y-2.5">
-            <SectionKicker index="03" label={`Programación ${temporada}`} />
+            <SectionKicker index="04" label={`Programación ${temporada}`} />
             <h2
               id="home-calendar-heading"
               className="text-3xl sm:text-4xl font-medium tracking-[-0.03em] text-white"

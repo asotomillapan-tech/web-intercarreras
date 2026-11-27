@@ -960,7 +960,7 @@ export function AdminRefereeView({
                   onClick={() => setSubTab('toty')}
                   className={subTabClass(effectiveSubTab === 'toty')}
                 >
-                  Equipo Ideal TOTY
+                  TOTYs
                 </button>
                 <button
                   type="button"
