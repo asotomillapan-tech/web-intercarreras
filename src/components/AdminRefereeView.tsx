@@ -545,9 +545,11 @@ export function AdminRefereeView({
         validatedAt: new Date().toISOString(),
         refereeName: activeReferee.nombre,
         method,
-        imagePreview: scoresheetImage ?? undefined,
-        aiResult: aiResult ?? undefined,
-        manualNotes: method === 'MANUAL_ARBITRO' ? manualNotes.trim() : undefined,
+        ...(scoresheetImage ? { imagePreview: scoresheetImage } : {}),
+        ...(aiResult ? { aiResult } : {}),
+        ...(method === 'MANUAL_ARBITRO' && manualNotes.trim()
+          ? { manualNotes: manualNotes.trim() }
+          : {}),
         finalHomeScore: finalHome,
         finalAwayScore: finalAway,
       },

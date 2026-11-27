@@ -813,8 +813,12 @@ export function applyMatchLiveEvent(params: ApplyLiveEventParams): ApplyLiveEven
     id: params.eventId ?? `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     minuteOrPeriod: match.clock === 'Por iniciar' ? resolvedPeriodLabel : resolvedClock,
     teamId,
-    playerId: player?.id,
-    playerName: player ? `${player.nombre} ${player.apellidoPaterno}` : undefined,
+    ...(player
+      ? {
+          playerId: player.id,
+          playerName: `${player.nombre} ${player.apellidoPaterno}`,
+        }
+      : {}),
     type: actionType,
     detail,
     ...(resolvedPoints > 0 ? { pointsDelta: resolvedPoints } : {}),

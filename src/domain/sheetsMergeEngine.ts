@@ -1060,11 +1060,20 @@ export function mergeTournamentWithSheets(params: {
         dorsal: parseBoundedInt(dorsalRes.value, 0, 99, webPlayer.dorsal),
         posicion: (posRes.value || webPlayer.posicion || 'Jugador').slice(0, 60),
         nombre: (nombreRes.value || webPlayer.nombre).slice(0, 80),
-        apellidoPaterno: (appRes.value || webPlayer.apellidoPaterno).slice(0, 80),
-        apellidoMaterno: (apmRes.value || webPlayer.apellidoMaterno).slice(0, 80),
-        carrera: carreraRes.value.length >= 2 ? carreraRes.value.slice(0, 140) : webPlayer.carrera,
+        apellidoPaterno: (appRes.value || webPlayer.apellidoPaterno || '-').slice(0, 80),
+        apellidoMaterno: (apmRes.value || webPlayer.apellidoMaterno || '-').slice(0, 80),
+        carrera:
+          carreraRes.value.length >= 2
+            ? carreraRes.value.slice(0, 140)
+            : webPlayer.carrera.length >= 2
+            ? webPlayer.carrera
+            : 'Carrera UFRO',
         facultad:
-          facultadRes.value.length >= 2 ? facultadRes.value.slice(0, 140) : webPlayer.facultad,
+          facultadRes.value.length >= 2
+            ? facultadRes.value.slice(0, 140)
+            : webPlayer.facultad.length >= 2
+            ? webPlayer.facultad
+            : 'Universidad de La Frontera',
         rut: rutRes.value,
         numeroMatricula: matRes.value,
         correoInstitucional: emailRes.value.toLowerCase(),
@@ -1393,9 +1402,24 @@ export function mergeTournamentWithSheets(params: {
         ...webMatch,
         fase: parseMatchPhase(faseRes.value, webMatch.fase),
         groupName: (grupoRes.value || webMatch.groupName || 'Grupo A').slice(0, 40),
-        fecha: fechaRes.value.length >= 8 ? fechaRes.value.slice(0, 20) : webMatch.fecha,
-        hora: horaRes.value.length >= 4 ? horaRes.value.slice(0, 12) : webMatch.hora,
-        cancha: canchaRes.value.length >= 2 ? canchaRes.value.slice(0, 120) : webMatch.cancha,
+        fecha:
+          fechaRes.value.length >= 8
+            ? fechaRes.value.slice(0, 20)
+            : webMatch.fecha.length >= 8
+            ? webMatch.fecha
+            : new Date().toISOString().slice(0, 10),
+        hora:
+          horaRes.value.length >= 4
+            ? horaRes.value.slice(0, 12)
+            : webMatch.hora.length >= 4
+            ? webMatch.hora
+            : '18:00',
+        cancha:
+          canchaRes.value.length >= 2
+            ? canchaRes.value.slice(0, 120)
+            : webMatch.cancha.length >= 2
+            ? webMatch.cancha
+            : DISCIPLINE_MAP[webMatch.disciplineId]?.sedePrincipal ?? 'Campus UFRO',
         homeTeamId: nextHomeId,
         awayTeamId: nextAwayId,
         homeScore: parseBoundedInt(homeScoreRes.value, 0, 300, webMatch.homeScore),

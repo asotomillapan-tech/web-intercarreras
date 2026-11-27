@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Award, CheckCircle2, ClipboardCheck, Edit3, Layers, Search, X } from 'lucide-react';
+import {
+  Award,
+  CheckCircle2,
+  ClipboardCheck,
+  Edit3,
+  Layers,
+  Search,
+  TrendingUp,
+  User,
+  X,
+} from 'lucide-react';
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
 import { computePlayerAttendanceSummary } from '../domain/attendanceEngine';
 import {
   buildUnifiedPlayers,
   findPlayerParticipations,
 } from '../domain/identityCrossRefEngine';
+import { computePlayerSeasonPerformance } from '../domain/playerPerformanceEngine';
 import { canEditPlayerProfile } from '../domain/rbacEngine';
 import { formatRut, validateRut, validateUfroEmail } from '../domain/tournamentEngine';
+import { PlayerPerformanceChart } from './PlayerPerformanceChart';
 import type {
   AcademicLevel,
   AppUserProfile,
@@ -58,9 +70,11 @@ export function PlayersView({
   }, [liveSelectedPlayer, state.players, state.teams]);
 
   const [activeParticipationId, setActiveParticipationId] = useState<string | null>(null);
+  const [profileTab, setProfileTab] = useState<'ficha' | 'rendimiento'>('ficha');
 
   useEffect(() => {
     setActiveParticipationId(liveSelectedPlayer?.id ?? null);
+    setProfileTab('ficha');
   }, [liveSelectedPlayer?.id]);
 
   const activeParticipationRecord = useMemo(() => {
@@ -71,6 +85,17 @@ export function PlayersView({
     }
     return liveSelectedPlayer;
   }, [liveSelectedPlayer, activeParticipationId, selectedPlayerParticipations]);
+
+  const activePerformanceSummary = useMemo(() => {
+    if (!activeParticipationRecord) return null;
+    const sportType = DISCIPLINE_MAP[activeParticipationRecord.disciplineId].sportType;
+    return computePlayerSeasonPerformance(
+      activeParticipationRecord,
+      state.matches,
+      sportType,
+      teamMap
+    );
+  }, [activeParticipationRecord, state.matches, teamMap]);
 
   useEffect(() => {
     setIsEditing(false);
@@ -441,9 +466,9 @@ export function PlayersView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="player-profile-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/75 p-4 sm:py-8 overflow-y-auto"
         >
-          <div className="bg-white w-full max-w-2xl border border-neutral-200 shadow-2xl my-8 overflow-hidden">
+          <div className="bg-white w-full max-w-3xl border border-neutral-200 shadow-2xl my-auto overflow-hidden">
             {/* Dark Editorial Header */}
             <div className="bg-[#0d0d0d] text-white p-6 space-y-4">
               <div className="flex items-start justify-between gap-4">
@@ -542,8 +567,57 @@ export function PlayersView({
               )}
             </div>
 
-            {/* Official 12-field UFRO Registration Sheet */}
+            {/* Modal View Switcher: Ficha vs Rendimiento Histórico */}
+            <div
+              role="tablist"
+              aria-label="Secciones del perfil del jugador"
+              className="flex items-center border-b border-neutral-200 bg-[#f5f6f8] px-6"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={profileTab === 'ficha'}
+                onClick={() => setProfileTab('ficha')}
+                className={`inline-flex items-center gap-2 px-4 py-3 text-xs font-display font-bold uppercase tracking-widest border-b-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  profileTab === 'ficha'
+                    ? 'border-[#707ef9] text-[#0d0d0d] bg-white'
+                    : 'border-transparent text-neutral-500 hover:text-[#0d0d0d]'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Ficha y Resumen</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={profileTab === 'rendimiento'}
+                onClick={() => setProfileTab('rendimiento')}
+                className={`inline-flex items-center gap-2 px-4 py-3 text-xs font-display font-bold uppercase tracking-widest border-b-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  profileTab === 'rendimiento'
+                    ? 'border-[#707ef9] text-[#0d0d0d] bg-white'
+                    : 'border-transparent text-neutral-500 hover:text-[#0d0d0d]'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Rendimiento Histórico</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
             <div className="p-6 space-y-6">
+              {profileTab === 'rendimiento' && activePerformanceSummary ? (
+                <PlayerPerformanceChart
+                  summary={activePerformanceSummary}
+                  playerName={`${activeParticipationRecord.nombre} ${activeParticipationRecord.apellidoPaterno}`}
+                  teamName={
+                    teamMap.get(activeParticipationRecord.teamId)?.nombre ??
+                    activeParticipationRecord.teamId
+                  }
+                  disciplineLabel={DISCIPLINE_MAP[activeParticipationRecord.disciplineId].nombreCorto}
+                  season={state.temporada}
+                />
+              ) : (
+                <>
               {editSaved && (
                 <div
                   role="status"
@@ -859,13 +933,23 @@ export function PlayersView({
 
               {/* Discipline Stats Grid */}
               <div>
-                <h3 className="font-display text-sm font-bold uppercase tracking-widest text-neutral-500 border-b border-neutral-200 pb-2 mb-4">
-                  Estadísticas Temporada {state.temporada} ·{' '}
-                  {DISCIPLINE_MAP[activeParticipationRecord.disciplineId].nombreCorto} (
-                  {teamMap.get(activeParticipationRecord.teamId)?.nombre ??
-                    activeParticipationRecord.teamId}
-                  )
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 pb-2 mb-4">
+                  <h3 className="font-display text-sm font-bold uppercase tracking-widest text-neutral-500">
+                    Estadísticas Temporada {state.temporada} ·{' '}
+                    {DISCIPLINE_MAP[activeParticipationRecord.disciplineId].nombreCorto} (
+                    {teamMap.get(activeParticipationRecord.teamId)?.nombre ??
+                      activeParticipationRecord.teamId}
+                    )
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setProfileTab('rendimiento')}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[#707ef9] hover:text-[#5766eb] hover:underline cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Ver gráficos históricos →</span>
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#f5f6f8] p-4 border border-neutral-200">
                   <div>
                     <p className="text-xs text-neutral-500">Partidos jugados</p>
@@ -977,6 +1061,8 @@ export function PlayersView({
                   );
                 })()}
               </div>
+                </>
+              )}
             </div>
           </div>
         </div>

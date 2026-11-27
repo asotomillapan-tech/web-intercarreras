@@ -17,6 +17,17 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { DEFAULT_MASTER_SHEETS, INITIAL_CONFIGS } from '../data/ufroSeed';
+import {
+  buildSanitizedDisciplineConfigPayload,
+  buildSanitizedMatchPayload,
+  buildSanitizedPlayerPayload,
+  buildSanitizedTeamPayload,
+  clampSafeInt,
+  sanitizeMatchAttendanceRecord,
+  sanitizeMatchLiveStateRecord,
+  sanitizePlayerStatsRecord,
+  stripUndefinedDeep,
+} from '../domain/firestoreSanitizer';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../domain/rbacEngine';
 import type { PublicRealtimeStreamKey } from '../domain/realtimeSyncEngine';
 import type {
@@ -66,38 +77,8 @@ function toIso(val: unknown): string {
   return new Date().toISOString();
 }
 
-function defaultStats(): PlayerStats {
-  return {
-    partidosJugados: 0,
-    goles: 0,
-    asistencias: 0,
-    tarjetasAmarillas: 0,
-    tarjetasRojas: 0,
-    puntos: 0,
-    rebotes: 0,
-    triples: 0,
-    faltas: 0,
-    aces: 0,
-    bloqueos: 0,
-  };
-}
-
 function sanitizeStats(raw: Partial<PlayerStats> | undefined): PlayerStats {
-  const base = defaultStats();
-  if (!raw) return base;
-  return {
-    partidosJugados: Math.max(0, Math.min(200, Math.trunc(Number(raw.partidosJugados) || 0))),
-    goles: Math.max(0, Math.min(500, Math.trunc(Number(raw.goles) || 0))),
-    asistencias: Math.max(0, Math.min(500, Math.trunc(Number(raw.asistencias) || 0))),
-    tarjetasAmarillas: Math.max(0, Math.min(100, Math.trunc(Number(raw.tarjetasAmarillas) || 0))),
-    tarjetasRojas: Math.max(0, Math.min(50, Math.trunc(Number(raw.tarjetasRojas) || 0))),
-    puntos: Math.max(0, Math.min(5000, Math.trunc(Number(raw.puntos) || 0))),
-    rebotes: Math.max(0, Math.min(2000, Math.trunc(Number(raw.rebotes) || 0))),
-    triples: Math.max(0, Math.min(1000, Math.trunc(Number(raw.triples) || 0))),
-    faltas: Math.max(0, Math.min(500, Math.trunc(Number(raw.faltas) || 0))),
-    aces: Math.max(0, Math.min(1000, Math.trunc(Number(raw.aces) || 0))),
-    bloqueos: Math.max(0, Math.min(1000, Math.trunc(Number(raw.bloqueos) || 0))),
-  };
+  return sanitizePlayerStatsRecord(raw);
 }
 
 const ALLOWED_FEATURED_CTA_SECTIONS: HomeFeaturedCtaSection[] = [
@@ -246,7 +227,7 @@ function mapConfigsDocs(
             : id === 'f7-h-1',
         inscripcionesAbiertas: Boolean(data.inscripcionesAbiertas),
         transferenciasAbiertas: Boolean(data.transferenciasAbiertas),
-        maxTransferenciasPorEquipo: Number(data.maxTransferenciasPorEquipo) ?? 2,
+        maxTransferenciasPorEquipo: clampSafeInt(data.maxTransferenciasPorEquipo, 0, 10, 2),
         faseActual: (data.faseActual as DisciplineFormatConfig['faseActual']) || 'INSCRIPCIONES',
       };
     }
@@ -1282,11 +1263,12 @@ export async function saveFirestoreSettings(settings: {
       }
     }
 
+    const cleanPayload = stripUndefinedDeep(payload);
     const existing = await getDoc(ref);
     if (existing.exists()) {
-      await updateDoc(ref, payload);
+      await updateDoc(ref, cleanPayload);
     } else {
-      await setDoc(ref, payload);
+      await setDoc(ref, cleanPayload);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -1298,18 +1280,7 @@ export async function saveFirestoreDisciplineConfig(config: DisciplineFormatConf
   try {
     const ref = doc(db, 'configs', config.disciplineId);
     const payload = {
-      disciplineId: config.disciplineId,
-      temporada: config.temporada.slice(0, 16),
-      maxCupos: Math.max(2, Math.min(128, Math.trunc(config.maxCupos))),
-      numGrupos: Math.max(1, Math.min(16, Math.trunc(config.numGrupos))),
-      clasificadosPorGrupo: Math.max(1, Math.min(8, Math.trunc(config.clasificadosPorGrupo))),
-      formatoPlayoff: config.formatoPlayoff,
-      incluyeTercerLugar: config.incluyeTercerLugar !== false,
-      playoffsIdaYVuelta: Boolean(config.playoffsIdaYVuelta),
-      inscripcionesAbiertas: Boolean(config.inscripcionesAbiertas),
-      transferenciasAbiertas: Boolean(config.transferenciasAbiertas),
-      maxTransferenciasPorEquipo: Math.max(0, Math.min(10, Math.trunc(config.maxTransferenciasPorEquipo))),
-      faseActual: config.faseActual,
+      ...buildSanitizedDisciplineConfigPayload(config),
       updatedAt: serverTimestamp(),
     };
     const existing = await getDoc(ref);
@@ -1342,147 +1313,88 @@ export async function saveFirestoreTeam(
   team: Team,
   actorUid: string,
   isNew: boolean,
-  actorRole?: UserRole
+  actorRole?: UserRole,
+  upsertFromSync = false
 ): Promise<void> {
   const path = `teams/${team.id}`;
+  let effectiveIsNew = isNew;
   try {
     const ref = doc(db, 'teams', team.id);
-    const safeNombre = (team.nombre || '').trim().slice(0, 120);
-    const nombre = safeNombre.length >= 2 ? safeNombre : safeNombre.padEnd(2, 'X');
-    const safeSigla = (team.sigla || '').trim().toUpperCase().slice(0, 8);
-    const sigla = safeSigla.length >= 2 ? safeSigla : nombre.slice(0, 3).toUpperCase().padEnd(2, 'X');
-    const safeCarrera = (team.carrera || '').trim().slice(0, 140);
-    const carrera = safeCarrera.length >= 2 ? safeCarrera : 'Carrera UFRO';
-    const safeFacultad = (team.facultad || '').trim().slice(0, 140);
-    const facultad = safeFacultad.length >= 2 ? safeFacultad : 'Universidad de La Frontera';
-    const groupName = ((team.groupName || '').trim() || 'Grupo A').slice(0, 40);
-    const validYear =
-      typeof team.anioFundacion === 'number' &&
-      Number.isFinite(team.anioFundacion) &&
-      Math.trunc(team.anioFundacion) >= 1950 &&
-      Math.trunc(team.anioFundacion) <= 2035
-        ? Math.trunc(team.anioFundacion)
-        : undefined;
+    if (upsertFromSync) {
+      const existing = await getDoc(ref);
+      effectiveIsNew = !existing.exists();
+    }
 
-    if (isNew) {
-      const payload: Record<string, unknown> = {
-        id: team.id,
-        nombre,
-        sigla,
-        disciplineId: team.disciplineId,
-        carrera,
-        facultad,
-        groupName,
-        createdByUid: actorUid,
+    const basePayload = buildSanitizedTeamPayload(team, actorUid, effectiveIsNew, actorRole);
+    if (effectiveIsNew) {
+      await setDoc(ref, {
+        ...basePayload,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      };
-      if (team.escudo && team.escudo.length <= 160000) {
-        payload.escudo = team.escudo;
-      }
-      if (validYear !== undefined) {
-        payload.anioFundacion = validYear;
-      }
-      if (team.logrosAnteriores) {
-        payload.logrosAnteriores = team.logrosAnteriores.trim().slice(0, 160);
-      }
-      await setDoc(ref, payload);
+      });
     } else {
-      const updatePayload: Record<string, unknown> = {
-        nombre,
-        sigla,
+      await updateDoc(ref, {
+        ...basePayload,
         updatedAt: serverTimestamp(),
-      };
-      if (actorRole !== 'delegado') {
-        updatePayload.carrera = carrera;
-        updatePayload.facultad = facultad;
-        updatePayload.groupName = groupName;
-      }
-      if (team.escudo !== undefined && team.escudo.length <= 160000) {
-        updatePayload.escudo = team.escudo;
-      }
-      if (validYear !== undefined) {
-        updatePayload.anioFundacion = validYear;
-      }
-      if (team.logrosAnteriores !== undefined) {
-        updatePayload.logrosAnteriores = team.logrosAnteriores.trim().slice(0, 160);
-      }
-      await updateDoc(ref, updatePayload);
+      });
     }
   } catch (error) {
-    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
+    handleFirestoreError(error, effectiveIsNew ? OperationType.CREATE : OperationType.UPDATE, path);
   }
 }
 
 export async function saveFirestorePlayer(
   player: Player,
   isNew: boolean,
-  actorRole: UserRole
+  actorRole: UserRole,
+  upsertFromSync = false
 ): Promise<void> {
   const pubPath = `players/${player.id}`;
   const privPath = `player_private/${player.id}`;
+  let effectiveIsNew = isNew;
   try {
     const pubRef = doc(db, 'players', player.id);
-    if (isNew) {
+    if (upsertFromSync) {
+      const existing = await getDoc(pubRef);
+      effectiveIsNew = !existing.exists();
+    }
+
+    const basePayload = buildSanitizedPlayerPayload(player, effectiveIsNew, actorRole);
+    if (effectiveIsNew) {
       await setDoc(pubRef, {
-        id: player.id,
-        teamId: player.teamId,
-        disciplineId: player.disciplineId,
-        dorsal: Math.max(0, Math.min(99, Math.trunc(player.dorsal))),
-        posicion: player.posicion.trim().slice(0, 60),
-        nombre: player.nombre.trim().slice(0, 80),
-        apellidoPaterno: player.apellidoPaterno.trim().slice(0, 80),
-        apellidoMaterno: player.apellidoMaterno.trim().slice(0, 80),
-        carrera: player.carrera.trim().slice(0, 140),
-        facultad: player.facultad.trim().slice(0, 140),
-        nivelAcademico: player.nivelAcademico,
-        fotografia: (player.fotografia || '').slice(0, 159000),
-        esSeleccionadoUfro: Boolean(player.esSeleccionadoUfro),
-        stats: sanitizeStats(player.stats),
+        ...basePayload,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } else {
-      const pubUpdate: Record<string, unknown> = {
-        dorsal: Math.max(0, Math.min(99, Math.trunc(player.dorsal))),
-        posicion: player.posicion.trim().slice(0, 60),
-        nombre: player.nombre.trim().slice(0, 80),
-        apellidoPaterno: player.apellidoPaterno.trim().slice(0, 80),
-        apellidoMaterno: player.apellidoMaterno.trim().slice(0, 80),
-        carrera: player.carrera.trim().slice(0, 140),
-        facultad: player.facultad.trim().slice(0, 140),
-        nivelAcademico: player.nivelAcademico,
-        fotografia: (player.fotografia || '').slice(0, 159000),
+      await updateDoc(pubRef, {
+        ...basePayload,
         updatedAt: serverTimestamp(),
-      };
-      if (actorRole === 'admin' || actorRole === 'delegado') {
-        pubUpdate.esSeleccionadoUfro = Boolean(player.esSeleccionadoUfro);
-      }
-      if (actorRole === 'admin') {
-        pubUpdate.teamId = player.teamId;
-        pubUpdate.stats = sanitizeStats(player.stats);
-      }
-      await updateDoc(pubRef, pubUpdate);
+      });
     }
 
     // Write isolated student PII only when all 4 PII fields are present
+    const rut = (player.rut || '').trim();
+    const numeroMatricula = (player.numeroMatricula || '').trim();
+    const correoInstitucional = (player.correoInstitucional || '').trim();
+    const fechaNacimiento = (player.fechaNacimiento || '').trim();
     if (
-      player.rut.trim().length >= 7 &&
-      player.numeroMatricula.trim().length >= 4 &&
-      player.correoInstitucional.trim().length >= 5 &&
-      player.fechaNacimiento.trim().length >= 8
+      rut.length >= 7 &&
+      numeroMatricula.length >= 4 &&
+      correoInstitucional.length >= 5 &&
+      fechaNacimiento.length >= 8
     ) {
       const privRef = doc(db, 'player_private', player.id);
-      const privPayload = {
+      const privPayload = stripUndefinedDeep({
         playerId: player.id,
         teamId: player.teamId,
-        rut: player.rut.trim().slice(0, 20),
-        numeroMatricula: player.numeroMatricula.trim().slice(0, 30),
-        correoInstitucional: player.correoInstitucional.trim().slice(0, 160),
-        fechaNacimiento: player.fechaNacimiento.trim().slice(0, 20),
+        rut: rut.slice(0, 20),
+        numeroMatricula: numeroMatricula.slice(0, 30),
+        correoInstitucional: correoInstitucional.slice(0, 160),
+        fechaNacimiento: fechaNacimiento.slice(0, 20),
         updatedAt: serverTimestamp(),
-      };
-      if (isNew) {
+      });
+      if (effectiveIsNew) {
         await setDoc(privRef, privPayload);
       } else {
         const privSnap = await getDoc(privRef);
@@ -1497,14 +1409,18 @@ export async function saveFirestorePlayer(
           if (actorRole === 'admin' || actorRole === 'delegado') {
             updatePriv.teamId = player.teamId;
           }
-          await updateDoc(privRef, updatePriv);
+          await updateDoc(privRef, stripUndefinedDeep(updatePriv));
         } else {
           await setDoc(privRef, privPayload);
         }
       }
     }
   } catch (error) {
-    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, `${pubPath} / ${privPath}`);
+    handleFirestoreError(
+      error,
+      effectiveIsNew ? OperationType.CREATE : OperationType.UPDATE,
+      `${pubPath} / ${privPath}`
+    );
   }
 }
 
@@ -1560,192 +1476,43 @@ export async function deleteFirestoreTeam(
 }
 
 function sanitizeMatchLiveState(raw: unknown): Match['liveState'] | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const obj = raw as Record<string, unknown>;
-  const rawOnCourt = (obj.onCourt && typeof obj.onCourt === 'object' ? obj.onCourt : {}) as Record<
-    string,
-    unknown
-  >;
-  const sanitizeIdArr = (val: unknown): string[] =>
-    Array.isArray(val)
-      ? Array.from(
-          new Set(
-            val
-              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-              .map((item) => item.trim().slice(0, 128))
-          )
-        ).slice(0, 15)
-      : [];
-  const sanitizeCountMap = (val: unknown): { home: number; away: number } | undefined => {
-    if (!val || typeof val !== 'object') return undefined;
-    const m = val as Record<string, unknown>;
-    return {
-      home: Math.max(0, Math.min(200, Math.trunc(Number(m.home) || 0))),
-      away: Math.max(0, Math.min(200, Math.trunc(Number(m.away) || 0))),
-    };
-  };
-
-  const out: NonNullable<Match['liveState']> = {
-    onCourt: {
-      home: sanitizeIdArr(rawOnCourt.home),
-      away: sanitizeIdArr(rawOnCourt.away),
-    },
-  };
-
-  if (obj.excludedPlayerIds && typeof obj.excludedPlayerIds === 'object') {
-    const rawEx = obj.excludedPlayerIds as Record<string, unknown>;
-    out.excludedPlayerIds = {
-      home: sanitizeIdArr(rawEx.home),
-      away: sanitizeIdArr(rawEx.away),
-    };
-  }
-  const pf = sanitizeCountMap(obj.periodFouls);
-  if (pf) out.periodFouls = pf;
-  if (obj.servingSide === 'home' || obj.servingSide === 'away') {
-    out.servingSide = obj.servingSide;
-  }
-  const sc = sanitizeCountMap(obj.substitutionsCount);
-  if (sc) out.substitutionsCount = sc;
-  if (typeof obj.clockSeconds === 'number' && Number.isFinite(obj.clockSeconds)) {
-    out.clockSeconds = Math.max(0, Math.min(7200, Math.trunc(obj.clockSeconds)));
-  }
-  if (typeof obj.stoppageMinutes === 'number' && Number.isFinite(obj.stoppageMinutes)) {
-    out.stoppageMinutes = Math.max(0, Math.min(30, Math.trunc(obj.stoppageMinutes)));
-  }
-
-  return out;
+  return sanitizeMatchLiveStateRecord(raw);
 }
 
 function sanitizeMatchAttendance(raw: unknown): Match['attendance'] | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const obj = raw as Record<string, unknown>;
-  const status =
-    obj.status === 'REGISTRADA' || obj.status === 'OMITIDA' || obj.status === 'NO_REGISTRADA'
-      ? obj.status
-      : 'NO_REGISTRADA';
-
-  const sanitizeAttendanceList = (val: unknown): string[] =>
-    Array.isArray(val)
-      ? Array.from(
-          new Set(
-            val
-              .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-              .map((item) => item.trim().slice(0, 128))
-          )
-        ).slice(0, 40)
-      : [];
-
-  const out: NonNullable<Match['attendance']> = {
-    status,
-    homePresentIds: status === 'OMITIDA' ? [] : sanitizeAttendanceList(obj.homePresentIds),
-    awayPresentIds: status === 'OMITIDA' ? [] : sanitizeAttendanceList(obj.awayPresentIds),
-  };
-
-  if (typeof obj.recordedAt === 'string' && obj.recordedAt.trim().length > 0) {
-    out.recordedAt = obj.recordedAt.trim().slice(0, 64);
-  }
-  if (typeof obj.recordedByName === 'string' && obj.recordedByName.trim().length > 0) {
-    out.recordedByName = obj.recordedByName.trim().slice(0, 120);
-  }
-  if (typeof obj.notes === 'string' && obj.notes.trim().length > 0) {
-    out.notes = obj.notes.trim().slice(0, 240);
-  }
-
-  return out;
+  return sanitizeMatchAttendanceRecord(raw);
 }
 
-export async function saveFirestoreMatch(match: Match, isNew: boolean, actorRole: UserRole): Promise<void> {
+export async function saveFirestoreMatch(
+  match: Match,
+  isNew: boolean,
+  actorRole: UserRole,
+  upsertFromSync = false
+): Promise<void> {
   const path = `matches/${match.id}`;
+  let effectiveIsNew = isNew;
   try {
     const ref = doc(db, 'matches', match.id);
-    const sanitizedLiveState = sanitizeMatchLiveState(match.liveState);
-    const sanitizedAttendance = sanitizeMatchAttendance(match.attendance);
-    if (isNew) {
-      const payload: Record<string, unknown> = {
-        id: match.id,
-        disciplineId: match.disciplineId,
-        groupName: match.groupName.slice(0, 40),
-        fase: match.fase,
-        jornada: Math.max(1, Math.min(50, Math.trunc(match.jornada))),
-        fecha: match.fecha.slice(0, 20),
-        hora: match.hora.slice(0, 12),
-        cancha: match.cancha.slice(0, 120),
-        homeTeamId: match.homeTeamId,
-        awayTeamId: match.awayTeamId,
-        homeScore: Math.max(0, Math.min(300, Math.trunc(match.homeScore))),
-        awayScore: Math.max(0, Math.min(300, Math.trunc(match.awayScore))),
-        status: match.status,
-        periodLabel: match.periodLabel.slice(0, 60),
-        clock: match.clock.slice(0, 24),
-        periods: match.periods.slice(0, 10),
-        fouls: { home: Math.trunc(match.fouls.home), away: Math.trunc(match.fouls.away) },
-        timeouts: { home: Math.trunc(match.timeouts.home), away: Math.trunc(match.timeouts.away) },
-        events: match.events.slice(0, 200),
-        refereeId: (match.refereeId || '').slice(0, 128),
+    if (upsertFromSync) {
+      const existing = await getDoc(ref);
+      effectiveIsNew = !existing.exists();
+    }
+
+    const basePayload = buildSanitizedMatchPayload(match, effectiveIsNew, actorRole);
+    if (effectiveIsNew) {
+      await setDoc(ref, {
+        ...basePayload,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      };
-      if (sanitizedLiveState) {
-        payload.liveState = sanitizedLiveState;
-      }
-      if (sanitizedAttendance) {
-        payload.attendance = sanitizedAttendance;
-      }
-      if (
-        match.playoffLeg === 'IDA' ||
-        match.playoffLeg === 'VUELTA' ||
-        match.playoffLeg === 'UNICO'
-      ) {
-        payload.playoffLeg = match.playoffLeg;
-      }
-      if (match.scoresheetValidation) {
-        payload.scoresheetValidation = match.scoresheetValidation;
-      }
-      await setDoc(ref, payload);
+      });
     } else {
-      const updatePayload: Record<string, unknown> = {
-        homeScore: Math.max(0, Math.min(300, Math.trunc(match.homeScore))),
-        awayScore: Math.max(0, Math.min(300, Math.trunc(match.awayScore))),
-        status: match.status,
-        periodLabel: match.periodLabel.slice(0, 60),
-        clock: match.clock.slice(0, 24),
-        periods: match.periods.slice(0, 10),
-        fouls: { home: Math.trunc(match.fouls.home), away: Math.trunc(match.fouls.away) },
-        timeouts: { home: Math.trunc(match.timeouts.home), away: Math.trunc(match.timeouts.away) },
-        events: match.events.slice(0, 200),
+      await updateDoc(ref, {
+        ...basePayload,
         updatedAt: serverTimestamp(),
-      };
-      if (sanitizedLiveState) {
-        updatePayload.liveState = sanitizedLiveState;
-      }
-      if (sanitizedAttendance) {
-        updatePayload.attendance = sanitizedAttendance;
-      }
-      if (match.scoresheetValidation) {
-        updatePayload.scoresheetValidation = match.scoresheetValidation;
-      }
-      if (actorRole === 'admin') {
-        updatePayload.groupName = match.groupName.slice(0, 40);
-        updatePayload.fase = match.fase;
-        if (
-          match.playoffLeg === 'IDA' ||
-          match.playoffLeg === 'VUELTA' ||
-          match.playoffLeg === 'UNICO'
-        ) {
-          updatePayload.playoffLeg = match.playoffLeg;
-        }
-        updatePayload.jornada = Math.max(1, Math.min(50, Math.trunc(match.jornada)));
-        updatePayload.fecha = match.fecha.slice(0, 20);
-        updatePayload.hora = match.hora.slice(0, 12);
-        updatePayload.cancha = match.cancha.slice(0, 120);
-        updatePayload.homeTeamId = match.homeTeamId;
-        updatePayload.awayTeamId = match.awayTeamId;
-        updatePayload.refereeId = (match.refereeId || '').slice(0, 128);
-      }
-      await updateDoc(ref, updatePayload);
+      });
     }
   } catch (error) {
-    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
+    handleFirestoreError(error, effectiveIsNew ? OperationType.CREATE : OperationType.UPDATE, path);
   }
 }
 
@@ -1865,7 +1632,7 @@ export async function createFirestoreTransferRequest(
       payload.toTeamApprovedByUid = transfer.toTeamApprovedByUid;
     }
 
-    await setDoc(doc(db, 'transfers', transfer.id), payload);
+    await setDoc(doc(db, 'transfers', transfer.id), stripUndefinedDeep(payload));
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, transferPath);
   }
@@ -1998,7 +1765,7 @@ export async function saveFirestorePhoto(photo: PhotoEntry): Promise<void> {
     if (photo.driveWebViewLink) payload.driveWebViewLink = photo.driveWebViewLink.slice(0, 500);
     if (photo.driveFolderPath) payload.driveFolderPath = photo.driveFolderPath.slice(0, 300);
 
-    await setDoc(doc(db, 'photos', photo.id), payload);
+    await setDoc(doc(db, 'photos', photo.id), stripUndefinedDeep(payload));
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -2434,7 +2201,7 @@ export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry
       payload.finalTeamEscudo = entry.finalTeamEscudo;
     }
 
-    await setDoc(ref, payload);
+    await setDoc(ref, stripUndefinedDeep(payload));
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }

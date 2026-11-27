@@ -677,15 +677,31 @@ function AppContent() {
         };
       });
 
-      // 2. Persist every Sheet-side change to Firestore
+      // 2. Persist every Sheet-side change to Firestore (teams first, then players/matches/configs, using upsert-safe mode)
       try {
+        if (imports.teamsToCreate.length > 0 || imports.teamsToUpdate.length > 0) {
+          await Promise.all([
+            ...imports.teamsToCreate.map((t) =>
+              saveFirestoreTeam(t, currentUser.uid, true, currentUser.role, true)
+            ),
+            ...imports.teamsToUpdate.map((t) =>
+              saveFirestoreTeam(t, currentUser.uid, false, currentUser.role, true)
+            ),
+          ]);
+        }
         await Promise.all([
-          ...imports.teamsToCreate.map((t) => saveFirestoreTeam(t, currentUser.uid, true)),
-          ...imports.teamsToUpdate.map((t) => saveFirestoreTeam(t, currentUser.uid, false)),
-          ...imports.playersToCreate.map((p) => saveFirestorePlayer(p, true, currentUser.role)),
-          ...imports.playersToUpdate.map((p) => saveFirestorePlayer(p, false, currentUser.role)),
-          ...imports.matchesToCreate.map((m) => saveFirestoreMatch(m, true, currentUser.role)),
-          ...imports.matchesToUpdate.map((m) => saveFirestoreMatch(m, false, currentUser.role)),
+          ...imports.playersToCreate.map((p) =>
+            saveFirestorePlayer(p, true, currentUser.role, true)
+          ),
+          ...imports.playersToUpdate.map((p) =>
+            saveFirestorePlayer(p, false, currentUser.role, true)
+          ),
+          ...imports.matchesToCreate.map((m) =>
+            saveFirestoreMatch(m, true, currentUser.role, true)
+          ),
+          ...imports.matchesToUpdate.map((m) =>
+            saveFirestoreMatch(m, false, currentUser.role, true)
+          ),
           ...imports.configsToUpdate.map((cfg) => saveFirestoreDisciplineConfig(cfg)),
         ]);
       } catch (err) {

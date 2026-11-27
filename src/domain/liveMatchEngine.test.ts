@@ -446,3 +446,29 @@ test('Helpers: autoSelectStartingLineup, formatMatchClock, computePlayerMatchCou
   assert.equal(clamped.tarjetasRojas, 0);
   assert.equal(clamped.faltas, 0);
 });
+
+test('Firestore safety: player-less live events never emit explicit undefined keys', () => {
+  const match = baseMatch({
+    disciplineId: 'voley-m',
+    status: 'EN_VIVO',
+    periodLabel: 'Set 1',
+    clock: 'Set 1',
+    periods: [{ home: 12, away: 10 }],
+  });
+
+  const timeoutResult = applyMatchLiveEvent({
+    match,
+    sportType: 'voleibol',
+    side: 'home',
+    actionType: 'TIEMPO_MUERTO',
+    teamName: 'Enfermería Vóley',
+    eventId: 'ev-timeout-no-player',
+  });
+
+  assert.equal('playerId' in timeoutResult.event, false);
+  assert.equal('playerName' in timeoutResult.event, false);
+  for (const [k, v] of Object.entries(timeoutResult.event)) {
+    assert.notStrictEqual(v, undefined, `Event key ${k} must not be undefined`);
+  }
+});
+
