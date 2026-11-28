@@ -4,6 +4,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
+import { createTursoRouter } from './tursoRoutes.ts';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
 
@@ -46,6 +47,8 @@ interface VerifiedTokenPayload {
   uid: string;
   email?: string;
   email_verified?: boolean;
+  name?: string;
+  picture?: string;
   aud: string;
   iss: string;
   exp: number;
@@ -418,9 +421,19 @@ export function createApiApp(): express.Express {
       mode: IS_PRODUCTION ? 'production' : 'development',
       runtime: process.env.VERCEL ? 'vercel-serverless' : 'node-express',
       projectId: FIREBASE_PROJECT_ID || null,
+      database: 'turso-libsql',
       timestamp: new Date().toISOString(),
     });
   });
+
+  // Turso (libSQL) Database API routes (public reads + Firebase-JWT protected writes & PII)
+  app.use(
+    '/api/db',
+    createTursoRouter({
+      verifyFirebaseIdToken,
+      requireFirebaseAuth,
+    })
+  );
 
   // Google Drive Public & Authenticated Folder Browser (2025 & 2026 Archives)
   app.get('/api/drive/folder/:folderId', async (req, res) => {

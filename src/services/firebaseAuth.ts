@@ -6,40 +6,10 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
-import {
-  doc,
-  getDocFromServer,
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  type Firestore,
-} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-
-function initCachedFirestore(): Firestore {
-  if (typeof window !== 'undefined') {
-    try {
-      return initializeFirestore(
-        app,
-        {
-          localCache: persistentLocalCache({
-            tabManager: persistentMultipleTabManager(),
-          }),
-        },
-        firebaseConfig.firestoreDatabaseId
-      );
-    } catch {
-      // Fallback if Firestore was already initialized or IndexedDB is unavailable (e.g. private iframe)
-    }
-  }
-  return getFirestore(app, firebaseConfig.firestoreDatabaseId);
-}
-
-export const db = initCachedFirestore();
 
 export const GOOGLE_WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
@@ -117,18 +87,7 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Validate Firestore connectivity on startup
-async function testConnection() {
-  if (typeof window === 'undefined') return;
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
-}
-void testConnection();
+// Persistence runs on Turso (libSQL) via /api/db/*; Firebase Auth handles Google Sign-In.
 
 export function initGoogleAuth(
   onAuthSuccess?: (user: User, token: string | null) => void,
