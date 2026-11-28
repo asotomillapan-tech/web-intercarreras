@@ -1,18 +1,18 @@
 import { createClient, type Client } from '@libsql/client';
+import { resolveTursoCredentialsFromEnv } from '../src/domain/tursoHelpers.ts';
 
 let cachedClient: Client | null = null;
 let schemaReadyPromise: Promise<void> | null = null;
 
 export function isTursoConfigured(): boolean {
-  const url = (process.env.TURSO_DATABASE_URL || '').trim();
+  const { url } = resolveTursoCredentialsFromEnv(process.env);
   return url.length > 0;
 }
 
 export function getTursoClient(): Client {
   if (cachedClient) return cachedClient;
 
-  const url = (process.env.TURSO_DATABASE_URL || '').trim();
-  const authToken = (process.env.TURSO_AUTH_TOKEN || '').trim();
+  const { url, authToken } = resolveTursoCredentialsFromEnv(process.env);
 
   if (!url) {
     throw new Error(

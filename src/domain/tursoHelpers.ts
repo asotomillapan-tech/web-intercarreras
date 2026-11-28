@@ -201,3 +201,35 @@ export function canActorManageTransfer(
   }
   return false;
 }
+
+function sanitizeEnvSecret(value: string | undefined): string {
+  if (!value) return '';
+  return value.trim().replace(/^['"]+|['"]+$/g, '').trim();
+}
+
+/**
+ * Resolves Turso libSQL connection credentials from server environment variables,
+ * stripping accidental surrounding quotes and supporting standard Turso/libSQL aliases.
+ */
+export function resolveTursoCredentialsFromEnv(
+  env: Record<string, string | undefined>
+): { url: string; authToken: string } {
+  const directUrl =
+    sanitizeEnvSecret(env.TURSO_DATABASE_URL) ||
+    sanitizeEnvSecret(env.TURSO_DB_URL) ||
+    sanitizeEnvSecret(env.LIBSQL_URL);
+
+  const fallbackDbUrl = sanitizeEnvSecret(env.DATABASE_URL);
+  const isFallbackLibsql =
+    fallbackDbUrl.startsWith('libsql://') ||
+    fallbackDbUrl.includes('.turso.io');
+
+  const url = directUrl || (isFallbackLibsql ? fallbackDbUrl : '');
+  const authToken =
+    sanitizeEnvSecret(env.TURSO_AUTH_TOKEN) ||
+    sanitizeEnvSecret(env.LIBSQL_AUTH_TOKEN) ||
+    sanitizeEnvSecret(env.TURSO_TOKEN);
+
+  return { url, authToken };
+}
+

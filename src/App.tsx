@@ -381,8 +381,8 @@ function AppContent() {
       return;
     }
 
-    const detail = err instanceof Error ? err.message : 'Error de sincronización con Firestore.';
-    console.error(`[Firestore] ${context}:`, err);
+    const detail = err instanceof Error ? err.message : 'Error de sincronización con la base de datos.';
+    console.error(`[DB] ${context}:`, err);
     setCloudError(`${context}: ${detail}`);
   }, []);
 
@@ -951,6 +951,7 @@ function AppContent() {
             return { ...prev, users: mergedUsers };
           });
           setCurrentUserUid(profile.uid);
+          setCloudError(null);
 
           await hydrateForAuthenticatedProfile(
             profile,
@@ -958,7 +959,7 @@ function AppContent() {
             stateRef.current.configs
           );
         } catch (err) {
-          reportCloudError('Error sincronizando sesión con Firestore', err);
+          reportCloudError('Error sincronizando sesión con la base de datos', err);
         }
       },
       () => {
@@ -1317,7 +1318,7 @@ function AppContent() {
           ...imports.configsToUpdate.map((cfg) => saveFirestoreDisciplineConfig(cfg)),
         ]);
       } catch (err) {
-        reportCloudError('Error aplicando cambios importados desde Google Sheets a Firestore', err);
+        reportCloudError('Error aplicando cambios importados desde Google Sheets a la base de datos', err);
       }
     },
     [currentUser, reportCloudError]
@@ -2005,7 +2006,7 @@ function AppContent() {
     setState((prev) => ({ ...prev, players: [newPlayer, ...prev.players] }));
     queueMasterSyncForDiscipline(newPlayer.disciplineId);
     void saveFirestorePlayer(newPlayer, true, currentUser.role).catch((err) =>
-      reportCloudError('Error registrando estudiante en Firestore', err)
+      reportCloudError('Error registrando estudiante en la base de datos', err)
     );
   };
 
@@ -2021,7 +2022,7 @@ function AppContent() {
     }));
     queueMasterSyncForDiscipline(player.disciplineId);
     void deleteFirestorePlayer(player.id).catch((err) =>
-      reportCloudError('Error eliminando jugador en Firestore', err)
+      reportCloudError('Error eliminando jugador en la base de datos', err)
     );
   };
 
@@ -2034,7 +2035,7 @@ function AppContent() {
     }));
     queueMasterSyncForDiscipline(enriched.disciplineId);
     void saveFirestoreTeam(enriched, currentUser.uid, true, currentUser.role).catch((err) =>
-      reportCloudError('Error agregando equipo en Firestore', err)
+      reportCloudError('Error agregando equipo en la base de datos', err)
     );
   };
 
@@ -2052,7 +2053,7 @@ function AppContent() {
     }));
     queueMasterSyncForDiscipline(team.disciplineId);
     void saveFirestoreTeam(team, currentUser.uid, false, currentUser.role).catch((err) =>
-      reportCloudError('Error actualizando equipo en Firestore', err)
+      reportCloudError('Error actualizando equipo en la base de datos', err)
     );
   };
 
@@ -2083,7 +2084,7 @@ function AppContent() {
         clearAnioFundacion: updates.some((u) => u.clearAnioFundacion),
       });
     } catch (err) {
-      reportCloudError('Error aplicando edición masiva de equipos en Firestore', err);
+      reportCloudError('Error aplicando edición masiva de equipos en la base de datos', err);
       throw err;
     }
   };
@@ -2115,7 +2116,7 @@ function AppContent() {
     void deleteFirestoreTeam(team.id, {
       playerIds: affectedPlayerIds,
       matchIds: affectedMatchIds,
-    }).catch((err) => reportCloudError('Error eliminando equipo en Firestore', err));
+    }).catch((err) => reportCloudError('Error eliminando equipo en la base de datos', err));
   };
 
   const handleAddPhoto = async (photo: PhotoEntry) => {
@@ -2308,7 +2309,7 @@ function AppContent() {
     queueMasterSyncForDiscipline(updatedMatch.disciplineId);
 
     void saveFirestoreMatch(updatedMatch, false, currentUser.role).catch((err) =>
-      reportCloudError('Error actualizando marcador en Firestore', err)
+      reportCloudError('Error actualizando marcador en la base de datos', err)
     );
     if (updatedPlayerForCloud) {
       const target = updatedPlayerForCloud as Player;
@@ -2326,7 +2327,7 @@ function AppContent() {
     }));
     queueMasterSyncForDiscipline(newMatch.disciplineId);
     void saveFirestoreMatch(newMatch, true, currentUser.role).catch((err) =>
-      reportCloudError('Error programando nuevo encuentro en Firestore', err)
+      reportCloudError('Error programando nuevo encuentro en la base de datos', err)
     );
   };
 
@@ -2344,7 +2345,7 @@ function AppContent() {
         await saveFirestoreTeam(team, currentUser.uid, true);
         await Promise.all(roster.map((p) => saveFirestorePlayer(p, true, currentUser.role)));
       } catch (err) {
-        reportCloudError('Error guardando inscripción del equipo en Firestore', err);
+        reportCloudError('Error guardando inscripción del equipo en la base de datos', err);
       }
     })();
   };
@@ -2358,7 +2359,7 @@ function AppContent() {
     }));
 
     void createFirestoreTransferRequest(enrichedTransfer, currentUser.uid).catch((err) =>
-      reportCloudError('Error enviando solicitud de transferencia en Firestore', err)
+      reportCloudError('Error enviando solicitud de transferencia en la base de datos', err)
     );
   };
 
@@ -2379,7 +2380,7 @@ function AppContent() {
     queueMasterSyncForDiscipline(updatedTransfer.disciplineId);
 
     void approveFirestoreTransferRequest(updatedTransfer, currentUser.uid, isFromDelegate).catch(
-      (err) => reportCloudError('Error confirmando transferencia en Firestore', err)
+      (err) => reportCloudError('Error confirmando transferencia en la base de datos', err)
     );
   };
 
@@ -2393,7 +2394,7 @@ function AppContent() {
     }));
 
     void rejectFirestoreTransferRequest(updatedTransfer.id, currentUser.uid).catch((err) =>
-      reportCloudError('Error rechazando solicitud de transferencia en Firestore', err)
+      reportCloudError('Error rechazando solicitud de transferencia en la base de datos', err)
     );
   };
 

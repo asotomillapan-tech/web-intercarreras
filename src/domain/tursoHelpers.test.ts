@@ -173,3 +173,31 @@ test('canActorManageTransfer restricts delegate actions to involved teams only',
     true
   );
 });
+
+test('resolveTursoCredentialsFromEnv strips accidental quotes and supports standard Turso/libSQL aliases', async () => {
+  const { resolveTursoCredentialsFromEnv } = await import('./tursoHelpers.ts');
+
+  assert.deepEqual(
+    resolveTursoCredentialsFromEnv({
+      TURSO_DATABASE_URL: ' "libsql://demo-ufro.turso.io" ',
+      TURSO_AUTH_TOKEN: "'tok_123'",
+    }),
+    { url: 'libsql://demo-ufro.turso.io', authToken: 'tok_123' }
+  );
+
+  assert.deepEqual(
+    resolveTursoCredentialsFromEnv({
+      LIBSQL_URL: 'libsql://alt-ufro.turso.io',
+      LIBSQL_AUTH_TOKEN: 'tok_alt',
+    }),
+    { url: 'libsql://alt-ufro.turso.io', authToken: 'tok_alt' }
+  );
+
+  assert.deepEqual(
+    resolveTursoCredentialsFromEnv({
+      DATABASE_URL: 'postgresql://user:pass@host/db',
+    }),
+    { url: '', authToken: '' }
+  );
+});
+
