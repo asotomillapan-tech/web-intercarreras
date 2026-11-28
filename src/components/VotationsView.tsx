@@ -38,6 +38,10 @@ import {
   areTotySelectionsEqual,
   type TotyBallotSubmissionInput,
 } from '../domain/totyBatchQueue';
+import {
+  computeTotyCountdown,
+  formatTotyDeadlineDisplay,
+} from '../domain/totyCountdown';
 import type {
   AppUserProfile,
   DisciplineId,
@@ -565,6 +569,22 @@ export function VotationsView({
   >({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [totyNowMs, setTotyNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!state.totyVotingDeadline) return;
+    setTotyNowMs(Date.now());
+    const timerId = window.setInterval(() => {
+      setTotyNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timerId);
+  }, [state.totyVotingDeadline]);
+
+  const totyCountdown = useMemo(
+    () => computeTotyCountdown(state.totyVotingDeadline, totyNowMs),
+    [state.totyVotingDeadline, totyNowMs]
+  );
+  const totyVotingClosed = totyCountdown.configured && totyCountdown.expired;
 
   const discMeta = DISCIPLINE_MAP[selectedDiscipline];
   const activeTotyConfig = state.totyConfigs?.[selectedDiscipline] ?? null;
@@ -956,6 +976,10 @@ export function VotationsView({
   }, [totyFormation.slots]);
 
   const handleSaveToty = async () => {
+    if (totyVotingClosed) {
+      setFeedbackMsg('El plazo de votación para los TOTYs ha finalizado.');
+      return;
+    }
     if (!currentUser) {
       onOpenAuth();
       return;
@@ -2001,6 +2025,56 @@ export function VotationsView({
                   </div>
                 </div>
               </div>
+
+              {totyCountdown.configured && (
+                <div className="relative z-10 px-6 sm:px-8 lg:px-10 py-4 border-t border-[#9ec8ff]/20 bg-[#050b20]/70 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  {totyVotingClosed ? (
+                    <div className="flex items-center gap-2.5 text-xs sm:text-sm text-rose-200">
+                      <Lock className="w-4 h-4 text-rose-300 shrink-0" />
+                      <span className="font-medium">Votaciones TOTY cerradas</span>
+                      <span className="text-rose-200/75 text-xs">
+                        · Cerró el {formatTotyDeadlineDisplay(state.totyVotingDeadline)}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-0.5">
+                        <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#9ec8ff] flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-[#b8dcff]" />
+                          <span>Cierre de votaciones TOTY</span>
+                        </p>
+                        <p className="text-xs text-[#d6e8ff]/80">
+                          Cierra el {formatTotyDeadlineDisplay(state.totyVotingDeadline)}
+                        </p>
+                      </div>
+
+                      <div
+                        aria-label="Tiempo restante para votar TOTYs"
+                        className="grid grid-cols-4 gap-2 shrink-0"
+                      >
+                        {[
+                          { value: String(totyCountdown.days).padStart(2, '0'), label: 'Días' },
+                          { value: String(totyCountdown.hours).padStart(2, '0'), label: 'Hrs' },
+                          { value: String(totyCountdown.minutes).padStart(2, '0'), label: 'Min' },
+                          { value: String(totyCountdown.seconds).padStart(2, '0'), label: 'Seg' },
+                        ].map((unit) => (
+                          <div
+                            key={unit.label}
+                            className="min-w-[54px] rounded-xl border border-[#9ec8ff]/25 bg-[#081336]/85 px-2.5 py-1.5 text-center"
+                          >
+                            <p className="text-lg sm:text-xl font-semibold text-white tabular-nums leading-tight">
+                              {unit.value}
+                            </p>
+                            <p className="text-[10px] font-mono uppercase tracking-wider text-[#9ec8ff]/80">
+                              {unit.label}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -2381,11 +2455,13 @@ export function VotationsView({
 
                     <button
                       type="button"
-                      disabled={savingKey === 'toty-save'}
+                      disabled={savingKey === 'toty-save' || totyVotingClosed}
                       onClick={handleSaveToty}
-                      className="w-full py-3 rounded-full bg-gradient-to-r from-[#eef6ff] via-white to-[#cce3ff] hover:brightness-105 disabled:opacity-50 text-[#050a1f] text-xs font-semibold tracking-[0.01em] shadow-[0_14px_30px_-14px_rgba(184,220,255,0.75)] transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
+                      className="w-full py-3 rounded-full bg-gradient-to-r from-[#eef6ff] via-white to-[#cce3ff] hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed text-[#050a1f] text-xs font-semibold tracking-[0.01em] shadow-[0_14px_30px_-14px_rgba(184,220,255,0.75)] transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
                     >
-                      {savingKey === 'toty-save'
+                      {totyVotingClosed
+                        ? 'Votaciones TOTY cerradas'
+                        : savingKey === 'toty-save'
                         ? 'Guardando lote...'
                         : !currentUser
                         ? unsavedTotySubmissions.length > 1

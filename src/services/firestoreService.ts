@@ -156,6 +156,7 @@ export async function saveFirestoreSettings(settings: {
   lastSyncedSpreadsheetId?: string;
   lastSyncedAt?: string;
   homeFeatured?: HomeFeaturedConfig;
+  totyVotingDeadline?: string | null;
 }): Promise<void> {
   await tursoRequest('/settings', {
     method: 'PUT',
@@ -563,14 +564,17 @@ export async function fetchPublicTotyConfigAndOwnBallot(
 ): Promise<{
   config: DisciplineTotyConfig | null;
   ownBallot: TotyBallotRecord | null;
+  totyVotingDeadline: string | null;
 }> {
   const res = await tursoRequest<{
     config: DisciplineTotyConfig | null;
     ownBallot: TotyBallotRecord | null;
+    totyVotingDeadline?: string | null;
   }>(`/toty/public/${encodeURIComponent(disciplineId)}`);
   return {
     config: res.config ?? null,
     ownBallot: res.ownBallot ?? null,
+    totyVotingDeadline: res.totyVotingDeadline ?? null,
   };
 }
 

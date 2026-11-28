@@ -24,6 +24,7 @@ import {
   stripPlayerPii,
   stripTeamPrivateFields,
 } from '../src/domain/tursoHelpers.ts';
+import { isTotyVotingClosed, parseTotyDeadlineMs } from '../src/domain/totyCountdown.ts';
 import type {
   AppUserProfile,
   ChampionshipMvpVoteRecord,
@@ -813,13 +814,27 @@ export function createTursoRouter({
     }
     try {
       const authed = await tryOptionalAuth(req, verifyFirebaseIdToken);
-      const configRs = await client.execute({
-        sql: 'SELECT data_json FROM toty_configs WHERE discipline_id = ? LIMIT 1',
-        args: [discId],
-      });
+      const [configRs, settingsRs] = await Promise.all([
+        client.execute({
+          sql: 'SELECT data_json FROM toty_configs WHERE discipline_id = ? LIMIT 1',
+          args: [discId],
+        }),
+        client.execute({
+          sql: "SELECT data_json FROM settings WHERE id = 'tournament' LIMIT 1",
+          args: [],
+        }),
+      ]);
       const config =
         configRs.rows.length > 0
           ? safeParseJson<DisciplineTotyConfig | null>(configRs.rows[0].data_json, null)
+          : null;
+      const settingsObj =
+        settingsRs.rows.length > 0
+          ? safeParseJson<{ totyVotingDeadline?: string }>(settingsRs.rows[0].data_json, {})
+          : {};
+      const totyVotingDeadline =
+        typeof settingsObj.totyVotingDeadline === 'string' && settingsObj.totyVotingDeadline.trim()
+          ? settingsObj.totyVotingDeadline
           : null;
 
       let ownBallot: TotyBallotRecord | null = null;
@@ -834,7 +849,7 @@ export function createTursoRouter({
         }
       }
 
-      res.json({ config, ownBallot });
+      res.json({ config, ownBallot, totyVotingDeadline });
     } catch (err) {
       console.error('[Turso] GET /toty/public failed:', err);
       res.status(500).json({ error: 'No se pudo cargar la configuración de TOTYs.' });
@@ -1152,7 +1167,19 @@ export function createTursoRouter({
         existingRs.rows.length > 0
           ? safeParseJson<Record<string, unknown>>(existingRs.rows[0].data_json, {})
           : {};
-      const merged = { ...existing, ...(req.body || {}) };
+      const incomingBody = (req.body || {}) as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...existing, ...incomingBody };
+      if ('totyVotingDeadline' in incomingBody) {
+        const rawDeadline = incomingBody.totyVotingDeadline;
+        if (rawDeadline === null || rawDeadline === '') {
+          delete merged.totyVotingDeadline;
+        } else if (typeof rawDeadline === 'string' && parseTotyDeadlineMs(rawDeadline) !== null) {
+          merged.totyVotingDeadline = new Date(parseTotyDeadlineMs(rawDeadline)!).toISOString();
+        } else {
+          res.status(400).json({ error: 'Fecha y hora de cierre TOTY inválida.' });
+          return;
+        }
+      }
       const now = new Date().toISOString();
 
       await client.execute({
@@ -2172,6 +2199,23 @@ export function createTursoRouter({
       return;
     }
     try {
+      const settingsRs = await client.execute({
+        sql: 'SELECT data_json FROM settings WHERE id = ? LIMIT 1',
+        args: ['tournament'],
+      });
+      if (settingsRs.rows.length > 0) {
+        const currentSettings = safeParseJson<{ totyVotingDeadline?: string }>(
+          settingsRs.rows[0].data_json,
+          {}
+        );
+        if (isTotyVotingClosed(currentSettings.totyVotingDeadline)) {
+          res.status(403).json({
+            error: 'El plazo de votación para los TOTYs ha finalizado.',
+          });
+          return;
+        }
+      }
+
       const voterUid = req.firebaseUser.uid;
       const now = new Date().toISOString();
       const stmts: Array<{ sql: string; args: InValue[] }> = [];

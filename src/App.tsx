@@ -518,6 +518,9 @@ function AppContent() {
             core.settings?.homeFeatured !== undefined
               ? core.settings.homeFeatured
               : prev.homeFeatured,
+          totyVotingDeadline: core.settings
+            ? core.settings.totyVotingDeadline || undefined
+            : prev.totyVotingDeadline,
           driveUploadRootFolderId:
             core.settings?.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
           driveUploadRootFolderName:
@@ -1090,7 +1093,7 @@ function AppContent() {
 
     inFlightTotyDisciplinesRef.current.add(selectedDiscipline);
     fetchPublicTotyConfigAndOwnBallot(selectedDiscipline, currentUserUid ?? undefined)
-      .then(async ({ config, ownBallot }) => {
+      .then(async ({ config, ownBallot, totyVotingDeadline }) => {
         let resolvedBallot = ownBallot;
         // Automatic self-migration: if the signed-in voter still has their own ballot in local cache
         // from before the Turso migration and Turso doesn't have it yet, sync it to Turso automatically.
@@ -1117,6 +1120,11 @@ function AppContent() {
         });
         if (!cancelled) {
           applyDisciplineTotyToState(selectedDiscipline, ballotList, config);
+          setState((prev) => {
+            const nextDeadline = totyVotingDeadline || undefined;
+            if (prev.totyVotingDeadline === nextDeadline) return prev;
+            return { ...prev, totyVotingDeadline: nextDeadline };
+          });
           setTotyLastSyncAt(new Date().toISOString());
         }
 
@@ -1778,6 +1786,26 @@ function AppContent() {
       importedBallots: result.importedBallots,
       importedConfigs: result.importedConfigs,
     };
+  };
+
+  const handleSaveTotyDeadline = async (deadlineIso: string | null) => {
+    if (!isAdminOrModerator(currentUser)) {
+      throw new Error('Solo administración puede configurar el temporizador TOTY.');
+    }
+    const normalized = deadlineIso && deadlineIso.trim() ? deadlineIso.trim() : null;
+    try {
+      await saveFirestoreSettings({
+        temporada: stateRef.current.temporada,
+        totyVotingDeadline: normalized,
+      });
+      setState((prev) => ({
+        ...prev,
+        totyVotingDeadline: normalized ?? undefined,
+      }));
+    } catch (err) {
+      reportCloudError('Error guardando temporizador TOTY', err);
+      throw err;
+    }
   };
 
   const handleVoteChampionshipMvp = async (disciplineId: DisciplineId, player: Player) => {
@@ -2875,6 +2903,7 @@ function AppContent() {
                 totyRealtimeActive={totyRealtimeActive}
                 onSaveTotyConfig={handleSaveTotyConfig}
                 onResetTotyConfig={handleResetTotyConfig}
+                onSaveTotyDeadline={handleSaveTotyDeadline}
                 onMigrateTotyFromFirestore={handleMigrateTotyFromFirestore}
                 onImportLocalTotyBackup={handleImportLocalTotyBackup}
                 onSaveHomeFeatured={handleSaveHomeFeatured}

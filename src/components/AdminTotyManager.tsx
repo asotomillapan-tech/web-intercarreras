@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardCopy,
+  Clock,
   CloudDownload,
   Crown,
   LayoutGrid,
@@ -15,10 +16,17 @@ import {
   RotateCcw,
   Save,
   Sparkles,
+  Trash2,
   Trophy,
   Upload,
   Users,
 } from 'lucide-react';
+import {
+  computeTotyCountdown,
+  formatTotyDeadlineDisplay,
+  isoToLocalDateAndTime,
+  localDateAndTimeToIso,
+} from '../domain/totyCountdown';
 import { loadAllCachedTotyData } from '../services/totyIndexedCache';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import { formatDorsalLabel } from '../domain/attendanceEngine';
@@ -49,6 +57,7 @@ interface AdminTotyManagerProps {
   totyRealtimeActive: boolean;
   onSaveTotyConfig: (config: DisciplineTotyConfig) => Promise<void>;
   onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
+  onSaveTotyDeadline?: (deadlineIso: string | null) => Promise<void>;
   onMigrateTotyFromFirestore?: () => Promise<{
     migratedBallots: number;
     migratedConfigs: number;
@@ -74,6 +83,7 @@ export function AdminTotyManager({
   totyRealtimeActive,
   onSaveTotyConfig,
   onResetTotyConfig,
+  onSaveTotyDeadline,
   onMigrateTotyFromFirestore,
   onImportLocalTotyBackup,
 }: AdminTotyManagerProps) {
@@ -176,6 +186,96 @@ export function AdminTotyManager({
       });
     } finally {
       setImportingBackup(false);
+    }
+  };
+
+  // --- TOTY Voting Countdown Timer Config ---
+  const initialDeadlineParts = useMemo(
+    () => isoToLocalDateAndTime(state.totyVotingDeadline),
+    [state.totyVotingDeadline]
+  );
+  const [deadlineDate, setDeadlineDate] = useState<string>(initialDeadlineParts.date);
+  const [deadlineTime, setDeadlineTime] = useState<string>(initialDeadlineParts.time || '23:59');
+  const [savingDeadline, setSavingDeadline] = useState(false);
+  const [deadlineFeedback, setDeadlineFeedback] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const parts = isoToLocalDateAndTime(state.totyVotingDeadline);
+    setDeadlineDate(parts.date);
+    setDeadlineTime(parts.time || '23:59');
+  }, [state.totyVotingDeadline]);
+
+  useEffect(() => {
+    if (!state.totyVotingDeadline) return;
+    const id = window.setInterval(() => setNowTickMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [state.totyVotingDeadline]);
+
+  const activeCountdown = useMemo(
+    () => computeTotyCountdown(state.totyVotingDeadline, nowTickMs),
+    [state.totyVotingDeadline, nowTickMs]
+  );
+
+  const handleApplyDeadlinePreset = (hoursFromNow: number) => {
+    const targetIso = new Date(Date.now() + hoursFromNow * 3600 * 1000).toISOString();
+    const parts = isoToLocalDateAndTime(targetIso);
+    setDeadlineDate(parts.date);
+    setDeadlineTime(parts.time);
+    setDeadlineFeedback(null);
+  };
+
+  const handleSaveDeadlineClick = async () => {
+    if (!onSaveTotyDeadline || savingDeadline) return;
+    const iso = localDateAndTimeToIso(deadlineDate, deadlineTime);
+    if (!iso) {
+      setDeadlineFeedback({
+        tone: 'error',
+        text: 'Selecciona una fecha y hora válidas antes de guardar.',
+      });
+      return;
+    }
+    setSavingDeadline(true);
+    setDeadlineFeedback(null);
+    try {
+      await onSaveTotyDeadline(iso);
+      setNowTickMs(Date.now());
+      setDeadlineFeedback({
+        tone: 'success',
+        text: `Temporizador TOTY configurado para el ${formatTotyDeadlineDisplay(iso)}.`,
+      });
+    } catch (err) {
+      setDeadlineFeedback({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'No se pudo guardar el temporizador TOTY.',
+      });
+    } finally {
+      setSavingDeadline(false);
+    }
+  };
+
+  const handleClearDeadlineClick = async () => {
+    if (!onSaveTotyDeadline || savingDeadline) return;
+    setSavingDeadline(true);
+    setDeadlineFeedback(null);
+    try {
+      await onSaveTotyDeadline(null);
+      setDeadlineDate('');
+      setDeadlineTime('23:59');
+      setDeadlineFeedback({
+        tone: 'success',
+        text: 'Temporizador eliminado. Las votaciones TOTY quedan abiertas sin límite de tiempo.',
+      });
+    } catch (err) {
+      setDeadlineFeedback({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'No se pudo quitar el temporizador TOTY.',
+      });
+    } finally {
+      setSavingDeadline(false);
     }
   };
 
@@ -532,6 +632,148 @@ export function AdminTotyManager({
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               )}
               <span>{migrationBanner.text}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Configurable TOTY Voting Countdown Timer */}
+      {onSaveTotyDeadline && (
+        <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[#a5b0ff]" />
+                <h3 className="text-sm font-medium text-white">
+                  Temporizador de votaciones TOTY
+                </h3>
+              </div>
+              <p className="text-[11px] text-zinc-400">
+                Define la fecha y hora exacta de cierre. Se muestra en vivo en la sección TOTYs y bloquea nuevos envíos al llegar a cero.
+              </p>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2 text-xs font-mono">
+              {activeCountdown.configured ? (
+                activeCountdown.expired ? (
+                  <span className="px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-200">
+                    Plazo cerrado · {formatTotyDeadlineDisplay(state.totyVotingDeadline)}
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 tabular-nums">
+                    Restan {activeCountdown.days}d {String(activeCountdown.hours).padStart(2, '0')}h{' '}
+                    {String(activeCountdown.minutes).padStart(2, '0')}m{' '}
+                    {String(activeCountdown.seconds).padStart(2, '0')}s
+                  </span>
+                )
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-zinc-400">
+                  Sin límite configurado
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+            <div className="sm:col-span-4 space-y-1.5">
+              <label
+                htmlFor="toty-deadline-date"
+                className="block text-[11px] uppercase tracking-wider text-zinc-400"
+              >
+                Fecha de cierre
+              </label>
+              <input
+                id="toty-deadline-date"
+                type="date"
+                value={deadlineDate}
+                onChange={(e) => {
+                  setDeadlineDate(e.target.value);
+                  setDeadlineFeedback(null);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-[#0b0b10] border border-white/[0.12] text-white focus:border-[#707ef9] focus:outline-none [color-scheme:dark]"
+              />
+            </div>
+
+            <div className="sm:col-span-3 space-y-1.5">
+              <label
+                htmlFor="toty-deadline-time"
+                className="block text-[11px] uppercase tracking-wider text-zinc-400"
+              >
+                Hora de cierre
+              </label>
+              <input
+                id="toty-deadline-time"
+                type="time"
+                value={deadlineTime}
+                onChange={(e) => {
+                  setDeadlineTime(e.target.value);
+                  setDeadlineFeedback(null);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-[#0b0b10] border border-white/[0.12] text-white focus:border-[#707ef9] focus:outline-none [color-scheme:dark]"
+              />
+            </div>
+
+            <div className="sm:col-span-5 flex flex-wrap items-center gap-2 sm:justify-end">
+              <button
+                type="button"
+                onClick={handleSaveDeadlineClick}
+                disabled={savingDeadline || !deadlineDate}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium bg-white text-[#050507] hover:bg-zinc-200 disabled:opacity-45 transition-colors cursor-pointer"
+              >
+                {savingDeadline ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>Guardar temporizador</span>
+              </button>
+
+              {state.totyVotingDeadline && (
+                <button
+                  type="button"
+                  onClick={handleClearDeadlineClick}
+                  disabled={savingDeadline}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium border border-white/[0.12] bg-white/[0.04] text-zinc-300 hover:text-white hover:bg-white/[0.09] disabled:opacity-45 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Quitar</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-white/[0.06]">
+            <span className="text-[11px] text-zinc-500">Atajos rápidos:</span>
+            {[
+              { label: '+24 horas', hours: 24 },
+              { label: '+3 días', hours: 72 },
+              { label: '+7 días', hours: 168 },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => handleApplyDeadlinePreset(preset.hours)}
+                className="px-2.5 py-1 rounded-full text-[11px] text-zinc-300 bg-white/[0.04] border border-white/[0.08] hover:border-[#707ef9]/50 hover:text-white transition-colors cursor-pointer"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {deadlineFeedback && (
+            <div
+              className={`rounded-xl px-3.5 py-2.5 text-xs flex items-start gap-2 border ${
+                deadlineFeedback.tone === 'success'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                  : 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+              }`}
+            >
+              {deadlineFeedback.tone === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
+              <span>{deadlineFeedback.text}</span>
             </div>
           )}
         </div>

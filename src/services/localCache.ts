@@ -65,6 +65,7 @@ export function sanitizePublicStateForCache(state: Partial<TournamentState>): Pa
     positionAwardVotes: state.positionAwardVotes,
     totyBallots: state.totyBallots,
     totyConfigs: state.totyConfigs,
+    totyVotingDeadline: state.totyVotingDeadline,
     photos: state.photos?.slice(0, 80).map((ph) => ({
       ...ph,
       imageUrl: ph.imageUrl.startsWith('data:') ? '' : ph.imageUrl,

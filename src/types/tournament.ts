@@ -596,6 +596,8 @@ export interface TournamentState {
   positionAwardVotes: PositionAwardVoteRecord[];
   totyBallots: TotyBallotRecord[];
   totyConfigs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+  /** Optional ISO-8601 closing timestamp for TOTY voting countdown across all disciplines. */
+  totyVotingDeadline?: string;
   photos: PhotoEntry[];
   news: NewsArticle[];
   leyendasLeaderboard: LeyendasLeaderboardEntry[];
