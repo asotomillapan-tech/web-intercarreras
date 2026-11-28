@@ -181,9 +181,9 @@ export function SportScoreboard({
             surface="dark"
             className="hidden sm:flex"
           />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="font-display text-base sm:text-xl font-bold uppercase leading-tight break-words [overflow-wrap:anywhere] min-w-0">
                 {homeName}
               </p>
               {mode === 'live' && sportType === 'voleibol' && liveState.servingSide === 'home' && (
@@ -268,8 +268,8 @@ export function SportScoreboard({
 
         {/* Away Side */}
         <div className="flex items-center justify-end gap-3 min-w-0 text-right">
-          <div className="min-w-0">
-            <div className="flex items-center justify-end gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-end gap-2 min-w-0">
               {mode === 'live' && sportType === 'voleibol' && liveState.servingSide === 'away' && (
                 <span
                   title="Saque activo Visita"
@@ -287,7 +287,7 @@ export function SportScoreboard({
                   POS ►
                 </span>
               )}
-              <p className="font-display text-lg sm:text-2xl font-bold uppercase leading-tight break-words">
+              <p className="font-display text-base sm:text-xl font-bold uppercase leading-tight break-words [overflow-wrap:anywhere] min-w-0">
                 {awayName}
               </p>
             </div>

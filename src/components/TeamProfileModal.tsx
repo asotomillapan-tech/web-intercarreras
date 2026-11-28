@@ -40,6 +40,7 @@ import type {
 } from '../types/tournament';
 import { MatchFilterBar } from './MatchFilterBar';
 import { EDITORIAL_EASE } from './MotionPrimitives';
+import { ShareEntityLinkButton } from './ShareEntityLinkButton';
 import { TeamCrest } from './TeamCrest';
 
 interface TeamProfileModalProps {
@@ -258,6 +259,12 @@ export function TeamProfileModal({
             </div>
 
             <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
+              <ShareEntityLinkButton
+                entityType="team"
+                entityId={activeTeam.id}
+                shareTitle={`${activeTeam.nombre} · Campeonato Intercarreras UFRO`}
+                shareText={`Mira el plantel y estadísticas de ${activeTeam.nombre} en el Campeonato Intercarreras UFRO.`}
+              />
               <button
                 type="button"
                 onClick={() => onToggleFavoriteTeam(activeTeam.id)}

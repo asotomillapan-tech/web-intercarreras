@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react';
 import { LOGO_LIGHT_SVG } from '../data/ufroSeed';
 import { getSectionPath, isPrimarySpaNavigationClick, type NavSection } from '../domain/navigationRoutes';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface FooterProps {
   onNavigate: (section: NavSection) => void;
@@ -37,6 +38,9 @@ export function Footer({ onNavigate, hasOpenRegistrations = true }: FooterProps)
             <p className="text-sm text-zinc-500 max-w-sm leading-relaxed">
               Universidad de La Frontera, Temuco. Fútbol 7, Básquetbol y Voleibol oficial.
             </p>
+            <div className="pt-1">
+              <PWAInstallButton variant="footer" />
+            </div>
           </div>
 
           <div className="md:col-span-3 space-y-3">

@@ -35,6 +35,7 @@ import type {
   Team,
 } from '../types/tournament';
 import { EDITORIAL_EASE } from './MotionPrimitives';
+import { ShareEntityLinkButton } from './ShareEntityLinkButton';
 import { SportScoreboard } from './SportScoreboard';
 
 interface MatchMvpModalProps {
@@ -159,14 +160,22 @@ export function MatchMvpModal({
               </h2>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Cerrar detalle del encuentro"
-              className="w-9 h-9 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <ShareEntityLinkButton
+                entityType="match"
+                entityId={match.id}
+                shareTitle={`${homeTeam?.nombre ?? 'Local'} vs ${awayTeam?.nombre ?? 'Visita'} · Campeonato Intercarreras UFRO`}
+                shareText={`Revisa el marcador, detalles y votación POTM de ${homeTeam?.nombre ?? 'Local'} vs ${awayTeam?.nombre ?? 'Visita'}.`}
+              />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Cerrar detalle del encuentro"
+                className="w-9 h-9 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {revealData ? (

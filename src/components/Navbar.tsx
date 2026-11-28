@@ -18,6 +18,7 @@ import {
 import { getDelegateTransferActionRole } from '../domain/transfersEngine';
 import type { AppUserProfile, Match, TournamentState } from '../types/tournament';
 import { EDITORIAL_EASE } from './MotionPrimitives';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export type { NavSection };
 
@@ -156,8 +157,9 @@ export function Navbar({
           })}
         </nav>
 
-        {/* Right Controls: Notifications + Account / Login + Panel */}
+        {/* Right Controls: Install PWA + Notifications + Account / Login + Panel */}
         <div className="flex items-center gap-2 shrink-0">
+          <PWAInstallButton variant="navbar" />
           {currentUser && (
             <div className="relative">
               <button
@@ -332,6 +334,7 @@ export function Navbar({
               })}
 
               <div className="pt-3 mt-2 space-y-2 border-t border-white/[0.08]">
+                <PWAInstallButton variant="mobile-menu" />
                 {currentUser ? (
                   <>
                     <a

@@ -84,6 +84,9 @@ import { LeyendasPlayoffGauntlet as LeyendasPlayoffGauntletView } from './Leyend
 import { LeyendasPosterModal } from './LeyendasPosterModal';
 import { LeyendasTrophyIcon } from './LeyendasTrophyIcon';
 import { TeamCrest } from './TeamCrest';
+import { LeyendasCreateScreen, type LocalHofEntry } from './leyendas/LeyendasCreateScreen';
+import { LeyendasTryoutsScreen } from './leyendas/LeyendasTryoutsScreen';
+import { LeyendasWeeklyRankingSection } from './leyendas/LeyendasWeeklyRankingSection';
 
 const LOCAL_HOF_KEY = 'ufro_leyendas_hof_v1';
 
@@ -108,18 +111,7 @@ type SemesterPhase =
   | 'TRANSFER'
   | 'POSTGRAD';
 
-interface LocalHofEntry {
-  id: string;
-  playerName: string;
-  career: string;
-  sportKey: LeyendasSportKey;
-  maxOvr: number;
-  score: number;
-  titlesCount: number;
-  legacyTitle: string;
-  finalTeam: string;
-  savedAt: string;
-}
+
 
 interface OvrFeedbackToast {
   id: number;
@@ -917,467 +909,45 @@ export function LeyendasGame({
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-10">
         {/* ==================== STEP 1A: CHARACTER CREATION ==================== */}
         {screen === 'create' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            <div className="lg:col-span-7 rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 sm:p-8 space-y-6">
-              <div className="border-b border-white/[0.08] pb-5 space-y-1.5">
-                <p className="text-xs text-[#a5b0ff]">Paso 1 de 2 · Ficha del mechón</p>
-                <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.03em] text-white">
-                  Crea tu jugador{' '}
-                  <span className="font-editorial text-[#c8ceff]">universitario</span>
-                </h2>
-                <p className="text-sm text-white/60 leading-relaxed">
-                  Elige tu deporte, rama, posición y carrera UFRO. El techo de 99 OVR ahora exige
-                  constancia real, decisiones difíciles a medio semestre y nervios de acero en playoffs.
-                </p>
-              </div>
-
-              {creationError && (
-                <div
-                  role="alert"
-                  className="rounded-2xl bg-rose-500/[0.1] border border-rose-400/35 px-4 py-3 text-xs text-rose-200"
-                >
-                  {creationError}
-                </div>
-              )}
-
-              {/* Name + Random Button */}
-              <div className="space-y-2">
-                <label
-                  htmlFor="leyendas-player-name"
-                  className="block text-xs font-medium text-white/75"
-                >
-                  Nombre y apellido
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    id="leyendas-player-name"
-                    type="text"
-                    maxLength={60}
-                    value={playerName}
-                    onChange={(e) => {
-                      setPlayerName(e.target.value);
-                      setCreationError(null);
-                    }}
-                    placeholder="Ej: Lucas Morales"
-                    className="flex-1 rounded-xl bg-[#111117] border border-white/[0.1] px-4 py-3 text-sm text-white placeholder:text-white/35 focus:outline-none focus:border-[#707ef9]"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRandomName}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.1] text-xs font-medium text-white/85 transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 text-[#a5b0ff]" />
-                    <span>Aleatorio</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Sport Selector */}
-              <div className="space-y-2">
-                <span className="block text-xs font-medium text-white/75">
-                  Deporte oficial UFRO
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {(['futbol', 'basquet', 'voley'] as LeyendasSportKey[]).map((key) => {
-                    const active = sportKey === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setSportKey(key)}
-                        className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
-                          active
-                            ? 'bg-[#707ef9]/[0.16] text-white border-[#707ef9]/70'
-                            : 'bg-[#111117] text-white/80 border-white/[0.08] hover:border-white/25'
-                        }`}
-                      >
-                        <p className="text-base font-medium text-white">
-                          {SPORT_CONFIG[key].name}
-                        </p>
-                        <p className="text-xs text-white/50 mt-0.5">
-                          {key === 'futbol'
-                            ? '3 Divisiones H · Damas'
-                            : key === 'basquet'
-                            ? '5x5 H · 3x3 Damas'
-                            : 'Varones y Damas'}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Branch Selector */}
-              <div className="space-y-2">
-                <span className="block text-xs font-medium text-white/75">Rama</span>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {(
-                    [
-                      { id: 'hombre', label: 'Hombres' },
-                      { id: 'mujer', label: 'Mujeres' },
-                    ] as const
-                  ).map((item) => {
-                    const active = branch === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setBranch(item.id)}
-                        className={`px-4 py-3 rounded-xl border text-sm font-medium transition-all cursor-pointer ${
-                          active
-                            ? 'bg-[#707ef9] text-white border-[#707ef9]'
-                            : 'bg-[#111117] text-white/75 border-white/[0.08] hover:border-white/25 hover:text-white'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Position Selector */}
-              <div className="space-y-2">
-                <span className="block text-xs font-medium text-white/75">
-                  Posición en cancha
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {sportPositions.map((p) => {
-                    const active = pos === p.code;
-                    return (
-                      <button
-                        key={p.code}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setPos(p.code)}
-                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                          active
-                            ? 'bg-[#707ef9]/[0.16] text-white border-[#707ef9]/70'
-                            : 'bg-[#111117] text-white/80 border-white/[0.08] hover:border-white/25'
-                        }`}
-                      >
-                        <p className="text-xs font-semibold text-[#a5b0ff]">{p.code}</p>
-                        <p className="text-sm font-medium text-white mt-0.5">{p.label}</p>
-                        <p className="text-[11px] text-white/45 mt-1 leading-snug">
-                          {p.shortDesc}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* UFRO Career Selector */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <label htmlFor="leyendas-career" className="text-xs font-medium text-white/75">
-                    Carrera UFRO
-                  </label>
-                  <span className="text-xs text-[#a5b0ff] tabular-nums">
-                    {inferCareerYears(selectedCareer)} años ({inferCareerYears(selectedCareer) * 2}{' '}
-                    semestres)
-                  </span>
-                </div>
-                <select
-                  id="leyendas-career"
-                  value={selectedCareer}
-                  onChange={(e) => setSelectedCareer(e.target.value)}
-                  className="w-full rounded-xl bg-[#111117] border border-white/[0.1] px-4 py-3 text-sm text-white focus:outline-none focus:border-[#707ef9]"
-                >
-                  {UFRO_CAREERS.map((c) => (
-                    <option key={c.carrera} value={c.carrera} className="bg-[#0c0c10] text-white">
-                      {c.carrera} ({inferCareerYears(c.carrera)} años)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Primary CTAs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  id="btn-leyendas-tryouts"
-                  onClick={handleGoToTryouts}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full bg-[#707ef9] hover:bg-[#5e6df5] text-white text-sm font-medium transition-colors cursor-pointer"
-                >
-                  <span>Ir a pruebas mechonas</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  id="btn-leyendas-random-debut"
-                  onClick={handleQuickRandomDebut}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-full bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] text-white text-sm font-medium transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4 text-[#a5b0ff]" />
-                  <span>Debut aleatorio</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Right Column: How it works + Local Hall of Fame */}
-            <div className="lg:col-span-5 space-y-6">
-              <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 sm:p-7 space-y-5">
-                <div className="space-y-1">
-                  <p className="text-xs text-[#a5b0ff]">Novedades de temporada</p>
-                  <h3 className="text-2xl font-medium tracking-[-0.03em] text-white">
-                    De mechón a{' '}
-                    <span className="font-editorial text-[#c8ceff]">leyenda real</span>
-                  </h3>
-                </div>
-                <ul className="space-y-4 text-sm text-white/65 leading-relaxed">
-                  <li className="flex items-start gap-3">
-                    <Flame className="w-4 h-4 text-[#a5b0ff] shrink-0 mt-1" />
-                    <span>
-                      <strong className="text-white font-medium">Progresión OVR exigente:</strong>{' '}
-                      Cada jugada suma XP hacia tu siguiente nivel. Superar los 90 y rozar el 99
-                      OVR ahora es una verdadera hazaña universitaria.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <Compass className="w-4 h-4 text-[#a5b0ff] shrink-0 mt-1" />
-                    <span>
-                      <strong className="text-white font-medium">
-                        Cruces de medio semestre:
-                      </strong>{' '}
-                      Decide si te quedas peleando el pase de fase con tu carrera o aceptas la
-                      citación de la Selección UFRO.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <Crown className="w-4 h-4 text-amber-300 shrink-0 mt-1" />
-                    <span>
-                      <strong className="text-white font-medium">
-                        Rutas épicas de playoffs:
-                      </strong>{' '}
-                      En pocas ocasiones especiales jugarás la última pelota consecutiva desde
-                      Octavos o Cuartos hasta la Gran Final.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <Shield className="w-4 h-4 text-[#a5b0ff] shrink-0 mt-1" />
-                    <span>
-                      <strong className="text-white font-medium">
-                        Clubes reales y postgrado:
-                      </strong>{' '}
-                      Equipos oficiales Intercarreras, Beca Deportiva, Magíster (+2 años) y
-                      Doctorado (+3 años).
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Local Hall of Fame Top 5 */}
-              <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 sm:p-7 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/[0.08] pb-3.5">
-                  <div className="flex items-center gap-2">
-                    <Crown className="w-4 h-4 text-amber-300" />
-                    <h3 className="text-lg font-medium text-white">Salón de la Fama local</h3>
-                  </div>
-                  <span className="text-xs text-white/45">Top 5</span>
-                </div>
-
-                {localHof.length === 0 ? (
-                  <p className="text-xs text-white/50 leading-relaxed">
-                    Completa tu primera carrera para guardar tus mejores registros en este
-                    dispositivo.
-                  </p>
-                ) : (
-                  <div className="divide-y divide-white/[0.06]">
-                    {localHof.map((item, idx) => (
-                      <div
-                        key={item.id}
-                        className="py-3 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium text-white truncate">
-                            #{idx + 1} {item.playerName}
-                          </p>
-                          <p className="text-white/45 truncate mt-0.5">
-                            {item.legacyTitle} · {item.finalTeam}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0 tabular-nums">
-                          <p className="text-base font-semibold text-[#c8ceff]">
-                            {item.score.toLocaleString('es-CL')} pts
-                          </p>
-                          <p className="text-[11px] text-white/45">
-                            {item.maxOvr} OVR · {item.titlesCount} copas
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <LeyendasCreateScreen
+            playerName={playerName}
+            sportKey={sportKey}
+            branch={branch}
+            pos={pos}
+            selectedCareer={selectedCareer}
+            creationError={creationError}
+            sportPositions={sportPositions}
+            localHof={localHof}
+            onPlayerNameChange={setPlayerName}
+            onClearError={() => setCreationError(null)}
+            onRandomName={handleRandomName}
+            onSelectSport={setSportKey}
+            onSelectBranch={setBranch}
+            onSelectPos={setPos}
+            onSelectCareer={setSelectedCareer}
+            onGoToTryouts={handleGoToTryouts}
+            onQuickRandomDebut={handleQuickRandomDebut}
+          />
         )}
 
         {/* ==================== STEP 1B: PRUEBAS MECHONAS ==================== */}
-        {screen === 'tryouts' &&
-          (() => {
-            const allCareerRejected =
-              careerTryoutClubs.length > 0 &&
-              careerTryoutClubs.every((c) => rejectedClubIds.includes(c.id));
-            const activeList = showOtherCampusTryouts ? otherCampusClubs : careerTryoutClubs;
-
-            return (
-              <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 sm:p-8 space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
-                  <div className="space-y-1">
-                    <p className="text-xs text-[#a5b0ff]">
-                      Paso 2 de 2 · Pruebas mechonas {SPORT_CONFIG[sportKey].name}
-                    </p>
-                    <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.03em] text-white">
-                      Equipos de{' '}
-                      <span className="font-editorial text-[#c8ceff]">{selectedCareer}</span>
-                    </h2>
-                    <p className="text-sm text-white/60">
-                      Postulas como <strong className="text-white font-medium">{playerName}</strong>{' '}
-                      ({pos} · OVR inicial {previewOvr}). Se muestran todos los planteles de tu
-                      carrera ({careerTryoutClubs.length}).
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setScreen('create')}
-                    className="text-xs text-white/65 hover:text-white transition-colors cursor-pointer self-start sm:self-auto"
-                  >
-                    ← Cambiar ficha
-                  </button>
-                </div>
-
-                {/* Career vs Other Campus Tabs */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="inline-flex rounded-full bg-[#111117] border border-white/[0.08] p-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowOtherCampusTryouts(false)}
-                      className={`px-4 py-2 rounded-full text-xs font-medium cursor-pointer transition-colors ${
-                        !showOtherCampusTryouts
-                          ? 'bg-[#707ef9] text-white'
-                          : 'text-white/60 hover:text-white'
-                      }`}
-                    >
-                      Tu carrera ({careerTryoutClubs.length})
-                    </button>
-                    {otherCampusClubs.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowOtherCampusTryouts(true)}
-                        className={`px-4 py-2 rounded-full text-xs font-medium cursor-pointer transition-colors ${
-                          showOtherCampusTryouts
-                            ? 'bg-[#707ef9] text-white'
-                            : 'text-white/60 hover:text-white'
-                        }`}
-                      >
-                        Otros clubes del campus ({otherCampusClubs.length})
-                      </button>
-                    )}
-                  </div>
-
-                  {allCareerRejected && !showOtherCampusTryouts && (
-                    <span className="text-xs font-medium text-emerald-300">
-                      Repesca desbloqueada: 100% de cupo en tu carrera
-                    </span>
-                  )}
-                </div>
-
-                {tryoutNotice && (
-                  <div
-                    role="status"
-                    className="rounded-2xl bg-amber-500/[0.09] border border-amber-400/35 p-4 text-xs text-amber-200 leading-relaxed"
-                  >
-                    {tryoutNotice}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {activeList.map((club, idx) => {
-                    const isOwn =
-                      club.carrera.toLowerCase().trim() === selectedCareer.toLowerCase().trim();
-                    const wasRejected = rejectedClubIds.includes(club.id);
-                    const canRepesca = wasRejected && allCareerRejected && !showOtherCampusTryouts;
-                    const chance = canRepesca
-                      ? 100
-                      : getTrialAcceptanceChance(previewOvr, club.ovr, isOwn);
-
-                    return (
-                      <div
-                        key={club.id}
-                        style={{ animationDelay: `${Math.min(idx * 45, 360)}ms` }}
-                        className={`leyendas-card-deal rounded-2xl border p-5 flex flex-col justify-between gap-4 transition-colors ${
-                          wasRejected && !canRepesca
-                            ? 'bg-[#09090d] border-white/[0.05] opacity-60'
-                            : 'bg-[#111117] border-white/[0.08] hover:border-[#707ef9]/55'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <TeamCrest
-                              escudo={club.escudo}
-                              sigla={club.sigla}
-                              nombre={club.name}
-                              size="md"
-                            />
-                            <div className="min-w-0">
-                              <p className="text-xs text-white/50 truncate">
-                                <span className="text-[#a5b0ff] font-medium">{club.div}</span>
-                                {club.isRealTeam && ' · Equipo real UFRO'}
-                                {isOwn && ' · Tu carrera'}
-                              </p>
-                              <h3 className="text-lg font-medium text-white truncate mt-0.5">
-                                {club.name}
-                              </h3>
-                              <p className="text-xs text-white/45 truncate">{club.carrera}</p>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl bg-[#050507] border border-white/[0.08] px-3 py-2 text-center shrink-0">
-                            <p className="text-[10px] text-white/45">OVR</p>
-                            <p className="text-xl font-semibold text-white tabular-nums leading-tight">
-                              {club.ovr}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3 pt-3.5 border-t border-white/[0.06]">
-                          <span className="text-xs text-white/55 tabular-nums">
-                            {canRepesca
-                              ? 'Repesca mechona garantizada (100%)'
-                              : wasRejected
-                              ? 'Sin cupo en esta prueba'
-                              : `Probabilidad de quedar: ${chance}%`}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={wasRejected && !canRepesca}
-                            onClick={() => handleAttemptTryout(club, canRepesca)}
-                            className={`px-4 py-2 rounded-full text-xs font-medium transition-colors ${
-                              wasRejected && !canRepesca
-                                ? 'bg-white/[0.06] text-white/35 cursor-not-allowed'
-                                : canRepesca
-                                ? 'bg-emerald-500 hover:bg-emerald-400 text-[#050507] cursor-pointer'
-                                : 'bg-[#707ef9] hover:bg-[#5e6df5] text-white cursor-pointer'
-                            }`}
-                          >
-                            {canRepesca
-                              ? 'Firmar repesca'
-                              : wasRejected
-                              ? 'No seleccionado'
-                              : 'Probarme'}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
+        {screen === 'tryouts' && (
+          <LeyendasTryoutsScreen
+            sportKey={sportKey}
+            selectedCareer={selectedCareer}
+            playerName={playerName}
+            pos={pos}
+            previewOvr={previewOvr}
+            careerTryoutClubs={careerTryoutClubs}
+            otherCampusClubs={otherCampusClubs}
+            showOtherCampusTryouts={showOtherCampusTryouts}
+            rejectedClubIds={rejectedClubIds}
+            tryoutNotice={tryoutNotice}
+            onBackToCreate={() => setScreen('create')}
+            onToggleOtherCampus={setShowOtherCampusTryouts}
+            onAttemptTryout={handleAttemptTryout}
+          />
+        )}
 
         {/* ==================== STEP 2 & 3: ACTIVE CAREER OR RETIRED LEGACY ==================== */}
         {screen === 'career' && career && (
@@ -2485,194 +2055,20 @@ export function LeyendasGame({
           </div>
         )}
 
-        {/* ==================== TOP GLOBAL SEMANAL (FIRESTORE) ==================== */}
-        <section className="rounded-3xl bg-[#0c0c10] border border-white/[0.08] p-6 sm:p-8 space-y-6">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
-            <div className="min-w-0 space-y-1">
-              <p className="text-xs text-[#a5b0ff]">Ranking semanal · {weekInfo.label}</p>
-              <h2 className="text-2xl sm:text-3xl font-medium tracking-[-0.03em] text-white">
-                Top global{' '}
-                <span className="font-editorial text-[#c8ceff]">Leyendas</span>
-              </h2>
-              <p className="text-sm text-white/55">
-                Las mejores carreras completadas esta semana. Selecciona cualquier fila para
-                inspeccionar su palmarés completo.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap lg:flex-nowrap items-center gap-1 rounded-full bg-[#111117] border border-white/[0.08] p-1 shrink-0">
-              {(
-                [
-                  { id: 'general', label: 'General' },
-                  { id: 'futbol-h', label: 'F7 Hombres' },
-                  { id: 'futbol-m', label: 'F7 Mujeres' },
-                  { id: 'basquet', label: 'Básquet' },
-                  { id: 'voley', label: 'Voleibol' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setRankingTab(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap cursor-pointer transition-colors ${
-                    rankingTab === tab.id
-                      ? 'bg-[#707ef9] text-white'
-                      : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {weeklyRanking.length === 0 ? (
-            <div className="rounded-2xl border border-white/[0.06] bg-[#111117] p-10 text-center space-y-2">
-              <Medal className="w-7 h-7 text-[#a5b0ff] mx-auto" />
-              <p className="text-lg font-medium text-white">
-                Aún no hay carreras registradas esta semana
-              </p>
-              <p className="text-xs text-white/55 max-w-md mx-auto">
-                Completa una carrera en Leyendas y publícala con tu cuenta de Google para inaugurar
-                el Top Global de {weekInfo.label}.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/[0.08]">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-[#111117] border-b border-white/[0.08] text-white/50">
-                    <th className="py-3.5 px-4 w-12 font-medium">#</th>
-                    <th className="py-3.5 px-4 font-medium">Leyenda</th>
-                    <th className="py-3.5 px-4 hidden md:table-cell font-medium">
-                      Club final · Carrera
-                    </th>
-                    <th className="py-3.5 px-4 text-right font-medium tabular-nums">Max OVR</th>
-                    <th className="py-3.5 px-4 text-right font-medium tabular-nums">Títulos</th>
-                    <th className="py-3.5 px-4 text-right font-medium text-white tabular-nums">
-                      Puntaje
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.06]">
-                  {weeklyRanking.map((entry, idx) => (
-                    <tr
-                      key={entry.id}
-                      onClick={() => setInspectedEntry(entry)}
-                      className="hover:bg-white/[0.03] cursor-pointer transition-colors"
-                    >
-                      <td className="py-3.5 px-4 text-sm font-semibold tabular-nums text-[#a5b0ff]">
-                        {idx + 1}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <p className="font-medium text-white text-sm">{entry.playerName}</p>
-                        <p className="text-white/50 mt-0.5">{entry.legacyTitle}</p>
-                      </td>
-                      <td className="py-3.5 px-4 hidden md:table-cell text-white/60">
-                        <p className="font-medium text-white/90">{entry.finalTeam}</p>
-                        <p className="text-white/45 mt-0.5">
-                          {entry.career} · {SPORT_CONFIG[entry.sportKey].shortName} ({entry.pos})
-                        </p>
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-base font-semibold text-white tabular-nums">
-                        {entry.maxOvr}
-                      </td>
-                      <td className="py-3.5 px-4 text-right tabular-nums text-white/75">
-                        {entry.titlesCount}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-base font-semibold text-[#c8ceff] tabular-nums">
-                        {entry.score.toLocaleString('es-CL')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        {/* ==================== TOP GLOBAL SEMANAL ==================== */}
+        <LeyendasWeeklyRankingSection
+          weekLabel={weekInfo.label}
+          rankingTab={rankingTab}
+          weeklyRanking={weeklyRanking}
+          inspectedEntry={inspectedEntry}
+          onSelectTab={setRankingTab}
+          onInspectEntry={setInspectedEntry}
+        />
       </div>
 
       {/* Poster PNG Modal */}
       {showPoster && career && (
         <LeyendasPosterModal career={career} onClose={() => setShowPoster(false)} />
-      )}
-
-      {/* Global Ranking Career Inspector Modal */}
-      {inspectedEntry && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Detalle de carrera de ${inspectedEntry.playerName}`}
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div className="rounded-3xl bg-[#0c0c10] border border-white/[0.1] max-w-2xl w-full overflow-hidden my-auto">
-            <div className="px-6 py-5 border-b border-white/[0.08] flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs text-[#a5b0ff]">
-                  {inspectedEntry.legacyTitle} · {inspectedEntry.weekKey}
-                </p>
-                <h3 className="text-2xl font-medium tracking-[-0.03em] text-white mt-0.5">
-                  {inspectedEntry.playerName}
-                </h3>
-                <p className="text-xs text-white/60 mt-1 tabular-nums">
-                  {inspectedEntry.finalTeam} · {inspectedEntry.career} · Max OVR{' '}
-                  {inspectedEntry.maxOvr} · {inspectedEntry.score.toLocaleString('es-CL')} pts
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setInspectedEntry(null)}
-                aria-label="Cerrar detalle de carrera"
-                className="p-2 rounded-full bg-white/[0.04] hover:bg-white/[0.1] text-white/70 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-white/[0.08] bg-[#111117] p-4 space-y-2.5">
-                  <h4 className="text-sm font-medium text-white">
-                    Títulos ({inspectedEntry.trophies.length})
-                  </h4>
-                  {inspectedEntry.trophies.length === 0 ? (
-                    <p className="text-xs text-white/45">Sin títulos registrados.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {inspectedEntry.trophies.map((t) => (
-                        <div key={t.id} className="flex items-center gap-2 text-xs text-white/80">
-                          <LeyendasTrophyIcon title={t.title} kind="trophy" size="sm" />
-                          <span>
-                            <strong className="text-white font-medium">{t.title}</strong> ({t.year})
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-white/[0.08] bg-[#111117] p-4 space-y-2.5">
-                  <h4 className="text-sm font-medium text-white">
-                    Clubes ({inspectedEntry.stints.length})
-                  </h4>
-                  <div className="space-y-2 text-xs">
-                    {inspectedEntry.stints.map((s, idx) => (
-                      <div
-                        key={`${s.team}-${idx}`}
-                        className="flex items-center justify-between gap-2"
-                      >
-                        <span className="font-medium text-white/85">
-                          {s.team} ({s.div})
-                        </span>
-                        <span className="text-white/45 tabular-nums">{s.years}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

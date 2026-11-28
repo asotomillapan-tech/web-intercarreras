@@ -5,6 +5,7 @@ import { NEWS_CATEGORY_META, sanitizeSafeNewsUrl } from '../domain/newsFormatter
 import type { DisciplineId, NewsArticle } from '../types/tournament';
 import { EDITORIAL_EASE } from './MotionPrimitives';
 import { RichTextRenderer } from './RichTextRenderer';
+import { ShareEntityLinkButton } from './ShareEntityLinkButton';
 
 interface NewsArticleModalProps {
   article: NewsArticle | null;
@@ -64,14 +65,22 @@ export function NewsArticleModal({ article, onClose }: NewsArticleModalProps) {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Cerrar noticia"
-              className="w-9 h-9 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <ShareEntityLinkButton
+                entityType="news"
+                entityId={article.id}
+                shareTitle={`${article.title} · Campeonato Intercarreras UFRO`}
+                shareText={article.summary}
+              />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Cerrar noticia"
+                className="w-9 h-9 rounded-full bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.1] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <div className={`grid gap-8 items-center ${safeCover ? 'grid-cols-1 lg:grid-cols-12' : ''}`}>
