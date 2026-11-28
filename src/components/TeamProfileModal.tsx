@@ -30,6 +30,7 @@ import {
 } from '../domain/matchFilterEngine';
 import type {
   AppUserProfile,
+  DisciplineId,
   Match,
   MatchPhase,
   MatchStatus,
@@ -53,6 +54,7 @@ interface TeamProfileModalProps {
   onOpenMatchModal: (match: Match) => void;
   onInspectPlayer: (player: Player) => void;
   onAdminEditMatch?: (matchId: string) => void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 export function TeamProfileModal({
@@ -67,6 +69,7 @@ export function TeamProfileModal({
   onOpenMatchModal,
   onInspectPlayer,
   onAdminEditMatch,
+  onLoadTeamPlayers,
 }: TeamProfileModalProps) {
   const [activeTeamId, setActiveTeamId] = useState<string | null>(team?.id ?? null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | MatchStatus>('ALL');
@@ -94,6 +97,11 @@ export function TeamProfileModal({
     if (!activeTeamId) return team;
     return clubSquads.find((s) => s.id === activeTeamId) ?? team;
   }, [team, activeTeamId, clubSquads]);
+
+  useEffect(() => {
+    if (!activeTeam || !onLoadTeamPlayers) return;
+    void onLoadTeamPlayers(activeTeam.id, activeTeam.disciplineId);
+  }, [activeTeam?.id, activeTeam?.disciplineId, onLoadTeamPlayers]);
 
   const unifiedClubName = useMemo(() => {
     if (clubSquads.length <= 1) return activeTeam?.nombre ?? '';

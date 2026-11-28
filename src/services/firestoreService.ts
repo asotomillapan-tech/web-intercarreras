@@ -6,6 +6,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   query,
   serverTimestamp,
@@ -41,6 +42,10 @@ import {
   classifyFirestoreError,
   shouldEmitThrottledQuotaLog,
 } from '../domain/syncHealthEngine';
+import {
+  PLAYERS_PREVIEW_LIMIT,
+  buildFirestoreNameEqualityCandidates,
+} from '../domain/readOptimizationEngine';
 import type {
   AcademicLevel,
   AppUserProfile,
@@ -280,10 +285,9 @@ function mapTeamDoc(d: QueryDocumentSnapshot): Team {
   };
 }
 
-function mapPlayerPublicDoc(d: QueryDocumentSnapshot): Player {
-  const data = d.data();
+function mapPlayerPublicData(docId: string, data: Record<string, unknown>): Player {
   return {
-    id: String(data.id || d.id),
+    id: String(data.id || docId),
     teamId: String(data.teamId || ''),
     disciplineId: data.disciplineId as DisciplineId,
     dorsal: Number(data.dorsal) || 0,
@@ -303,6 +307,10 @@ function mapPlayerPublicDoc(d: QueryDocumentSnapshot): Player {
     esSeleccionadoUfro: Boolean(data.esSeleccionadoUfro),
     stats: sanitizeStats(data.stats as Partial<PlayerStats> | undefined),
   };
+}
+
+function mapPlayerPublicDoc(d: QueryDocumentSnapshot): Player {
+  return mapPlayerPublicData(d.id, d.data());
 }
 
 function mapMatchDoc(d: QueryDocumentSnapshot): Match {
@@ -2552,5 +2560,342 @@ export async function saveFirestoreLeyendasEntry(entry: LeyendasLeaderboardEntry
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
+
+// -----------------------------------------------------------------------------
+// Optimized Low-Read On-Demand Fetchers (Eliminates Eager Bulk Reads)
+// -----------------------------------------------------------------------------
+
+export interface CorePublicFetchReport {
+  settings?: Partial<TournamentState>;
+  configs?: Record<DisciplineId, DisciplineFormatConfig>;
+  teams?: Team[];
+  matches?: Match[];
+  settledStreams: PublicRealtimeStreamKey[];
+  errors: Array<{ stream: PublicRealtimeStreamKey; error: unknown }>;
+}
+
+/**
+ * Lightweight one-shot core boot fetch: loads ONLY settings (1 doc), discipline
+ * configs (8 docs), teams, and matches. Avoids opening 13 persistent onSnapshot
+ * listeners and NEVER downloads the full /players collection on initial page load.
+ */
+export async function fetchCorePublicTournamentSnapshot(): Promise<CorePublicFetchReport> {
+  const [settingsRes, configsRes, teamsRes, matchesRes] = await Promise.allSettled([
+    getDoc(doc(db, 'settings', 'tournament')),
+    getDocs(query(collection(db, 'configs'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'teams'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(query(collection(db, 'matches'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+  ]);
+
+  const report: CorePublicFetchReport = {
+    settledStreams: [],
+    errors: [],
+  };
+
+  if (settingsRes.status === 'fulfilled') {
+    report.settings = settingsRes.value.exists()
+      ? mapSettingsData(settingsRes.value.data() as Record<string, unknown>)
+      : {};
+    report.settledStreams.push('settings');
+  } else {
+    logFirestoreSnapshotError(settingsRes.reason, OperationType.GET, 'settings/tournament');
+    report.errors.push({ stream: 'settings', error: settingsRes.reason });
+  }
+
+  if (configsRes.status === 'fulfilled') {
+    if (!configsRes.value.empty) {
+      report.configs = mapConfigsDocs(configsRes.value.docs);
+    }
+    report.settledStreams.push('configs');
+  } else {
+    logFirestoreSnapshotError(configsRes.reason, OperationType.LIST, 'configs');
+    report.errors.push({ stream: 'configs', error: configsRes.reason });
+  }
+
+  if (teamsRes.status === 'fulfilled') {
+    report.teams = teamsRes.value.docs.map((d) => mapTeamDoc(d));
+    report.settledStreams.push('teams');
+  } else {
+    logFirestoreSnapshotError(teamsRes.reason, OperationType.LIST, 'teams');
+    report.errors.push({ stream: 'teams', error: teamsRes.reason });
+  }
+
+  if (matchesRes.status === 'fulfilled') {
+    report.matches = matchesRes.value.docs.map((d) => mapMatchDoc(d));
+    report.settledStreams.push('matches');
+  } else {
+    logFirestoreSnapshotError(matchesRes.reason, OperationType.LIST, 'matches');
+    report.errors.push({ stream: 'matches', error: matchesRes.reason });
+  }
+
+  return report;
+}
+
+/**
+ * Loads ONLY a small bounded preview of players (default 10 docs) for the initial
+ * /jugadores screen instead of reading the entire /players collection.
+ */
+export async function fetchPlayersPreview(
+  limitCount: number = PLAYERS_PREVIEW_LIMIT,
+  disciplineId?: DisciplineId
+): Promise<Player[]> {
+  const safeLimit = Math.max(1, Math.min(25, Math.trunc(limitCount)));
+  const q = disciplineId
+    ? query(
+        collection(db, 'players'),
+        where('disciplineId', '==', disciplineId),
+        limit(safeLimit)
+      )
+    : query(
+        collection(db, 'players'),
+        where('disciplineId', 'in', ALL_DISCIPLINE_IDS),
+        limit(safeLimit)
+      );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => mapPlayerPublicDoc(d));
+}
+
+/**
+ * Loads ONLY the roster of a single selected team using pure equality filters
+ * (requires ZERO composite indexes and satisfies firestore.rules discipline check).
+ */
+export async function fetchPlayersByTeam(
+  teamId: string,
+  disciplineId?: DisciplineId
+): Promise<Player[]> {
+  const cleanTeamId = teamId.trim();
+  if (!cleanTeamId) return [];
+  const q = disciplineId
+    ? query(
+        collection(db, 'players'),
+        where('disciplineId', '==', disciplineId),
+        where('teamId', '==', cleanTeamId),
+        limit(50)
+      )
+    : query(
+        collection(db, 'players'),
+        where('disciplineId', 'in', ALL_DISCIPLINE_IDS),
+        where('teamId', '==', cleanTeamId),
+        limit(50)
+      );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => mapPlayerPublicDoc(d));
+}
+
+/**
+ * Fetches a single player document by ID (1 Firestore read).
+ */
+export async function fetchPlayerById(playerId: string): Promise<Player | null> {
+  const cleanId = playerId.trim();
+  if (!cleanId) return null;
+  const snap = await getDoc(doc(db, 'players', cleanId));
+  if (!snap.exists()) return null;
+  return mapPlayerPublicData(snap.id, snap.data() as Record<string, unknown>);
+}
+
+/**
+ * Targeted, index-free player name search in Firestore using bounded equality
+ * lookups on nombre and apellidoPaterno (never downloads the full /players collection).
+ */
+export async function searchPlayersInFirestoreByName(
+  rawQuery: string,
+  disciplineId?: DisciplineId
+): Promise<Player[]> {
+  const candidates = buildFirestoreNameEqualityCandidates(rawQuery);
+  if (candidates.length === 0) return [];
+
+  const discFilter = disciplineId
+    ? where('disciplineId', '==', disciplineId)
+    : where('disciplineId', 'in', ALL_DISCIPLINE_IDS);
+
+  const queries = candidates.flatMap((token) => [
+    getDocs(query(collection(db, 'players'), discFilter, where('nombre', '==', token), limit(12))),
+    getDocs(
+      query(collection(db, 'players'), discFilter, where('apellidoPaterno', '==', token), limit(12))
+    ),
+  ]);
+
+  const settled = await Promise.allSettled(queries);
+  const byId = new Map<string, Player>();
+  for (const res of settled) {
+    if (res.status !== 'fulfilled') continue;
+    for (const d of res.value.docs) {
+      const mapped = mapPlayerPublicDoc(d);
+      byId.set(mapped.id, mapped);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+/**
+ * Explicit on-demand full roster fetch reserved strictly for authenticated Admin/Moderator
+ * bulk tools (AdminPlayersManager, MasterSheetsPanel, AdminTotyManager).
+ */
+export async function fetchAllPlayersForAdmin(): Promise<Player[]> {
+  const snap = await getDocs(
+    query(collection(db, 'players'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))
+  );
+  return snap.docs.map((d) => mapPlayerPublicDoc(d));
+}
+
+/**
+ * Public write-only TOTY helper: reads ONLY the formation config doc (1 read) and,
+ * when signed in, ONLY the caller's own ballot doc (1 read). Performs ZERO reads of
+ * other users' ballots so live TOTY tallying is completely omitted on public /votaciones.
+ */
+export async function fetchPublicTotyConfigAndOwnBallot(
+  disciplineId: DisciplineId,
+  voterUid?: string | null
+): Promise<{
+  config: DisciplineTotyConfig | null;
+  ownBallot: TotyBallotRecord | null;
+}> {
+  const configPromise = getDoc(doc(db, 'toty_configs', disciplineId));
+  const ownBallotPromise =
+    voterUid && voterUid.trim()
+      ? getDoc(doc(db, 'toty_ballots', `${disciplineId}_${voterUid.trim()}`))
+      : Promise.resolve(null);
+
+  const [configSnap, ownBallotSnap] = await Promise.all([configPromise, ownBallotPromise]);
+
+  const config = configSnap.exists()
+    ? mapTotyConfigDoc(configSnap.id, configSnap.data() as Record<string, unknown>)
+    : null;
+
+  const ownBallot =
+    ownBallotSnap && ownBallotSnap.exists()
+      ? mapTotyBallotDoc(ownBallotSnap.id, ownBallotSnap.data() as Record<string, unknown>)
+      : null;
+
+  return { config, ownBallot };
+}
+
+/**
+ * Bounded lazy fetcher for published news articles (max 25 docs).
+ */
+export async function fetchPublicNewsBounded(maxDocs: number = 25): Promise<NewsArticle[]> {
+  const snap = await getDocs(
+    query(collection(db, 'news'), where('published', '==', true), limit(maxDocs))
+  );
+  return snap.docs
+    .map((d) => mapNewsDoc(d.id, d.data()))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Bounded lazy fetcher for official gallery photos (max 60 docs).
+ */
+export async function fetchPublicPhotosBounded(maxDocs: number = 60): Promise<PhotoEntry[]> {
+  const snap = await getDocs(
+    query(collection(db, 'photos'), where('source', 'in', ['upload', 'drive']), limit(maxDocs))
+  );
+  return snap.docs
+    .map((d) => mapPhotoDoc(d))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Bounded lazy fetcher for approved transfers (max 60 docs).
+ */
+export async function fetchApprovedTransfersBounded(
+  maxDocs: number = 60
+): Promise<TransferRecord[]> {
+  const snap = await getDocs(
+    query(collection(db, 'transfers'), where('estado', '==', 'APROBADA'), limit(maxDocs))
+  );
+  return snap.docs
+    .map((d) => mapTransferDoc(d))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
+}
+
+/**
+ * Bounded lazy fetcher for Leyendas UFRO leaderboard (max 50 docs),
+ * loaded ONLY when visiting /minijuegos.
+ */
+export async function fetchWeeklyLeyendasBounded(
+  maxDocs: number = 50
+): Promise<LeyendasLeaderboardEntry[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'leyendas_leaderboard'),
+      where('sportKey', 'in', ['futbol', 'basquet', 'voley']),
+      limit(maxDocs)
+    )
+  );
+  return snap.docs
+    .map((d) => mapLeyendasDoc(d))
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Discipline-scoped bounded lazy fetcher for non-TOTY voting collections
+ * (award_nominees, mvp_votes, championship_mvp_votes, position_award_votes).
+ * Also loads ONLY the nominated MVP player documents so MVP voting works without
+ * downloading the full /players collection.
+ */
+export async function fetchVotingSecondaryForDiscipline(
+  disciplineId: DisciplineId
+): Promise<{
+  awardNominees?: Partial<Record<DisciplineId, string[]>>;
+  mvpVotes?: MvpVoteRecord[];
+  championshipMvpVotes?: ChampionshipMvpVoteRecord[];
+  positionAwardVotes?: PositionAwardVoteRecord[];
+  nominatedPlayers: Player[];
+}> {
+  const [nomineesRes, mvpRes, champMvpRes, posAwardsRes] = await Promise.allSettled([
+    getDocs(query(collection(db, 'award_nominees'), where('disciplineId', 'in', ALL_DISCIPLINE_IDS))),
+    getDocs(
+      query(collection(db, 'mvp_votes'), where('disciplineId', '==', disciplineId), limit(150))
+    ),
+    getDocs(
+      query(
+        collection(db, 'championship_mvp_votes'),
+        where('disciplineId', '==', disciplineId),
+        limit(150)
+      )
+    ),
+    getDocs(
+      query(
+        collection(db, 'position_award_votes'),
+        where('disciplineId', '==', disciplineId),
+        limit(200)
+      )
+    ),
+  ]);
+
+  const result: {
+    awardNominees?: Partial<Record<DisciplineId, string[]>>;
+    mvpVotes?: MvpVoteRecord[];
+    championshipMvpVotes?: ChampionshipMvpVoteRecord[];
+    positionAwardVotes?: PositionAwardVoteRecord[];
+    nominatedPlayers: Player[];
+  } = {
+    nominatedPlayers: [],
+  };
+
+  if (nomineesRes.status === 'fulfilled') {
+    result.awardNominees = mapAwardNomineesDocs(nomineesRes.value.docs);
+    const idsForDisc = result.awardNominees[disciplineId] ?? [];
+    if (idsForDisc.length > 0) {
+      const playerSnaps = await Promise.allSettled(idsForDisc.map((id) => fetchPlayerById(id)));
+      result.nominatedPlayers = playerSnaps
+        .filter((r): r is PromiseFulfilledResult<Player | null> => r.status === 'fulfilled')
+        .map((r) => r.value)
+        .filter((p): p is Player => Boolean(p));
+    }
+  }
+  if (mvpRes.status === 'fulfilled') {
+    result.mvpVotes = mvpRes.value.docs.map((d) => mapMvpVoteDoc(d));
+  }
+  if (champMvpRes.status === 'fulfilled') {
+    result.championshipMvpVotes = champMvpRes.value.docs.map((d) => mapChampionshipMvpVoteDoc(d));
+  }
+  if (posAwardsRes.status === 'fulfilled') {
+    result.positionAwardVotes = posAwardsRes.value.docs.map((d) => mapPositionAwardVoteDoc(d));
+  }
+
+  return result;
+}
+
 
 

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   Crown,
+  Loader2,
   Lock,
   Search,
   ShieldCheck,
@@ -18,7 +19,6 @@ import { formatDorsalLabel } from '../domain/attendanceEngine';
 import {
   aggregateChampionshipMvpVotes,
   aggregatePositionAwardVotes,
-  computeCommunityToty,
   getEligiblePlayersForPosition,
   getPositionsForSport,
   getTotyFormationForSport,
@@ -210,29 +210,39 @@ interface TotyPlayerSearchPickerProps {
   posKey: string;
   shortCode: string;
   label: string;
+  disciplineId: DisciplineId;
   matched: Player[];
   all: Player[];
+  disciplineTeams: Team[];
   teamMap: Map<string, Team>;
   selectedPlayerId: string;
   excludedPlayerIds?: Set<string>;
   highlightAccent?: boolean;
   onSelect: (playerId: string) => void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
+  onSearchPlayers?: (query: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 function TotyPlayerSearchPicker({
   posKey,
   shortCode,
   label,
+  disciplineId,
   matched,
   all,
+  disciplineTeams,
   teamMap,
   selectedPlayerId,
   excludedPlayerIds,
   highlightAccent = false,
   onSelect,
+  onLoadTeamPlayers,
+  onSearchPlayers,
 }: TotyPlayerSearchPickerProps) {
   const [query, setQuery] = useState('');
+  const [pickerTeamId, setPickerTeamId] = useState<string>('');
   const [open, setOpen] = useState(false);
+  const [loadingRemote, setLoadingRemote] = useState(false);
 
   const selectedPlayer = useMemo(
     () => all.find((p) => p.id === selectedPlayerId),
@@ -241,19 +251,63 @@ function TotyPlayerSearchPicker({
   const selectedTeam = selectedPlayer ? teamMap.get(selectedPlayer.teamId) : undefined;
   const matchedIdSet = useMemo(() => new Set(matched.map((p) => p.id)), [matched]);
 
-  const results = useMemo(() => {
-    const q = normalizeSearchText(query);
-    if (!q) {
-      const rest = all.filter((p) => !matchedIdSet.has(p.id));
-      return [...matched, ...rest].slice(0, 20);
+  // Reset picker team when discipline changes
+  useEffect(() => {
+    setPickerTeamId('');
+    setQuery('');
+    setOpen(false);
+  }, [disciplineId]);
+
+  // Targeted remote name lookup only when typing >= 2 chars
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!open || !onSearchPlayers || trimmed.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoadingRemote(true);
+      onSearchPlayers(trimmed, disciplineId)
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoadingRemote(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, open, disciplineId, onSearchPlayers]);
+
+  const handleSelectPickerTeam = async (nextTeamId: string) => {
+    setPickerTeamId(nextTeamId);
+    setOpen(true);
+    if (nextTeamId && onLoadTeamPlayers) {
+      setLoadingRemote(true);
+      try {
+        await onLoadTeamPlayers(nextTeamId, disciplineId);
+      } finally {
+        setLoadingRemote(false);
+      }
     }
-    const filtered = all.filter((p) => playerMatchesQuery(p, teamMap.get(p.teamId), q));
-    return filtered.sort((a, b) => {
-      const aSpec = matchedIdSet.has(a.id) ? 0 : 1;
-      const bSpec = matchedIdSet.has(b.id) ? 0 : 1;
-      return aSpec - bSpec;
-    });
-  }, [query, matched, all, matchedIdSet, teamMap]);
+  };
+
+  const hasSearchCriteria = pickerTeamId.length > 0 || query.trim().length >= 2;
+
+  const results = useMemo(() => {
+    if (!hasSearchCriteria) return [];
+    const q = normalizeSearchText(query);
+    const scoped = pickerTeamId ? all.filter((p) => p.teamId === pickerTeamId) : all;
+    const filtered = q
+      ? scoped.filter((p) => playerMatchesQuery(p, teamMap.get(p.teamId), q))
+      : scoped;
+    return filtered
+      .sort((a, b) => {
+        const aSpec = matchedIdSet.has(a.id) ? 0 : 1;
+        const bSpec = matchedIdSet.has(b.id) ? 0 : 1;
+        if (aSpec !== bSpec) return aSpec - bSpec;
+        return a.dorsal - b.dorsal;
+      })
+      .slice(0, 25);
+  }, [hasSearchCriteria, query, pickerTeamId, all, matchedIdSet, teamMap]);
 
   return (
     <div className="space-y-1.5 relative">
@@ -270,8 +324,8 @@ function TotyPlayerSearchPicker({
           </span>
           <span className="text-[#eef6ff]">{label}</span>
         </label>
-        {matched.length > 0 && (
-          <span className="text-[11px] text-[#9ec8ff]/65">{matched.length} en posición</span>
+        {selectedPlayer && !open && (
+          <span className="text-[11px] text-[#9ec8ff]/75">Seleccionado</span>
         )}
       </div>
 
@@ -319,34 +373,53 @@ function TotyPlayerSearchPicker({
           </div>
         </div>
       ) : (
-        <div className="space-y-1">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-[#8bbaff]/65 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              id={`toty-search-${posKey}`}
-              type="text"
-              value={query}
-              onFocus={() => setOpen(true)}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setOpen(true);
-              }}
-              placeholder={`Buscar para ${label}...`}
-              className="w-full pl-9 pr-8 py-2 rounded-xl text-xs sm:text-sm border border-[#9ec8ff]/18 bg-[#0b1430]/90 text-zinc-100 placeholder:text-[#8eb2e0]/55 focus:border-[#6ea8ff] focus:outline-none"
-            />
-            {(query || open) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery('');
-                  setOpen(false);
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
+            <div className="sm:col-span-7 relative">
+              <Search className="w-3.5 h-3.5 text-[#8bbaff]/65 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id={`toty-search-${posKey}`}
+                type="text"
+                value={query}
+                onFocus={() => setOpen(true)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setOpen(true);
                 }}
-                aria-label="Cerrar búsqueda"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-white cursor-pointer"
+                placeholder={`Nombre para ${label}...`}
+                className="w-full pl-8 pr-7 py-2 rounded-xl text-xs border border-[#9ec8ff]/18 bg-[#0b1430]/90 text-zinc-100 placeholder:text-[#8eb2e0]/55 focus:border-[#6ea8ff] focus:outline-none"
+              />
+              {(query || open) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery('');
+                    setPickerTeamId('');
+                    setOpen(false);
+                  }}
+                  aria-label="Cerrar búsqueda"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="sm:col-span-5">
+              <select
+                aria-label={`Seleccionar equipo para ${label}`}
+                value={pickerTeamId}
+                onChange={(e) => void handleSelectPickerTeam(e.target.value)}
+                className="w-full px-2.5 py-2 rounded-xl text-xs border border-[#9ec8ff]/18 bg-[#0b1430]/90 text-zinc-100 focus:border-[#6ea8ff] focus:outline-none"
               >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+                <option value="">O elige equipo...</option>
+                {disciplineTeams.map((tm) => (
+                  <option key={tm.id} value={tm.id}>
+                    {tm.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {open && (
@@ -355,9 +428,18 @@ function TotyPlayerSearchPicker({
               aria-label={`Opciones de jugadores para ${label}`}
               className="rounded-xl border border-[#9ec8ff]/24 bg-[#070f26] max-h-52 overflow-y-auto divide-y divide-white/[0.06] shadow-2xl"
             >
-              {results.length === 0 ? (
+              {loadingRemote ? (
+                <div className="px-3 py-3 text-xs text-[#9ec8ff] flex items-center justify-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Cargando jugadores...</span>
+                </div>
+              ) : !hasSearchCriteria ? (
+                <p className="px-3 py-3 text-[11px] text-[#9eb8df]/75 text-center">
+                  Escribe al menos 2 letras del nombre o selecciona un equipo arriba.
+                </p>
+              ) : results.length === 0 ? (
                 <p className="px-3 py-3 text-xs text-zinc-400 text-center">
-                  Sin jugadores para &ldquo;{query}&rdquo;.
+                  Sin jugadores encontrados. Prueba con otro nombre o selecciona su equipo.
                 </p>
               ) : (
                 results.map((p) => {
@@ -443,6 +525,8 @@ interface VotationsViewProps {
     | void;
   pendingTotyDisciplines?: DisciplineId[];
   onFlushTotyBatch?: () => Promise<number> | void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
+  onSearchPlayers?: (query: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 export function VotationsView({
@@ -457,6 +541,8 @@ export function VotationsView({
   onSubmitTotyBallot,
   pendingTotyDisciplines = [],
   onFlushTotyBatch,
+  onLoadTeamPlayers,
+  onSearchPlayers,
 }: VotationsViewProps) {
   const [activeTab, setActiveTab] = useState<VotationTab>('toty');
   const [potmDisciplineFilter, setPotmDisciplineFilter] = useState<'ALL' | DisciplineId>(
@@ -470,11 +556,13 @@ export function VotationsView({
   const [showAllPlayersForPosition, setShowAllPlayersForPosition] = useState(false);
   const [positionPlayerSearch, setPositionPlayerSearch] = useState('');
   const [positionTeamFilter, setPositionTeamFilter] = useState<'ALL' | string>('ALL');
+  const [loadingPositionPlayers, setLoadingPositionPlayers] = useState(false);
   const [totyQuickSearch, setTotyQuickSearch] = useState('');
+  const [totyQuickTeamId, setTotyQuickTeamId] = useState<string>('');
+  const [loadingTotyQuick, setLoadingTotyQuick] = useState(false);
   const [totyDraftsByDiscipline, setTotyDraftsByDiscipline] = useState<
     Partial<Record<DisciplineId, Record<string, string>>>
   >({});
-  const [totyBoardMode, setTotyBoardMode] = useState<'community' | 'draft'>('community');
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
@@ -501,8 +589,51 @@ export function VotationsView({
     setPositionPlayerSearch('');
     setPositionTeamFilter('ALL');
     setTotyQuickSearch('');
+    setTotyQuickTeamId('');
     setFeedbackMsg(null);
   }, [selectedDiscipline, sportPositions, selectedPositionKey]);
+
+  // Targeted remote search for TOTY Quick Assign (only when >= 2 chars)
+  useEffect(() => {
+    const trimmed = totyQuickSearch.trim();
+    if (activeTab !== 'toty' || !onSearchPlayers || trimmed.length < 2) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoadingTotyQuick(true);
+      onSearchPlayers(trimmed, selectedDiscipline)
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoadingTotyQuick(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [totyQuickSearch, activeTab, selectedDiscipline, onSearchPlayers]);
+
+  // Targeted remote search for Position Awards (only when >= 2 chars)
+  useEffect(() => {
+    const trimmed = positionPlayerSearch.trim();
+    if (activeTab !== 'posiciones' || !onSearchPlayers || trimmed.length < 2) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoadingPositionPlayers(true);
+      onSearchPlayers(trimmed, selectedDiscipline)
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoadingPositionPlayers(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [positionPlayerSearch, activeTab, selectedDiscipline, onSearchPlayers]);
 
   const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
 
@@ -717,14 +848,22 @@ export function VotationsView({
       : eligibleForActivePosition.all;
   }, [eligibleForActivePosition, showAllPlayersForPosition, positionPlayerSearch]);
 
-  const positionCandidatesToDisplay = useMemo(
-    () =>
-      positionCandidatesBase.filter((pl) => {
-        if (positionTeamFilter !== 'ALL' && pl.teamId !== positionTeamFilter) return false;
-        return playerMatchesQuery(pl, teamMap.get(pl.teamId), positionPlayerSearch);
-      }),
-    [positionCandidatesBase, positionTeamFilter, positionPlayerSearch, teamMap]
-  );
+  const hasPositionSearchCriteria =
+    positionTeamFilter !== 'ALL' || positionPlayerSearch.trim().length >= 2;
+
+  const positionCandidatesToDisplay = useMemo(() => {
+    if (!hasPositionSearchCriteria) return [];
+    return positionCandidatesBase.filter((pl) => {
+      if (positionTeamFilter !== 'ALL' && pl.teamId !== positionTeamFilter) return false;
+      return playerMatchesQuery(pl, teamMap.get(pl.teamId), positionPlayerSearch);
+    });
+  }, [
+    hasPositionSearchCriteria,
+    positionCandidatesBase,
+    positionTeamFilter,
+    positionPlayerSearch,
+    teamMap,
+  ]);
 
   const userPositionVote = useMemo(() => {
     if (!currentUser || !activePositionStanding) return undefined;
@@ -735,26 +874,6 @@ export function VotationsView({
         v.voterUid === currentUser.uid
     );
   }, [state.positionAwardVotes, selectedDiscipline, activePositionStanding, currentUser]);
-
-  const communityToty = useMemo(
-    () =>
-      computeCommunityToty(
-        selectedDiscipline,
-        discMeta.sportType,
-        state.totyBallots,
-        state.players,
-        state.teams,
-        activeTotyConfig
-      ),
-    [
-      selectedDiscipline,
-      discMeta.sportType,
-      state.totyBallots,
-      state.players,
-      state.teams,
-      activeTotyConfig,
-    ]
-  );
 
   const handleChampionshipMvpClick = async (playerId: string) => {
     if (!currentUser) {
@@ -819,22 +938,22 @@ export function VotationsView({
   const totyRowsGrouped = useMemo(() => {
     const rowMap = new Map<
       number,
-      { row: number; rowLabel: string; slots: typeof communityToty.slots }
+      { row: number; rowLabel: string; slots: typeof totyFormation.slots }
     >();
-    for (const slotRes of communityToty.slots) {
-      const existing = rowMap.get(slotRes.slot.row);
+    for (const slot of totyFormation.slots) {
+      const existing = rowMap.get(slot.row);
       if (existing) {
-        existing.slots.push(slotRes);
+        existing.slots.push(slot);
       } else {
-        rowMap.set(slotRes.slot.row, {
-          row: slotRes.slot.row,
-          rowLabel: slotRes.slot.rowLabel,
-          slots: [slotRes],
+        rowMap.set(slot.row, {
+          row: slot.row,
+          rowLabel: slot.rowLabel,
+          slots: [slot],
         });
       }
     }
     return Array.from(rowMap.values()).sort((a, b) => b.row - a.row);
-  }, [communityToty.slots]);
+  }, [totyFormation.slots]);
 
   const handleSaveToty = async () => {
     if (!currentUser) {
@@ -922,16 +1041,21 @@ export function VotationsView({
     [positionCandidatesToDisplay, teamMap, userPositionVote]
   );
 
-  const totyFilteredQuickPlayers = useMemo(() => {
-    if (!totyQuickSearch.trim()) return disciplinePlayers;
-    return disciplinePlayers.filter((pl) =>
-      playerMatchesQuery(pl, teamMap.get(pl.teamId), totyQuickSearch)
-    );
-  }, [disciplinePlayers, teamMap, totyQuickSearch]);
+  const totyQuickScopedPlayers = useMemo(() => {
+    const hasCriteria = totyQuickTeamId.length > 0 || totyQuickSearch.trim().length >= 2;
+    if (!hasCriteria) return [];
+    const base = totyQuickTeamId
+      ? disciplinePlayers.filter((pl) => pl.teamId === totyQuickTeamId)
+      : disciplinePlayers;
+    if (!totyQuickSearch.trim()) return base.slice(0, 25);
+    return base
+      .filter((pl) => playerMatchesQuery(pl, teamMap.get(pl.teamId), totyQuickSearch))
+      .slice(0, 25);
+  }, [disciplinePlayers, teamMap, totyQuickSearch, totyQuickTeamId]);
 
   const totyQuickAutocompleteOptions = useMemo<AutocompletePlayerOption[]>(
     () =>
-      totyFilteredQuickPlayers.map((pl) => {
+      totyQuickScopedPlayers.map((pl) => {
         const tm = teamMap.get(pl.teamId);
         const alreadyInToty = totyDraftPlayerIdSet.has(pl.id);
         return {
@@ -945,7 +1069,7 @@ export function VotationsView({
           disabled: alreadyInToty,
         };
       }),
-    [totyFilteredQuickPlayers, teamMap, totyDraftPlayerIdSet]
+    [totyQuickScopedPlayers, teamMap, totyDraftPlayerIdSet]
   );
 
   const handleQuickAssignTotyPlayer = (playerId: string) => {
@@ -970,9 +1094,32 @@ export function VotationsView({
     }
 
     updateActiveTotyDraft((prev) => ({ ...prev, [targetSlot.slotKey]: player.id }));
-    setTotyBoardMode('draft');
     setTotyQuickSearch('');
     setFeedbackMsg(`${player.nombre} ${player.apellidoPaterno} asignado a ${targetSlot.label}.`);
+  };
+
+  const handleSelectTotyQuickTeam = async (nextTeamId: string) => {
+    setTotyQuickTeamId(nextTeamId);
+    if (nextTeamId && onLoadTeamPlayers) {
+      setLoadingTotyQuick(true);
+      try {
+        await onLoadTeamPlayers(nextTeamId, selectedDiscipline);
+      } finally {
+        setLoadingTotyQuick(false);
+      }
+    }
+  };
+
+  const handleSelectPositionTeamFilter = async (nextTeamId: string) => {
+    setPositionTeamFilter(nextTeamId);
+    if (nextTeamId !== 'ALL' && onLoadTeamPlayers) {
+      setLoadingPositionPlayers(true);
+      try {
+        await onLoadTeamPlayers(nextTeamId, selectedDiscipline);
+      } finally {
+        setLoadingPositionPlayers(false);
+      }
+    }
   };
 
   return (
@@ -1057,7 +1204,7 @@ export function VotationsView({
                 {
                   id: 'toty',
                   label: 'TOTYs',
-                  sub: `${communityToty.totalBallots} papeletas`,
+                  sub: 'Arma tu formación ideal',
                   icon: Crown,
                 },
                 {
@@ -1705,10 +1852,10 @@ export function VotationsView({
                     <select
                       aria-label="Filtrar candidatos por equipo"
                       value={positionTeamFilter}
-                      onChange={(e) => setPositionTeamFilter(e.target.value)}
+                      onChange={(e) => void handleSelectPositionTeamFilter(e.target.value)}
                       className="w-full px-3 py-2.5 rounded-xl text-xs sm:text-sm border border-white/[0.1] bg-[#111117] text-zinc-100 focus:border-[#707ef9] focus:outline-none"
                     >
-                      <option value="ALL">Todos los equipos ({disciplineTeams.length})</option>
+                      <option value="ALL">Selecciona un equipo ({disciplineTeams.length})...</option>
                       {disciplineTeams.map((tm) => (
                         <option key={tm.id} value={tm.id}>
                           {tm.nombre}
@@ -1718,7 +1865,22 @@ export function VotationsView({
                   </div>
                 </div>
 
-                {positionCandidatesToDisplay.length === 0 ? (
+                {loadingPositionPlayers ? (
+                  <div className="py-8 text-center space-y-2 rounded-2xl border border-white/[0.08] bg-[#101016]">
+                    <Loader2 className="w-5 h-5 text-[#a5b0ff] animate-spin mx-auto" />
+                    <p className="text-xs text-zinc-400">Cargando jugadores...</p>
+                  </div>
+                ) : !hasPositionSearchCriteria ? (
+                  <div className="py-8 px-4 text-center space-y-2 rounded-2xl border border-dashed border-white/[0.12] bg-[#101016]">
+                    <Users className="w-5 h-5 text-[#a5b0ff] mx-auto" />
+                    <p className="text-sm font-medium text-white">
+                      Busca un jugador o elige su equipo
+                    </p>
+                    <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                      Selecciona un equipo en el desplegable o escribe al menos 2 letras del nombre para mostrar los candidatos disponibles.
+                    </p>
+                  </div>
+                ) : positionCandidatesToDisplay.length === 0 ? (
                   <div className="py-8 text-center space-y-2 rounded-2xl border border-dashed border-white/[0.1] bg-[#101016]">
                     <p className="text-xs text-zinc-400">Sin jugadores con ese criterio.</p>
                     {(positionPlayerSearch.trim() || positionTeamFilter !== 'ALL') && (
@@ -1831,10 +1993,10 @@ export function VotationsView({
                   <TotyCoBrandLockup />
                   <div className="text-right">
                     <p className="text-[11px] font-mono uppercase tracking-[0.16em] text-[#b8dcff]/80">
-                      Papeletas TOTYs
+                      Tu formación
                     </p>
                     <p className="text-3xl sm:text-4xl font-light toty-text-ice tabular-nums leading-tight">
-                      {communityToty.totalBallots}
+                      {totySelectedCount}/{totyFormation.slots.length}
                     </p>
                   </div>
                 </div>
@@ -1842,7 +2004,7 @@ export function VotationsView({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* Left: Tactical Full-Formation TOTYs Board */}
+              {/* Left: Tactical Full-Formation Personal TOTY Board (Live Official Tally Omitted) */}
               <div className="lg:col-span-7 rounded-3xl bg-[#060b1d] text-white border border-[#9ec8ff]/24 overflow-hidden shadow-[0_24px_60px_-34px_rgba(20,66,204,0.6)]">
                 <div className="px-6 py-5 border-b border-[#9ec8ff]/16 bg-gradient-to-r from-[#08102a] via-[#0c1d54]/85 to-[#08102a] flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-3.5">
@@ -1855,36 +2017,15 @@ export function VotationsView({
                         </span>
                       </p>
                       <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.025em] text-white">
-                        {totyBoardMode === 'community' ? 'TOTY Oficial ' : 'Tu formación '}
+                        Tu formación{' '}
                         <span className="font-editorial text-[#b8dcff]">{state.temporada}</span>
                       </h2>
                     </div>
                   </div>
 
-                  <div className="inline-flex rounded-full border border-[#9ec8ff]/25 bg-[#040919]/80 p-1">
-                    <button
-                      type="button"
-                      onClick={() => setTotyBoardMode('community')}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                        totyBoardMode === 'community'
-                          ? 'bg-[#2152d4] text-white shadow-sm'
-                          : 'text-[#b8d4f8]/75 hover:text-white'
-                      }`}
-                    >
-                      TOTY Oficial ({totyFormation.slots.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTotyBoardMode('draft')}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                        totyBoardMode === 'draft'
-                          ? 'bg-white text-[#050a1f]'
-                          : 'text-[#b8d4f8]/75 hover:text-white'
-                      }`}
-                    >
-                      Mi formación ({totySelectedCount}/{totyFormation.slots.length})
-                    </button>
-                  </div>
+                  <span className="text-xs font-mono text-[#c7e2ff] tabular-nums">
+                    {totySelectedCount}/{totyFormation.slots.length} elegidos
+                  </span>
                 </div>
 
                 {/* Tactical Pitch / Court Surface */}
@@ -1988,8 +2129,8 @@ export function VotationsView({
                           </div>
 
                           <div className={`grid ${colClass} gap-3`}>
-                            {rowGroup.slots.map((slotRes) => {
-                              const draftPlayerId = totyDraft[slotRes.slot.slotKey];
+                            {rowGroup.slots.map((slot) => {
+                              const draftPlayerId = totyDraft[slot.slotKey];
                               const draftPlayer = draftPlayerId
                                 ? disciplinePlayers.find((p) => p.id === draftPlayerId)
                                 : undefined;
@@ -1997,71 +2138,25 @@ export function VotationsView({
                                 ? teamMap.get(draftPlayer.teamId)
                                 : undefined;
 
-                              const isLibero = Boolean(slotRes.slot.isLibero);
+                              const isLibero = Boolean(slot.isLibero);
 
                               return (
                                 <div
-                                  key={slotRes.slot.slotKey}
+                                  key={slot.slotKey}
                                   className={`toty-collector-card rounded-2xl p-3.5 flex flex-col justify-between gap-2.5 backdrop-blur-md ${
                                     isLibero ? '!border-[#78b3ff]/60' : ''
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-2 min-w-0">
                                     <span className="text-[11px] font-mono text-[#9ec8ff] truncate">
-                                      {slotRes.slot.shortCode} · {slotRes.slot.label}
+                                      {slot.shortCode} · {slot.label}
                                     </span>
-                                    {totyBoardMode === 'community' ? (
-                                      <span className="text-[10px] font-mono text-[#c7e2ff]/75 tabular-nums shrink-0 whitespace-nowrap">
-                                        {slotRes.winner ? `${slotRes.winner.votes} v.` : '0 v.'}
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] font-mono text-[#c7e2ff]/75 shrink-0 whitespace-nowrap">
-                                        {draftPlayer ? 'Elegido' : 'Pendiente'}
-                                      </span>
-                                    )}
+                                    <span className="text-[10px] font-mono text-[#c7e2ff]/75 shrink-0 whitespace-nowrap">
+                                      {draftPlayer ? 'Elegido' : draftPlayerId ? 'Guardado' : 'Pendiente'}
+                                    </span>
                                   </div>
 
-                                  {totyBoardMode === 'community' ? (
-                                    slotRes.winner ? (
-                                      <div className="space-y-2">
-                                        <div className="flex items-center gap-2.5 min-w-0">
-                                          <TeamCrest
-                                            escudo={slotRes.winner.teamEscudo}
-                                            sigla={slotRes.winner.teamSigla}
-                                            nombre={slotRes.winner.teamName}
-                                            size="sm"
-                                            surface="dark"
-                                          />
-                                          <div className="min-w-0">
-                                            <p className="text-sm font-medium leading-tight truncate text-white">
-                                              {slotRes.winner.playerName}
-                                            </p>
-                                            <p className="text-[11px] text-[#b8d4f8]/75 truncate">
-                                              {slotRes.winner.teamName}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full h-1 rounded-full bg-white/[0.08] overflow-hidden">
-                                            <div
-                                              className="h-full rounded-full bg-gradient-to-r from-[#3b74f5] to-[#dbeeff]"
-                                              style={{
-                                                width: `${Math.min(100, Math.max(8, slotRes.winner.percentage))}%`,
-                                              }}
-                                            />
-                                          </div>
-                                          <p className="text-[10px] font-mono text-[#b8dcff] tabular-nums">
-                                            {slotRes.winner.votes} votos · {slotRes.winner.percentage}%
-                                          </p>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="py-2 text-xs text-[#9eb8df]/60 flex items-center gap-2">
-                                        <Users className="w-3.5 h-3.5 text-[#8bbaff]/50 shrink-0" />
-                                        <span>Vacante</span>
-                                      </div>
-                                    )
-                                  ) : draftPlayer ? (
+                                  {draftPlayer ? (
                                     <div className="flex items-center gap-2.5 min-w-0">
                                       <TeamCrest
                                         escudo={draftTeam?.escudo}
@@ -2080,6 +2175,11 @@ export function VotationsView({
                                         </p>
                                       </div>
                                     </div>
+                                  ) : draftPlayerId ? (
+                                    <div className="py-2 text-xs text-[#c7e2ff] flex items-center gap-2">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-[#8bbaff] shrink-0" />
+                                      <span className="truncate">Jugador seleccionado en tu papeleta</span>
+                                    </div>
                                   ) : (
                                     <div className="py-2 text-xs text-[#9eb8df]/60 flex items-center gap-2">
                                       <Users className="w-3.5 h-3.5 text-[#8bbaff]/50 shrink-0" />
@@ -2096,38 +2196,19 @@ export function VotationsView({
                   </div>
                 </div>
 
-                {/* Runner-Ups */}
-                {totyBoardMode === 'community' &&
-                  communityToty.slots.some((s) => s.runnerUps.length > 0) && (
-                    <div className="px-6 py-4 border-t border-[#9ec8ff]/16 bg-[#050a1a] space-y-2.5">
-                      <p className="text-xs text-[#9ec8ff]/75">Siguientes más votados</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {communityToty.slots
-                          .filter((s) => s.runnerUps.length > 0)
-                          .map((s) => (
-                            <div
-                              key={`ru-${s.slot.slotKey}`}
-                              className="rounded-xl bg-[#0a1432]/70 border border-[#9ec8ff]/14 px-3 py-2 text-[11px]"
-                            >
-                              <p className="text-[10px] font-mono text-[#9ec8ff] mb-1">
-                                {s.position.label}
-                              </p>
-                              {s.runnerUps.slice(0, 2).map((ru) => (
-                                <div
-                                  key={ru.playerId}
-                                  className="flex items-center justify-between text-zinc-200 gap-2"
-                                >
-                                  <span className="truncate">{ru.playerName}</span>
-                                  <span className="font-mono text-[#b8dcff]/70 shrink-0 tabular-nums">
-                                    {ru.votes} v.
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
+                {/* Editorial notice explaining TOTY Official results will be revealed in a dedicated section */}
+                <div className="px-6 py-4 border-t border-[#9ec8ff]/16 bg-[#050a1a] flex items-start gap-3">
+                  <Lock className="w-4 h-4 text-[#9ec8ff] shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-medium text-[#dbeeff]">
+                      Resultados oficiales próximamente
+                    </p>
+                    <p className="text-[11px] text-[#9eb8df]/75 leading-relaxed">
+                      Tu voto se registra de forma segura sin recuento en vivo. El equipo oficial de
+                      los TOTYs se anunciará en una sección dedicada al cierre de la votación.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Right: User TOTYs Ballot */}
@@ -2157,34 +2238,98 @@ export function VotationsView({
                   </div>
                 </div>
 
-                {disciplinePlayers.length === 0 ? (
+                {disciplineTeams.length === 0 ? (
                   <p className="text-xs text-zinc-400 py-4">
-                    Sin jugadores registrados en {discMeta.nombre}.
+                    Sin equipos registrados en {discMeta.nombre}.
                   </p>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-2xl bg-[#0b1534]/85 border border-[#9ec8ff]/18 p-3.5 space-y-2">
-                      <label
-                        htmlFor="toty-quick-autocomplete"
-                        className="block text-xs text-[#b8dcff]/85"
-                      >
-                        Asignación rápida
-                      </label>
-                      <VotingPlayerAutocompleteBar
-                        id="toty-quick-autocomplete"
-                        value={totyQuickSearch}
-                        onChange={setTotyQuickSearch}
-                        placeholder="Nombre, dorsal o equipo..."
-                        ariaLabel="Buscar jugador con autocompletado para los TOTYs"
-                        options={totyQuickAutocompleteOptions}
-                        actionHint="Asignar"
-                        onSelectOption={(opt) => handleQuickAssignTotyPlayer(opt.id)}
-                      />
+                    <div className="rounded-2xl bg-[#0b1534]/85 border border-[#9ec8ff]/18 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label
+                          htmlFor="toty-quick-autocomplete"
+                          className="block text-xs text-[#b8dcff]/85"
+                        >
+                          Asignación rápida por nombre o equipo
+                        </label>
+                        {loadingTotyQuick && (
+                          <Loader2 className="w-3.5 h-3.5 text-[#9ec8ff] animate-spin" />
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                        <div className="sm:col-span-7">
+                          <VotingPlayerAutocompleteBar
+                            id="toty-quick-autocomplete"
+                            value={totyQuickSearch}
+                            onChange={setTotyQuickSearch}
+                            placeholder="Buscar nombre (mín. 2 letras)..."
+                            ariaLabel="Buscar jugador por nombre para los TOTYs"
+                            options={totyQuickAutocompleteOptions}
+                            actionHint="Asignar"
+                            onSelectOption={(opt) => handleQuickAssignTotyPlayer(opt.id)}
+                          />
+                        </div>
+                        <div className="sm:col-span-5">
+                          <select
+                            aria-label="Seleccionar equipo para asignar rápido al TOTY"
+                            value={totyQuickTeamId}
+                            onChange={(e) => void handleSelectTotyQuickTeam(e.target.value)}
+                            className="w-full px-2.5 py-2.5 rounded-xl text-xs border border-white/[0.1] bg-[#111117] text-zinc-100 focus:border-[#707ef9] focus:outline-none"
+                          >
+                            <option value="">Elegir equipo...</option>
+                            {disciplineTeams.map((tm) => (
+                              <option key={tm.id} value={tm.id}>
+                                {tm.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {totyQuickTeamId && (
+                        <div className="rounded-xl border border-[#9ec8ff]/20 bg-[#070f26] max-h-40 overflow-y-auto divide-y divide-white/[0.06]">
+                          {loadingTotyQuick ? (
+                            <p className="px-3 py-2.5 text-[11px] text-[#9ec8ff] text-center">
+                              Cargando plantel...
+                            </p>
+                          ) : totyQuickScopedPlayers.length === 0 ? (
+                            <p className="px-3 py-2.5 text-[11px] text-zinc-400 text-center">
+                              Sin jugadores cargados en este equipo.
+                            </p>
+                          ) : (
+                            totyQuickScopedPlayers.map((pl) => {
+                              const alreadyInToty = totyDraftPlayerIdSet.has(pl.id);
+                              return (
+                                <button
+                                  key={pl.id}
+                                  type="button"
+                                  disabled={alreadyInToty}
+                                  onClick={() => handleQuickAssignTotyPlayer(pl.id)}
+                                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-xs transition-colors ${
+                                    alreadyInToty
+                                      ? 'opacity-40 cursor-not-allowed'
+                                      : 'hover:bg-[#1a3e9c]/25 cursor-pointer'
+                                  }`}
+                                >
+                                  <span className="text-white truncate">
+                                    {formatDorsalLabel(pl.dorsal)} {pl.nombre} {pl.apellidoPaterno}{' '}
+                                    <span className="text-[#9eb8df]/70">· {pl.posicion}</span>
+                                  </span>
+                                  <span className="text-[10px] text-[#9ec8ff] shrink-0">
+                                    {alreadyInToty ? 'En TOTY' : '+ Asignar'}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {totyFormation.slots.map((slot) => {
                       const { matched, all } = getEligiblePlayersForPosition(
-                        totyFilteredQuickPlayers,
+                        disciplinePlayers,
                         discMeta.sportType,
                         slot.positionKey
                       );
@@ -2196,12 +2341,16 @@ export function VotationsView({
                           posKey={slot.slotKey}
                           shortCode={slot.shortCode}
                           label={slot.label}
+                          disciplineId={selectedDiscipline}
                           matched={matched}
                           all={all}
+                          disciplineTeams={disciplineTeams}
                           teamMap={teamMap}
                           selectedPlayerId={pickedId}
                           excludedPlayerIds={totyDraftPlayerIdSet}
                           highlightAccent={Boolean(slot.isLibero)}
+                          onLoadTeamPlayers={onLoadTeamPlayers}
+                          onSearchPlayers={onSearchPlayers}
                           onSelect={(playerId) => {
                             updateActiveTotyDraft((prev) => ({
                               ...prev,

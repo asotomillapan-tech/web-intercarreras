@@ -518,9 +518,9 @@ export function HomeView({
             </div>
             <div>
               <p className="text-3xl sm:text-4xl font-light tracking-[-0.03em] tabular-nums text-white">
-                {state.players.length}
+                {state.matches.length}
               </p>
-              <p className="text-xs text-zinc-500 mt-1">Jugadores registrados</p>
+              <p className="text-xs text-zinc-500 mt-1">Partidos programados</p>
             </div>
           </motion.div>
         </div>

@@ -40,37 +40,43 @@ async function generatePosterDataUrl(career: LeyendasCareerState): Promise<strin
 
   const legacy = computeCreativeLegacyBanner(career);
   const score = calculateCareerLeaderboardScore(career);
-  const isGoat = legacy.tier === 'GOAT' || career.maxOvr >= 100;
+  const isGoat = legacy.tier === 'GOAT' || career.maxOvr >= 99;
   const accent = isGoat ? '#f5c84c' : '#707ef9';
-  const displayFont = '"League Gothic", "Arial Narrow", Impact, sans-serif';
-  const bodyFont = '"Roboto", system-ui, -apple-system, sans-serif';
+  const displayFont = '"Inter", system-ui, -apple-system, sans-serif';
+  const editorialFont = '"Playfair Display", Georgia, serif';
+  const bodyFont = '"Inter", system-ui, -apple-system, sans-serif';
 
-  // 1. Clean Carbon Editorial Backdrop
-  ctx.fillStyle = '#0d0d0d';
+  // 1. Clean Obsidian Editorial Backdrop
+  ctx.fillStyle = '#050507';
   ctx.fillRect(0, 0, 1080, 1920);
 
-  // Solid Top Accent Bar & Single Minimal Hairline Frame
-  ctx.fillStyle = accent;
-  ctx.fillRect(0, 0, 1080, 14);
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  // Subtle Top Glow Wash
+  const topGlow = ctx.createRadialGradient(540, 220, 40, 540, 220, 620);
+  topGlow.addColorStop(0, isGoat ? 'rgba(245,200,76,0.16)' : 'rgba(112,126,249,0.18)');
+  topGlow.addColorStop(1, 'rgba(5,5,7,0)');
+  ctx.fillStyle = topGlow;
+  ctx.fillRect(0, 0, 1080, 960);
+
+  // Minimal Hairline Frame
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx.lineWidth = 2;
   ctx.strokeRect(48, 48, 984, 1824);
 
   // 2. Minimal Header Row
-  ctx.fillStyle = accent;
-  ctx.font = `700 22px ${bodyFont}`;
+  ctx.fillStyle = '#a5b0ff';
+  ctx.font = `500 22px ${bodyFont}`;
   ctx.textAlign = 'left';
-  ctx.fillText('INTERCARRERAS UFRO · LEYENDAS', 92, 118);
+  ctx.fillText('Intercarreras UFRO · Leyendas', 92, 118);
 
-  ctx.fillStyle = '#a1a1aa';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.textAlign = 'right';
   ctx.fillText(
-    `${SPORT_CONFIG[career.sportKey].shortName.toUpperCase()} · ${career.pos}`,
+    `${SPORT_CONFIG[career.sportKey].shortName} · ${career.pos}`,
     988,
     118
   );
 
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
   ctx.fillRect(92, 148, 896, 1.5);
 
   // 3. Centered Club Crest Medallion
@@ -81,7 +87,7 @@ async function generatePosterDataUrl(career: LeyendasCareerState): Promise<strin
   ctx.arc(centerX, crestY, 84, 0, Math.PI * 2);
   ctx.fillStyle = '#ffffff';
   ctx.fill();
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 4;
   ctx.strokeStyle = accent;
   ctx.stroke();
 
@@ -96,47 +102,47 @@ async function generatePosterDataUrl(career: LeyendasCareerState): Promise<strin
     ctx.drawImage(crestImg, centerX - dw / 2, crestY - dh / 2, dw, dh);
     ctx.restore();
   } else {
-    ctx.fillStyle = '#0d0d0d';
+    ctx.fillStyle = '#050507';
     ctx.textAlign = 'center';
-    ctx.font = `400 66px ${displayFont}`;
-    ctx.fillText((career.team.sigla || 'UFRO').slice(0, 4).toUpperCase(), centerX, crestY + 23);
+    ctx.font = `600 54px ${displayFont}`;
+    ctx.fillText((career.team.sigla || 'UFRO').slice(0, 4).toUpperCase(), centerX, crestY + 18);
   }
 
   // 4. Giant Peak OVR Focal Number
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#a1a1aa';
-  ctx.font = `700 22px ${bodyFont}`;
-  ctx.fillText(isGoat ? 'GOAT · PEAK OVR' : 'PEAK OVR', centerX, 456);
+  ctx.fillStyle = 'rgba(255,255,255,0.52)';
+  ctx.font = `500 22px ${bodyFont}`;
+  ctx.fillText(isGoat ? 'Leyenda Absoluta · Peak OVR' : 'Peak OVR', centerX, 456);
 
   ctx.fillStyle = accent;
-  ctx.font = `400 220px ${displayFont}`;
-  ctx.fillText(String(career.maxOvr), centerX, 650);
+  ctx.font = `600 210px ${displayFont}`;
+  ctx.fillText(String(career.maxOvr), centerX, 646);
 
-  // 5. Player Name + Single Clean Career/Club Line + Legacy Title
-  const upperName = career.playerName.toUpperCase();
-  let nameSize = 112;
-  ctx.font = `400 ${nameSize}px ${displayFont}`;
-  while (ctx.measureText(upperName).width > 860 && nameSize > 62) {
-    nameSize -= 6;
-    ctx.font = `400 ${nameSize}px ${displayFont}`;
+  // 5. Player Name + Career/Club Line + Editorial Legacy Title
+  const cleanName = career.playerName.trim() || 'Leyenda UFRO';
+  let nameSize = 84;
+  ctx.font = `500 ${nameSize}px ${displayFont}`;
+  while (ctx.measureText(cleanName).width > 860 && nameSize > 48) {
+    nameSize -= 4;
+    ctx.font = `500 ${nameSize}px ${displayFont}`;
   }
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(upperName, centerX, 774);
+  ctx.fillText(cleanName, centerX, 766);
 
-  ctx.fillStyle = '#d4d4d8';
-  ctx.font = `500 28px ${bodyFont}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.68)';
+  ctx.font = `400 28px ${bodyFont}`;
   ctx.fillText(
     `${career.career} · ${career.team.name}`.slice(0, 56),
     centerX,
-    828
+    822
   );
 
-  ctx.fillStyle = accent;
-  ctx.font = `700 24px ${bodyFont}`;
+  ctx.fillStyle = isGoat ? '#f5c84c' : '#c8ceff';
+  ctx.font = `italic 400 32px ${editorialFont}`;
   ctx.fillText(
-    `${legacy.title.toUpperCase()} · ${career.startYear}–${career.year}`.slice(0, 54),
+    `${legacy.title} · ${career.startYear}–${career.year}`.slice(0, 52),
     centerX,
-    880
+    878
   );
 
   // 6. Simple 4-Stat Horizontal Strip (no heavy boxes)
@@ -174,12 +180,12 @@ async function generatePosterDataUrl(career: LeyendasCareerState): Promise<strin
       ctx.fillRect(92 + colW * idx, statsY + 34, 1.5, 134);
     }
     ctx.fillStyle = '#ffffff';
-    ctx.font = `400 104px ${displayFont}`;
-    ctx.fillText(st.val, cx, statsY + 126);
+    ctx.font = `600 84px ${displayFont}`;
+    ctx.fillText(st.val, cx, statsY + 122);
 
-    ctx.fillStyle = '#a1a1aa';
-    ctx.font = `700 20px ${bodyFont}`;
-    ctx.fillText(st.label, cx, statsY + 168);
+    ctx.fillStyle = 'rgba(255,255,255,0.52)';
+    ctx.font = `500 20px ${bodyFont}`;
+    ctx.fillText(st.label, cx, statsY + 166);
   });
 
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
@@ -240,8 +246,8 @@ async function generatePosterDataUrl(career: LeyendasCareerState): Promise<strin
 
   ctx.textAlign = 'right';
   ctx.fillStyle = accent;
-  ctx.font = `400 96px ${displayFont}`;
-  ctx.fillText(`${score.toLocaleString('es-CL')} PTS`, 988, 1778);
+  ctx.font = `600 82px ${displayFont}`;
+  ctx.fillText(`${score.toLocaleString('es-CL')} pts`, 988, 1776);
 
   return canvas.toDataURL('image/png');
 }
@@ -306,15 +312,15 @@ export function LeyendasPosterModal({ career, onClose }: LeyendasPosterModalProp
       role="dialog"
       aria-modal="true"
       aria-labelledby="leyendas-poster-title"
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
     >
-      <div className="bg-[#0d0d0d] text-white border border-white/15 w-full max-w-2xl overflow-hidden my-6">
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between gap-4">
+      <div className="rounded-3xl bg-[#0c0c10] text-white border border-white/[0.1] w-full max-w-2xl overflow-hidden my-6">
+        <div className="px-6 py-5 border-b border-white/[0.08] flex items-center justify-between gap-4">
           <div>
-            <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-[#707ef9]">
-              Tarjeta Final · 1080×1920 PNG
+            <p className="text-xs text-[#a5b0ff]">
+              Tarjeta final · 1080×1920 PNG
             </p>
-            <h3 id="leyendas-poster-title" className="font-display text-2xl font-bold uppercase">
+            <h3 id="leyendas-poster-title" className="text-2xl font-medium tracking-[-0.03em] text-white">
               {career.playerName}
             </h3>
           </div>
@@ -322,33 +328,33 @@ export function LeyendasPosterModal({ career, onClose }: LeyendasPosterModalProp
             type="button"
             onClick={onClose}
             aria-label="Cerrar vista previa de tarjeta"
-            className="p-2 text-neutral-400 hover:text-white cursor-pointer"
+            className="p-2 rounded-full bg-white/[0.04] hover:bg-white/[0.1] text-white/70 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-5">
-          <div className="bg-[#14141b] border border-white/10 p-4 flex items-center justify-center min-h-[380px]">
+          <div className="rounded-2xl bg-[#050507] border border-white/[0.08] p-4 flex items-center justify-center min-h-[380px]">
             {generating ? (
-              <p className="text-sm text-neutral-400 font-mono">
+              <p className="text-sm text-white/55">
                 Generando tarjeta 1080×1920...
               </p>
             ) : dataUrl ? (
               <img
                 src={dataUrl}
-                alt={`Tarjeta final de ${career.playerName} en LEYENDAS UFRO`}
-                className="max-h-[540px] w-auto object-contain border border-white/15 shadow-2xl"
+                alt={`Tarjeta final de ${career.playerName} en Leyendas UFRO`}
+                className="max-h-[540px] w-auto object-contain rounded-xl border border-white/[0.12] shadow-2xl"
               />
             ) : (
-              <p className="text-sm text-red-400">
+              <p className="text-sm text-rose-400">
                 No se pudo generar la vista previa de la tarjeta.
               </p>
             )}
           </div>
 
           {shareNote && (
-            <p role="status" className="text-xs text-emerald-400 text-center">
+            <p role="status" className="text-xs text-emerald-300 text-center">
               {shareNote}
             </p>
           )}
@@ -358,7 +364,7 @@ export function LeyendasPosterModal({ career, onClose }: LeyendasPosterModalProp
               type="button"
               onClick={handleShare}
               disabled={!dataUrl}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-display font-bold uppercase tracking-wider text-xs transition-colors cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-white text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
             >
               <Share2 className="w-4 h-4" />
               <span>Compartir Story</span>
@@ -367,7 +373,7 @@ export function LeyendasPosterModal({ career, onClose }: LeyendasPosterModalProp
               type="button"
               onClick={handleDownload}
               disabled={!dataUrl}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display font-bold uppercase tracking-wider text-xs transition-colors cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#707ef9] hover:bg-[#5e6df5] text-white text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
               <span>Descargar PNG</span>

@@ -8,6 +8,15 @@ import type {
   Match,
   Team,
 } from '../types/tournament';
+import {
+  applyOvrXpDelta,
+  getOvrCapForCareer,
+  legacyOvrDeltaToXp,
+  type LeyendasGauntletResult,
+  type LeyendasMidSemesterResolution,
+} from './leyendasSpecialModes';
+
+export * from './leyendasSpecialModes';
 
 export type LeyendasSportKey = 'futbol' | 'basquet' | 'voley';
 export type LeyendasBranch = 'hombre' | 'mujer';
@@ -42,6 +51,7 @@ export interface LeyendasFocusCard {
   title: string;
   subtitle: string;
   ovrDelta: number;
+  ovrXpDelta: number;
   gpaDelta: number;
   statMult: number;
   injuryRiskDelta: number;
@@ -193,6 +203,7 @@ export interface LeyendasMiniGameOutcome {
   tier: 'PERFECT' | 'GOOD' | 'MISS';
   success: boolean;
   ovrDelta: number;
+  ovrXpDelta: number;
   statBoost: number;
   headline: string;
   narrative: string;
@@ -212,8 +223,12 @@ export interface LeyendasCareerState {
   totalSemesters: number;
   postgradStage: 'PREGRADO' | 'MAGISTER' | 'DOCTORADO';
   ovr: number;
+  ovrProgress: number;
   maxOvr: number;
   lastOvrDelta: number;
+  momentum: number; // -2..3 streak
+  lastGauntletYear: number | null;
+  gauntletsWon: number;
   gpa: number;
   hasScholarship: boolean;
   injuredSemesters: number;
@@ -246,6 +261,7 @@ export interface LeyendasCareerState {
     seleccionUfro?: string;
     injuryNote?: string;
     ovrChange?: number;
+    gauntletBadge?: string;
   } | null;
   pendingLoanOffers: LeyendasClub[];
   pendingTransferOffers: LeyendasTransferOffer[];
@@ -783,6 +799,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Pretemporada Estadio UFRO',
     subtitle: 'Doble jornada física y técnica con balón/aro',
     ovrDelta: 2,
+    ovrXpDelta: 38,
     gpaDelta: -0.22,
     statMult: 1.22,
     injuryRiskDelta: 0.12,
@@ -794,6 +811,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Sparring con Selección UFRO',
     subtitle: 'Entrenamiento táctico de máxima exigencia',
     ovrDelta: 2,
+    ovrXpDelta: 42,
     gpaDelta: -0.28,
     statMult: 1.28,
     injuryRiskDelta: 0.16,
@@ -805,6 +823,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Método Atleta-Estudiante',
     subtitle: 'Planificación entre Gimnasio Olímpico y Biblioteca',
     ovrDelta: 1,
+    ovrXpDelta: 22,
     gpaDelta: 0.35,
     statMult: 1.05,
     injuryRiskDelta: -0.05,
@@ -816,6 +835,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Videoanálisis con el DT',
     subtitle: 'Lectura de rivales y pelota detenida',
     ovrDelta: 1,
+    ovrXpDelta: 26,
     gpaDelta: 0.08,
     statMult: 1.15,
     injuryRiskDelta: -0.04,
@@ -827,6 +847,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Potencia en Gimnasio Olímpico',
     subtitle: 'Fuerza explosiva y prevención de lesiones',
     ovrDelta: 1,
+    ovrXpDelta: 24,
     gpaDelta: -0.08,
     statMult: 1.12,
     injuryRiskDelta: -0.08,
@@ -838,6 +859,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Modo Biblioteca Central',
     subtitle: 'Prioridad absoluta a certámenes y promedio',
     ovrDelta: 0,
+    ovrXpDelta: 0,
     gpaDelta: 0.65,
     statMult: 0.9,
     injuryRiskDelta: -0.08,
@@ -849,6 +871,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Recuperación Kinesiológica',
     subtitle: 'Descarga muscular en clínica UFRO',
     ovrDelta: 1,
+    ovrXpDelta: 10,
     gpaDelta: 0.2,
     statMult: 0.96,
     injuryRiskDelta: -0.16,
@@ -860,6 +883,7 @@ const FOCUS_CARD_POOL: LeyendasFocusCard[] = [
     title: 'Liderazgo de Camarín',
     subtitle: 'Cohesión con mechones y capitanes de carrera',
     ovrDelta: 1,
+    ovrXpDelta: 14,
     gpaDelta: 0.12,
     statMult: 1.08,
     injuryRiskDelta: -0.03,
@@ -1851,14 +1875,17 @@ export function pickSemesterEvent(
 export function getVisualMiniGameScenario(
   career: LeyendasCareerState,
   rng: () => number = Math.random,
-  lastKind?: LeyendasMiniGameKind | null
+  lastKind?: LeyendasMiniGameKind | null,
+  overrides?: { rivalName?: string; speedBump?: number }
 ): LeyendasMiniGameScenario {
-  const rivalName = career.rival?.clubName ?? 'Clásico Rival UFRO';
+  const rivalName = overrides?.rivalName ?? career.rival?.clubName ?? 'Clásico Rival UFRO';
   const ovrBonusWidth = Math.max(-3, Math.min(8, Math.round((career.ovr - 70) * 0.3)));
   const injuredPenalty = career.activeInjury ? -3 : 0;
   const sweetSpotWidth = Math.max(10, Math.min(22, 14 + Math.round(ovrBonusWidth * 0.5) + injuredPenalty));
   const goodZoneWidth = Math.max(26, Math.min(44, 34 + ovrBonusWidth + injuredPenalty));
-  const speedMultiplier = career.semester === 2 ? 1.12 : 1.0;
+  const speedMultiplier = Number(
+    ((career.semester === 2 ? 1.12 : 1.0) + (overrides?.speedBump ?? 0)).toFixed(2)
+  );
 
   let pool: LeyendasMiniGameKind[];
   if (career.sportKey === 'futbol') {
@@ -2074,6 +2101,17 @@ export function evaluateVisualMiniGameOutcome(
   scenario: LeyendasMiniGameScenario,
   tier: 'PERFECT' | 'GOOD' | 'MISS'
 ): LeyendasMiniGameOutcome {
+  const base = evaluateVisualMiniGameOutcomeBase(scenario, tier);
+  return {
+    ...base,
+    ovrXpDelta: tier === 'PERFECT' ? 48 : tier === 'GOOD' ? 22 : -34,
+  };
+}
+
+function evaluateVisualMiniGameOutcomeBase(
+  scenario: LeyendasMiniGameScenario,
+  tier: 'PERFECT' | 'GOOD' | 'MISS'
+): Omit<LeyendasMiniGameOutcome, 'ovrXpDelta'> {
   switch (scenario.kind) {
     case 'penalty_kick':
       if (tier === 'PERFECT') {
@@ -2815,15 +2853,20 @@ export function simulateSemesterFull(params: {
     injuryTriggered?: boolean;
     rehabCompleted?: boolean;
   };
-  momentDelta: { ovrDelta: number; statBoost: number; success?: boolean };
+  momentDelta: { ovrDelta: number; statBoost: number; success?: boolean; ovrXpDelta?: number };
+  midSemesterImpact?: LeyendasMidSemesterResolution | null;
+  gauntletResult?: LeyendasGauntletResult | null;
   incrementalOvrAlreadyApplied?: boolean;
   rng?: () => number;
 }): LeyendasCareerState {
   const rng = params.rng ?? Math.random;
   const prev = params.career;
+  const mid = params.midSemesterImpact ?? null;
+  const gauntlet = params.gauntletResult ?? null;
 
   // Update physical load / injury risk (0..100)
-  const riskShift = Math.round(params.focusCard.injuryRiskDelta * 100);
+  const riskShift =
+    Math.round(params.focusCard.injuryRiskDelta * 100) + (mid?.injuryRiskDelta ?? 0);
   const nextInjuryRisk = Math.max(0, Math.min(90, prev.injuryRisk + riskShift));
 
   // Determine injury status for this semester and next
@@ -2869,42 +2912,71 @@ export function simulateSemesterFull(params: {
     }
   }
 
-  const ovrCap = prev.trophies.length >= 2 || prev.ovr >= 94 ? 105 : 99;
-  const scholarshipBonus = prev.hasScholarship && rng() < 0.5 ? 1 : 0;
+  const nextGauntletsWon = (prev.gauntletsWon ?? 0) + (gauntlet?.wonChampionship ? 1 : 0);
+  const ovrCap = getOvrCapForCareer({
+    trophiesCount: prev.trophies.length,
+    gauntletsWon: nextGauntletsWon,
+    ovr: prev.ovr,
+  });
+
+  const scholarshipXp = prev.hasScholarship ? 14 : 0;
+  const injuryXp = sufferedInjuryThisSemester && !prev.activeInjury ? -46 : 0;
 
   let nextOvr = prev.ovr;
+  let nextOvrProgress = prev.ovrProgress ?? 0;
   let appliedDelta = 0;
 
   if (params.incrementalOvrAlreadyApplied) {
     // Only apply end-of-semester subtle adjustment (scholarship / injury setback)
-    const endRaw = scholarshipBonus + (sufferedInjuryThisSemester && !prev.activeInjury ? -1 : 0);
-    const res = applyGradualOvrDelta(prev.ovr, endRaw, ovrCap);
+    const endXp = scholarshipXp + injuryXp;
+    const res = applyOvrXpDelta({
+      currentOvr: prev.ovr,
+      currentProgress: prev.ovrProgress ?? 0,
+      xpDelta: endXp,
+      ovrCap,
+      semestersPlayed: prev.semestersPlayed,
+      momentum: prev.momentum ?? 0,
+    });
     nextOvr = res.nextOvr;
-    appliedDelta = res.appliedDelta;
+    nextOvrProgress = res.nextProgress;
+    appliedDelta = res.ovrDelta;
   } else {
-    const rawOvrDelta =
-      params.focusCard.ovrDelta +
-      params.eventDelta.ovrDelta +
-      params.momentDelta.ovrDelta +
-      scholarshipBonus +
-      (sufferedInjuryThisSemester ? -1 : 0);
-    const res = applyGradualOvrDelta(prev.ovr, rawOvrDelta, ovrCap);
+    const focusXp =
+      params.focusCard.ovrXpDelta ?? legacyOvrDeltaToXp(params.focusCard.ovrDelta);
+    const eventXp = legacyOvrDeltaToXp(params.eventDelta.ovrDelta);
+    const midXp = mid?.xpDelta ?? 0;
+    const momentXp = gauntlet
+      ? gauntlet.totalXpEarned
+      : params.momentDelta.ovrXpDelta ?? legacyOvrDeltaToXp(params.momentDelta.ovrDelta);
+    const totalXp = focusXp + eventXp + midXp + momentXp + scholarshipXp + injuryXp;
+    const res = applyOvrXpDelta({
+      currentOvr: prev.ovr,
+      currentProgress: prev.ovrProgress ?? 0,
+      xpDelta: totalXp,
+      ovrCap,
+      semestersPlayed: prev.semestersPlayed,
+      momentum: prev.momentum ?? 0,
+    });
     nextOvr = res.nextOvr;
-    appliedDelta = res.appliedDelta;
+    nextOvrProgress = res.nextProgress;
+    appliedDelta = res.ovrDelta;
   }
 
   const nextMaxOvr = Math.max(prev.maxOvr, nextOvr);
 
   const nextGpa = updateHiddenGpa(
     prev.gpa,
-    params.focusCard.gpaDelta + params.eventDelta.gpaDelta,
+    params.focusCard.gpaDelta + params.eventDelta.gpaDelta + (mid?.gpaDelta ?? 0),
     prev.hasScholarship
   );
   const nextScholarship = evaluateSportsScholarship(nextOvr, nextGpa);
 
   const boostedTeam: LeyendasClub = {
     ...prev.team,
-    ovr: Math.min(93, prev.team.ovr + (params.eventDelta.teamOvrBoost ?? 0)),
+    ovr: Math.min(
+      93,
+      prev.team.ovr + (params.eventDelta.teamOvrBoost ?? 0) + (mid?.teamOvrBoost ?? 0)
+    ),
   };
 
   // Effective team strength blends club OVR and player impact
@@ -2922,7 +2994,10 @@ export function simulateSemesterFull(params: {
     pos: prev.pos,
     ovr: nextOvr,
     statMult: sufferedInjuryThisSemester ? 0.6 : params.focusCard.statMult,
-    extraBonus: params.eventDelta.statBonus + params.momentDelta.statBoost,
+    extraBonus:
+      params.eventDelta.statBonus +
+      (mid?.statBonus ?? 0) +
+      (gauntlet ? gauntlet.totalStatBoost : params.momentDelta.statBoost),
     matchesPlayed,
     rng,
   });
@@ -2945,11 +3020,40 @@ export function simulateSemesterFull(params: {
   let promotedLabel: string | undefined;
   let relegatedLabel: string | undefined;
   let seleccionLabel: string | undefined;
+  let gauntletBadge: string | undefined;
   let nextTeam = boostedTeam;
-  let nextCaps = prev.caps;
+  let nextCaps = prev.caps + (mid?.capsGain ?? 0);
   let nextClimbed = prev.climbedFromThirdToFirst;
   let headline = '';
   let subheadline = '';
+
+  if (mid) {
+    newTimeline.push({
+      id: `tl-mid-${prev.year}-${prev.semester}`,
+      year: prev.year,
+      semester: prev.semester,
+      badge: mid.timelineBadge,
+      title: mid.timelineTitle,
+      detail: mid.narrative,
+      tone: mid.success
+        ? mid.choiceTag === 'SELECCIÓN' || mid.choiceTag === 'DOBLE FRENTE'
+          ? 'gold'
+          : 'accent'
+        : 'danger',
+    });
+
+    if (mid.capsGain > 0 && mid.seleccionTournamentName) {
+      seleccionLabel = `Selección UFRO · ${mid.seleccionTournamentName} (+${mid.capsGain} caps)`;
+      if (mid.success && prev.semester === 2 && nextOvr >= 84 && rng() < 0.45) {
+        trophiesWon.push({
+          id: `sel-mid-${prev.year}`,
+          title: `Selección UFRO · ${mid.seleccionTournamentName}`,
+          year: prev.year,
+          team: 'Selección UFRO',
+        });
+      }
+    }
+  }
 
   if (nextActiveInjury && !prev.activeInjury) {
     newTimeline.push({
@@ -2963,7 +3067,25 @@ export function simulateSemesterFull(params: {
     });
   }
 
-  const perfRoll = teamStrength + (rng() * 20 - 10) - (sufferedInjuryThisSemester ? 3 : 0);
+  const perfRoll =
+    teamStrength +
+    (rng() * 20 - 10) +
+    (mid?.qualificationBonus ?? 0) -
+    (sufferedInjuryThisSemester ? 3 : 0);
+
+  // Update Momentum streak (-2..+3)
+  let nextMomentum = prev.momentum ?? 0;
+  if (gauntlet) {
+    nextMomentum = gauntlet.wonChampionship
+      ? Math.min(3, nextMomentum + 2)
+      : Math.max(-2, nextMomentum - 1);
+  } else if (params.momentDelta.success === true) {
+    nextMomentum = Math.min(3, nextMomentum + 1);
+  } else if (params.momentDelta.success === false) {
+    nextMomentum = Math.max(-2, nextMomentum - 1);
+  }
+
+  const nextLastGauntletYear = gauntlet ? prev.year : (prev.lastGauntletYear ?? null);
 
   if (prev.semester === 1) {
     // S1: Fase de Grupos + Copa Facultad
@@ -3029,14 +3151,27 @@ export function simulateSemesterFull(params: {
     }
   } else {
     // S2: Playoffs + Ascenso/Descenso + Interfacultades + Selección UFRO + Premios Individuales
-    const wonIntercarreras = perfRoll >= 84;
-    const finalist = !wonIntercarreras && perfRoll >= 79;
-    const thirdPlace = !wonIntercarreras && !finalist && perfRoll >= 75;
-    const relegated =
-      prev.sportKey === 'futbol' &&
-      prev.branch === 'hombre' &&
-      (boostedTeam.div === '1ª Div' || boostedTeam.div === '2ª Div') &&
-      perfRoll < 65;
+    const wonIntercarreras = gauntlet
+      ? gauntlet.finalStageReached === 'CAMPEÓN'
+      : perfRoll >= 84;
+    const finalist = gauntlet
+      ? gauntlet.finalStageReached === 'FINAL'
+      : !wonIntercarreras && perfRoll >= 79;
+    const thirdPlace = gauntlet
+      ? gauntlet.finalStageReached === 'SEMIFINAL'
+      : !wonIntercarreras && !finalist && perfRoll >= 75;
+    const relegated = gauntlet
+      ? false
+      : prev.sportKey === 'futbol' &&
+        prev.branch === 'hombre' &&
+        (boostedTeam.div === '1ª Div' || boostedTeam.div === '2ª Div') &&
+        perfRoll < 65;
+
+    if (gauntlet) {
+      gauntletBadge = gauntlet.wonChampionship
+        ? `Ruta Épica superada (${gauntlet.roundsCleared}/${gauntlet.totalRounds})`
+        : `Eliminación Directa · ${gauntlet.eliminatedAtStage ?? 'Playoffs'}`;
+    }
 
     if (wonIntercarreras) {
       const titleText =
@@ -3049,15 +3184,19 @@ export function simulateSemesterFull(params: {
         year: prev.year,
         team: boostedTeam.name,
       });
-      headline = `¡CAMPEÓN INTERCARRERAS ${prev.year}!`;
-      subheadline = `${boostedTeam.name} conquistó la Gran Final en ${boostedTeam.div}.`;
+      headline = gauntlet ? gauntlet.headline : `¡Campeón Intercarreras ${prev.year}!`;
+      subheadline = gauntlet
+        ? gauntlet.narrative
+        : `${boostedTeam.name} conquistó la Gran Final en ${boostedTeam.div}.`;
       newTimeline.push({
         id: `tl-champ-${prev.year}`,
         year: prev.year,
         semester: 2,
-        badge: 'TÍTULO',
+        badge: gauntlet ? 'RUTA ÉPICA' : 'TÍTULO',
         title: `¡${titleText} ${prev.year}!`,
-        detail: `Figura en la Gran Final con ${boostedTeam.name} (${nextOvr} OVR).`,
+        detail: gauntlet
+          ? gauntlet.narrative
+          : `Figura en la Gran Final con ${boostedTeam.name} (${nextOvr} OVR).`,
         tone: 'gold',
       });
 
@@ -3074,8 +3213,10 @@ export function simulateSemesterFull(params: {
         }
       }
     } else if (finalist) {
-      headline = `Subcampeón Intercarreras ${prev.year}`;
-      subheadline = `${boostedTeam.name} cayó en una final vibrante de ${boostedTeam.div}.`;
+      headline = gauntlet ? gauntlet.headline : `Subcampeón Intercarreras ${prev.year}`;
+      subheadline = gauntlet
+        ? gauntlet.narrative
+        : `${boostedTeam.name} cayó en una final vibrante de ${boostedTeam.div}.`;
       if (prev.sportKey === 'futbol' && prev.branch === 'hombre' && boostedTeam.div === '3ª Div') {
         nextTeam = { ...boostedTeam, div: '2ª Div', ovr: Math.min(82, boostedTeam.ovr + 2) };
         promotedLabel = 'Ascenso a 2ª División como Subcampeón';
@@ -3090,19 +3231,29 @@ export function simulateSemesterFull(params: {
         semester: 2,
         badge: 'FINAL',
         title: `Subcampeón ${boostedTeam.div} (${prev.year})`,
-        detail: `Gran campaña con ${boostedTeam.name} hasta el último partido.`,
+        detail: gauntlet
+          ? gauntlet.narrative
+          : `Gran campaña con ${boostedTeam.name} hasta el último partido.`,
         tone: 'accent',
       });
     } else if (thirdPlace) {
-      headline = `Podio · Tercer Lugar ${prev.year}`;
-      subheadline = `${boostedTeam.name} cerró el año ganando el partido por el bronce.`;
+      headline = gauntlet
+        ? `Semifinalista · Ruta de Playoffs ${prev.year}`
+        : `Podio · Tercer Lugar ${prev.year}`;
+      subheadline = gauntlet
+        ? gauntlet.narrative
+        : `${boostedTeam.name} cerró el año ganando el partido por el bronce.`;
       newTimeline.push({
         id: `tl-3rd-${prev.year}`,
         year: prev.year,
         semester: 2,
-        badge: 'PODIO',
-        title: `Tercer Lugar en ${boostedTeam.div}`,
-        detail: `Victoria en la definición por el 3° puesto con ${boostedTeam.name}.`,
+        badge: gauntlet ? 'SEMIFINAL' : 'PODIO',
+        title: gauntlet
+          ? `Semifinalista en ${boostedTeam.div}`
+          : `Tercer Lugar en ${boostedTeam.div}`,
+        detail: gauntlet
+          ? gauntlet.narrative
+          : `Victoria en la definición por el 3° puesto con ${boostedTeam.name}.`,
         tone: 'neutral',
       });
     } else if (relegated) {
@@ -3121,15 +3272,23 @@ export function simulateSemesterFull(params: {
         tone: 'danger',
       });
     } else {
-      headline = `Cuartos de Final · Temporada ${prev.year}`;
-      subheadline = `${boostedTeam.name} compitió en playoffs pero quedó en el camino.`;
+      headline = gauntlet
+        ? `${gauntlet.headline} · Temporada ${prev.year}`
+        : `Cuartos de Final · Temporada ${prev.year}`;
+      subheadline = gauntlet
+        ? gauntlet.narrative
+        : `${boostedTeam.name} compitió en playoffs pero quedó en el camino.`;
       newTimeline.push({
         id: `tl-qf-${prev.year}`,
         year: prev.year,
         semester: 2,
         badge: 'PLAYOFFS',
-        title: `Campaña sólida en ${boostedTeam.div}`,
-        detail: `Sumaste experiencia clave y cerraste con ${nextOvr} OVR.`,
+        title: gauntlet
+          ? `Eliminación en ${gauntlet.eliminatedAtStage ?? 'Playoffs'} (${boostedTeam.div})`
+          : `Campaña sólida en ${boostedTeam.div}`,
+        detail: gauntlet
+          ? gauntlet.narrative
+          : `Sumaste experiencia clave y cerraste con ${nextOvr} OVR.`,
         tone: 'neutral',
       });
     }
@@ -3266,8 +3425,12 @@ export function simulateSemesterFull(params: {
     semestersPlayed: nextSemestersPlayed,
     totalSemesters: nextTotalSemesters,
     ovr: nextOvr,
+    ovrProgress: nextOvrProgress,
     maxOvr: nextMaxOvr,
     lastOvrDelta: appliedDelta,
+    momentum: nextMomentum,
+    lastGauntletYear: nextLastGauntletYear,
+    gauntletsWon: nextGauntletsWon,
     gpa: nextGpa,
     hasScholarship: nextScholarship,
     injuredSemesters: nextActiveInjury ? prev.injuredSemesters + 1 : 0,
@@ -3297,6 +3460,7 @@ export function simulateSemesterFull(params: {
       seleccionUfro: seleccionLabel,
       injuryNote,
       ovrChange: appliedDelta,
+      gauntletBadge,
     },
     pendingLoanOffers,
     pendingTransferOffers: [],
@@ -3347,7 +3511,7 @@ export function computeCreativeLegacyBanner(career: LeyendasCareerState): {
   tier: 'GOAT' | 'LEYENDA' | 'ICONO' | 'FIGURA' | 'PROMESA';
 } {
   const uniqueClubs = new Set(career.stints.map((s) => s.team)).size;
-  if (career.maxOvr >= 100 || (career.trophies.length >= 5 && career.maxOvr >= 90)) {
+  if (career.maxOvr >= 99 || (career.trophies.length >= 5 && career.maxOvr >= 90)) {
     return {
       title: 'GOAT Absoluto del Campus UFRO',
       subtitle: 'Tu camiseta y tu apellido quedaron grabados en la historia grande de Intercarreras.',
@@ -3534,8 +3698,12 @@ export function createInitialCareerState(params: {
     totalSemesters: years * 2,
     postgradStage: 'PREGRADO',
     ovr: startOvr,
+    ovrProgress: 0,
     maxOvr: startOvr,
     lastOvrDelta: 0,
+    momentum: 0,
+    lastGauntletYear: null,
+    gauntletsWon: 0,
     gpa: createInitialGpa(),
     hasScholarship: evaluateSportsScholarship(startOvr, createInitialGpa()),
     injuredSemesters: 0,

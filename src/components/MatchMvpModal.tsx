@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Award,
@@ -28,6 +28,7 @@ import {
 } from '../domain/rbacEngine';
 import type {
   AppUserProfile,
+  DisciplineId,
   Match,
   MvpVoteRecord,
   Player,
@@ -47,6 +48,7 @@ interface MatchMvpModalProps {
   onOpenAuth: () => void;
   onOpenMatchInReferee?: (matchId: string) => void;
   onToggleFavoriteTeam?: (teamId: string) => void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 export function MatchMvpModal({
@@ -60,9 +62,16 @@ export function MatchMvpModal({
   onOpenAuth,
   onOpenMatchInReferee,
   onToggleFavoriteTeam,
+  onLoadTeamPlayers,
 }: MatchMvpModalProps) {
   const [playerQuery, setPlayerQuery] = useState('');
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+
+  useEffect(() => {
+    if (!match || !onLoadTeamPlayers) return;
+    void onLoadTeamPlayers(match.homeTeamId, match.disciplineId);
+    void onLoadTeamPlayers(match.awayTeamId, match.disciplineId);
+  }, [match?.id, match?.homeTeamId, match?.awayTeamId, match?.disciplineId, onLoadTeamPlayers]);
 
   if (!match) return null;
 

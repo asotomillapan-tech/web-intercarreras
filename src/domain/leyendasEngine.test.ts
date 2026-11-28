@@ -436,4 +436,69 @@ describe('leyendasEngine', () => {
       );
     }
   });
+
+  it('integrates mid-semester Selección UFRO impact and Playoff Gauntlet championship outcomes in simulateSemesterFull', () => {
+    const clubs = buildLeyendasTeamsFromTournament(SAMPLE_TEAMS, SAMPLE_MATCHES);
+    const team = clubs.find((c) => c.realTeamId === 'eq-ind-1')!;
+    const initial = createInitialCareerState({
+      playerName: 'Ignacio Vera',
+      careerName: 'Ingeniería Civil Industrial',
+      sportKey: 'futbol',
+      branch: 'hombre',
+      pos: 'DEL',
+      team,
+      allClubs: clubs,
+      rng: () => 0.5,
+    });
+    const cards = drawSemesterFocusCards(() => 0.25);
+
+    const afterMid = simulateSemesterFull({
+      career: { ...initial, semester: 2, ovr: 80 },
+      allClubs: clubs,
+      focusCard: cards[0],
+      eventDelta: { ovrDelta: 1, gpaDelta: 0, statBonus: 1 },
+      momentDelta: { ovrDelta: 1, statBoost: 2, success: true },
+      midSemesterImpact: {
+        dilemmaKind: 'seleccion_vs_pase',
+        optionId: 'ms-opt-seleccion-ufro',
+        choiceTag: 'SELECCIÓN',
+        success: true,
+        xpDelta: 64,
+        gpaDelta: -0.15,
+        injuryRiskDelta: 10,
+        qualificationBonus: -6,
+        capsGain: 3,
+        statBonus: 2,
+        teamOvrBoost: 0,
+        seleccionTournamentName: 'FENAUDE Nacional',
+        headline: 'Brillaste con la Selección UFRO (+3 caps)',
+        narrative: 'Destacaste en FENAUDE Nacional.',
+        timelineBadge: 'SELECCIÓN UFRO',
+        timelineTitle: 'Citación FENAUDE Nacional (+3 caps)',
+      },
+      gauntletResult: {
+        gauntletId: 'gauntlet-2026-qf',
+        wonChampionship: true,
+        roundsCleared: 3,
+        totalRounds: 3,
+        perfectRounds: 2,
+        totalXpEarned: 195,
+        totalStatBoost: 8,
+        finalStageReached: 'CAMPEÓN',
+        headline: '¡CAMPEÓN DE LA RUTA DE ELIMINACIÓN DIRECTA!',
+        narrative: 'Decidiste las 3 últimas jugadas consecutivas hasta levantar la copa.',
+      },
+      rng: () => 0.4,
+    });
+
+    assert.ok(afterMid.caps >= 3, 'Selección UFRO mid-semester call-up must add official caps');
+    assert.equal(afterMid.gauntletsWon, 1, 'Sweeping playoff gauntlet must increment gauntletsWon');
+    assert.equal(afterMid.lastGauntletYear, 2026, 'Must record lastGauntletYear for cooldown');
+    assert.ok(
+      afterMid.trophies.some((t) => t.title.includes('Campeón Intercarreras')),
+      'Winning the playoff gauntlet must award the Intercarreras championship trophy'
+    );
+    assert.ok(afterMid.momentum > 0, 'Winning the gauntlet must boost momentum');
+  });
 });
+

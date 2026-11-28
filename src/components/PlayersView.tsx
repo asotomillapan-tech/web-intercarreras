@@ -1,31 +1,27 @@
 import {
-  forwardRef,
-  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
   type FormEvent,
 } from 'react';
 import {
+  ArrowLeft,
   Award,
   CheckCircle2,
   ClipboardCheck,
   Edit3,
   Layers,
+  Loader2,
   Search,
+  Shield,
   TrendingUp,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import {
-  TableVirtuoso,
-  type TableComponents,
-  type TableVirtuosoHandle,
-} from 'react-virtuoso';
 import { DISCIPLINES, DISCIPLINE_MAP, UFRO_CAREERS, UFRO_FACULTIES } from '../data/ufroSeed';
 import { computePlayerAttendanceSummary, formatDorsalLabel } from '../domain/attendanceEngine';
 import {
@@ -36,14 +32,21 @@ import {
 } from '../domain/identityCrossRefEngine';
 import { computePlayerSeasonPerformance } from '../domain/playerPerformanceEngine';
 import { canEditPlayerProfile } from '../domain/rbacEngine';
+import {
+  PLAYERS_PREVIEW_LIMIT,
+  filterTeamsForQuickSelect,
+  slicePlayersForDirectoryView,
+} from '../domain/readOptimizationEngine';
 import { formatRut, validateRut, validateUfroEmail } from '../domain/tournamentEngine';
 import { EDITORIAL_EASE, SectionKicker } from './MotionPrimitives';
 import { PlayerPerformanceChart } from './PlayerPerformanceChart';
+import { TeamCrest } from './TeamCrest';
 import type {
   AcademicLevel,
   AppUserProfile,
   DisciplineId,
   Player,
+  Team,
   TournamentState,
 } from '../types/tournament';
 
@@ -54,57 +57,12 @@ interface PlayersViewProps {
   onSelectPlayer: (player: Player | null) => void;
   onInspectTeam: (teamId: string) => void;
   onUpdatePlayer: (updated: Player) => void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
+  onSearchPlayers?: (query: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 const getPlayerInitials = (p: Player) =>
   `${p.nombre[0] ?? ''}${p.apellidoPaterno[0] ?? ''}`.toUpperCase();
-
-const VIRTUOSO_TABLE_COMPONENTS: TableComponents<UnifiedPlayerProfile> = {
-  Scroller: forwardRef<HTMLDivElement, ComponentProps<'div'> & { context?: unknown }>(
-    function VirtuosoScroller({ context: _context, className, ...props }, ref) {
-      return (
-        <div
-          {...props}
-          ref={ref}
-          className={`overflow-x-auto bg-[#0c0c10] ${className ?? ''}`}
-        />
-      );
-    }
-  ),
-  Table: ({ context: _context, ...props }) => (
-    <table {...props} className="w-full text-left border-collapse text-sm" />
-  ),
-  TableHead: forwardRef<
-    HTMLTableSectionElement,
-    ComponentProps<'thead'> & { context?: unknown }
-  >(function VirtuosoTableHead({ context: _context, ...props }, ref) {
-    return <thead {...props} ref={ref} className="bg-[#111117] z-10" />;
-  }),
-  TableRow: ({ item: _item, context: _context, ...props }) => (
-    <tr
-      {...props}
-      className="border-b border-white/[0.06] hover:bg-white/[0.03] transition-colors bg-[#0c0c10]"
-    />
-  ),
-  TableBody: forwardRef<
-    HTMLTableSectionElement,
-    ComponentProps<'tbody'> & { context?: unknown }
-  >(function VirtuosoTableBody({ context: _context, ...props }, ref) {
-    return <tbody {...props} ref={ref} />;
-  }),
-};
-
-const renderPlayersTableHeader = () => (
-  <tr className="bg-[#111117] text-[11px] text-zinc-500 shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.08)]">
-    <th className="py-3 px-4 font-medium bg-[#111117]">Estudiante</th>
-    <th className="py-3 px-3 font-medium bg-[#111117]">Equipos y Disciplinas</th>
-    <th className="py-3 px-3 hidden md:table-cell font-medium bg-[#111117]">Carrera</th>
-    <th className="py-3 px-3 hidden lg:table-cell font-medium bg-[#111117]">RUT</th>
-    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#111117]">PJ</th>
-    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#111117]">Rendimiento</th>
-    <th className="py-3 px-4 text-right font-medium bg-[#111117]">Ficha</th>
-  </tr>
-);
 
 export function PlayersView({
   state,
@@ -113,6 +71,8 @@ export function PlayersView({
   onSelectPlayer,
   onInspectTeam,
   onUpdatePlayer,
+  onLoadTeamPlayers,
+  onSearchPlayers,
 }: PlayersViewProps) {
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
@@ -120,7 +80,14 @@ export function PlayersView({
   const [facultyFilter, setFacultyFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<'ALL' | AcademicLevel>('ALL');
   const [onlySelectedUfro, setOnlySelectedUfro] = useState(false);
-  const virtuosoRef = useRef<TableVirtuosoHandle>(null);
+
+  // Team-focused directory state (default = null -> strictly 10 players)
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [teamSearchQuery, setTeamSearchQuery] = useState('');
+  const [teamDisciplineTab, setTeamDisciplineTab] = useState<'ALL' | DisciplineId>('ALL');
+  const [loadingTeamRoster, setLoadingTeamRoster] = useState(false);
+  const [searchingRemotePlayers, setSearchingRemotePlayers] = useState(false);
+  const rosterTopRef = useRef<HTMLDivElement>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<Player | null>(null);
@@ -235,9 +202,63 @@ export function PlayersView({
     setEditSaved(null);
   }, [activeParticipationRecord?.id]);
 
+  // Targeted remote name search only when typing >= 2 chars (never downloads full collection)
   useEffect(() => {
-    virtuosoRef.current?.scrollToIndex({ index: 0, behavior: 'auto' });
-  }, [deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
+    const trimmed = deferredQuery.trim();
+    if (!onSearchPlayers || trimmed.length < 2) {
+      setSearchingRemotePlayers(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearchingRemotePlayers(true);
+      onSearchPlayers(trimmed, disciplineFilter === 'ALL' ? undefined : disciplineFilter)
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setSearchingRemotePlayers(false);
+        });
+    }, 320);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [deferredQuery, disciplineFilter, onSearchPlayers]);
+
+  const selectedTeam: Team | null = useMemo(
+    () => (selectedTeamId ? teamMap.get(selectedTeamId) ?? null : null),
+    [selectedTeamId, teamMap]
+  );
+
+  const handleSelectDirectoryTeam = async (team: Team) => {
+    setSelectedTeamId(team.id);
+    setQuery('');
+    setDisciplineFilter('ALL');
+    setFacultyFilter('ALL');
+    setLevelFilter('ALL');
+    setOnlySelectedUfro(false);
+
+    if (onLoadTeamPlayers) {
+      setLoadingTeamRoster(true);
+      try {
+        await onLoadTeamPlayers(team.id, team.disciplineId);
+      } finally {
+        setLoadingTeamRoster(false);
+      }
+    }
+
+    rosterTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const quickSelectTeamsResult = useMemo(
+    () =>
+      filterTeamsForQuickSelect(state.teams, {
+        query: teamSearchQuery,
+        disciplineFilter: teamDisciplineTab,
+        maxPreviewCount: 8,
+        maxSearchResults: 24,
+      }),
+    [state.teams, teamSearchQuery, teamDisciplineTab]
+  );
 
   const canEditSelected = activeParticipationRecord
     ? canEditPlayerProfile(currentUser, activeParticipationRecord)
@@ -305,120 +326,146 @@ export function PlayersView({
     return results;
   }, [indexedProfiles, deferredQuery, disciplineFilter, facultyFilter, levelFilter, onlySelectedUfro]);
 
-  const renderPlayerRow = useCallback(
-    (_index: number, profile: UnifiedPlayerProfile) => {
-      const focusedParticipation =
-        disciplineFilter !== 'ALL'
-          ? profile.participations.find((p) => p.disciplineId === disciplineFilter) ??
-            profile.participations[0]
-          : profile.participations[0];
-      const player = focusedParticipation.player;
-      const primary = profile.primaryRecord;
-      const disc = DISCIPLINE_MAP[player.disciplineId];
-      const statLabel =
-        disc.sportType === 'futbol7'
-          ? `${player.stats.goles}G / ${player.stats.asistencias}A`
-          : disc.sportType === 'voleibol'
-          ? `${player.stats.puntos} Pts / ${player.stats.aces} Aces`
-          : `${player.stats.puntos} Pts / ${player.stats.rebotes} Reb`;
-      const isMulti = profile.participations.length > 1;
+  const hasActiveSearchOrFilter =
+    deferredQuery.trim().length > 0 ||
+    disciplineFilter !== 'ALL' ||
+    facultyFilter !== 'ALL' ||
+    levelFilter !== 'ALL' ||
+    onlySelectedUfro;
 
-      return (
-        <>
-          <td className="py-3.5 px-4">
-            <div className="flex items-center gap-3">
-              {primary.fotografia ? (
-                <img
-                  src={primary.fotografia}
-                  alt={`${primary.nombre} ${primary.apellidoPaterno}`}
-                  loading="lazy"
-                  decoding="async"
-                  className="w-9 h-9 rounded-xl object-cover border border-white/[0.1] shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-9 h-9 rounded-xl bg-white/[0.07] border border-white/[0.1] text-zinc-200 text-xs font-medium flex items-center justify-center shrink-0">
-                  {getPlayerInitials(primary)}
-                </div>
-              )}
-              <div>
-                <p className="font-medium text-white">
-                  {primary.nombre} {primary.apellidoPaterno}
-                  {primary.apellidoMaterno && !/^[-–—\s.]+$/.test(primary.apellidoMaterno)
-                    ? ` ${primary.apellidoMaterno}`
-                    : ''}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {formatDorsalLabel(player.dorsal)} · {player.posicion}
-                  {isMulti && (
-                    <span className="text-[#a5b0ff]">
-                      {' '}· {profile.participations.length} equipos
-                    </span>
-                  )}
-                  {profile.esSeleccionadoUfro && (
-                    <span className="text-[#a5b0ff]"> · UFRO</span>
-                  )}
-                </p>
+  const directorySlice = useMemo(() => {
+    const sliced = slicePlayersForDirectoryView({
+      matchedProfiles,
+      selectedTeamId,
+      hasActiveSearchOrFilter,
+      previewLimit: PLAYERS_PREVIEW_LIMIT,
+    });
+    if (selectedTeamId) {
+      const sortedByDorsal = [...sliced.profiles].sort((a, b) => {
+        const aPart = a.participations.find((p) => p.player.teamId === selectedTeamId);
+        const bPart = b.participations.find((p) => p.player.teamId === selectedTeamId);
+        return (aPart?.player.dorsal ?? 999) - (bPart?.player.dorsal ?? 999);
+      });
+      return { ...sliced, profiles: sortedByDorsal };
+    }
+    return sliced;
+  }, [matchedProfiles, selectedTeamId, hasActiveSearchOrFilter]);
+
+  const displayedProfiles = directorySlice.profiles;
+
+  const renderPlayerRowCells = (profile: UnifiedPlayerProfile) => {
+    const focusedParticipation = selectedTeamId
+      ? profile.participations.find((p) => p.player.teamId === selectedTeamId) ??
+        profile.participations[0]
+      : disciplineFilter !== 'ALL'
+      ? profile.participations.find((p) => p.disciplineId === disciplineFilter) ??
+        profile.participations[0]
+      : profile.participations[0];
+    const player = focusedParticipation.player;
+    const primary = profile.primaryRecord;
+    const disc = DISCIPLINE_MAP[player.disciplineId];
+    const statLabel =
+      disc.sportType === 'futbol7'
+        ? `${player.stats.goles}G / ${player.stats.asistencias}A`
+        : disc.sportType === 'voleibol'
+        ? `${player.stats.puntos} Pts / ${player.stats.aces} Aces`
+        : `${player.stats.puntos} Pts / ${player.stats.rebotes} Reb`;
+    const isMulti = profile.participations.length > 1;
+
+    return (
+      <>
+        <td className="py-3.5 px-4">
+          <div className="flex items-center gap-3">
+            {primary.fotografia ? (
+              <img
+                src={primary.fotografia}
+                alt={`${primary.nombre} ${primary.apellidoPaterno}`}
+                loading="lazy"
+                decoding="async"
+                className="w-9 h-9 rounded-xl object-cover border border-white/[0.1] shrink-0"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-white/[0.07] border border-white/[0.1] text-zinc-200 text-xs font-medium flex items-center justify-center shrink-0">
+                {getPlayerInitials(primary)}
               </div>
-            </div>
-          </td>
-          <td className="py-3.5 px-3">
-            <div className="space-y-1">
-              {profile.participations.map((part) => {
-                const partDisc = DISCIPLINE_MAP[part.disciplineId];
-                return (
-                  <div key={part.player.id} className="leading-tight">
-                    <button
-                      type="button"
-                      onClick={() => onInspectTeam(part.player.teamId)}
-                      className="text-left group cursor-pointer"
-                    >
-                      <span className="font-medium text-zinc-200 group-hover:text-[#c8ceff] transition-colors">
-                        {part.team?.nombre ?? part.player.teamId}
-                      </span>
-                      <span className="text-xs text-zinc-500 ml-1.5">
-                        · {partDisc.nombreCorto} ({formatDorsalLabel(part.player.dorsal)})
-                      </span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </td>
-          <td className="py-3.5 px-3 hidden md:table-cell">
-            <p className="text-xs text-zinc-300">{primary.carrera}</p>
-            <p className="text-xs text-zinc-500">{primary.nivelAcademico}</p>
-          </td>
-          <td className="py-3.5 px-3 hidden lg:table-cell text-xs tabular-nums text-zinc-500">
-            {primary.rut || 'Reservado'}
-          </td>
-          <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
-            {disciplineFilter !== 'ALL'
-              ? player.stats.partidosJugados
-              : profile.totalPartidosJugados}
-          </td>
-          <td className="py-3.5 px-3 text-right tabular-nums font-medium text-white">
-            <span>{statLabel}</span>
-            {isMulti && disciplineFilter === 'ALL' && (
-              <span className="block text-[10px] font-normal text-zinc-500">
-                {disc.nombreCorto}
-              </span>
             )}
-          </td>
-          <td className="py-3.5 px-4 text-right">
-            <button
-              type="button"
-              onClick={() => onSelectPlayer(player)}
-              className="text-xs font-medium text-[#a5b0ff] hover:text-white transition-colors cursor-pointer"
-            >
-              Perfil →
-            </button>
-          </td>
-        </>
-      );
-    },
-    [disciplineFilter, onInspectTeam, onSelectPlayer]
-  );
+            <div>
+              <p className="font-medium text-white">
+                {primary.nombre} {primary.apellidoPaterno}
+                {primary.apellidoMaterno && !/^[-–—\s.]+$/.test(primary.apellidoMaterno)
+                  ? ` ${primary.apellidoMaterno}`
+                  : ''}
+              </p>
+              <p className="text-xs text-zinc-500">
+                {formatDorsalLabel(player.dorsal)} · {player.posicion}
+                {isMulti && (
+                  <span className="text-[#a5b0ff]">
+                    {' '}· {profile.participations.length} equipos
+                  </span>
+                )}
+                {profile.esSeleccionadoUfro && (
+                  <span className="text-[#a5b0ff]"> · UFRO</span>
+                )}
+              </p>
+            </div>
+          </div>
+        </td>
+        <td className="py-3.5 px-3">
+          <div className="space-y-1">
+            {profile.participations.map((part) => {
+              const partDisc = DISCIPLINE_MAP[part.disciplineId];
+              return (
+                <div key={part.player.id} className="leading-tight">
+                  <button
+                    type="button"
+                    onClick={() => onInspectTeam(part.player.teamId)}
+                    className="text-left group cursor-pointer"
+                  >
+                    <span className="font-medium text-zinc-200 group-hover:text-[#c8ceff] transition-colors">
+                      {part.team?.nombre ?? part.player.teamId}
+                    </span>
+                    <span className="text-xs text-zinc-500 ml-1.5">
+                      · {partDisc.nombreCorto} ({formatDorsalLabel(part.player.dorsal)})
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </td>
+        <td className="py-3.5 px-3 hidden md:table-cell">
+          <p className="text-xs text-zinc-300">{primary.carrera}</p>
+          <p className="text-xs text-zinc-500">{primary.nivelAcademico}</p>
+        </td>
+        <td className="py-3.5 px-3 hidden lg:table-cell text-xs tabular-nums text-zinc-500">
+          {primary.rut || 'Reservado'}
+        </td>
+        <td className="py-3.5 px-3 text-right tabular-nums text-zinc-400">
+          {disciplineFilter !== 'ALL' || selectedTeamId
+            ? player.stats.partidosJugados
+            : profile.totalPartidosJugados}
+        </td>
+        <td className="py-3.5 px-3 text-right tabular-nums font-medium text-white">
+          <span>{statLabel}</span>
+          {isMulti && disciplineFilter === 'ALL' && !selectedTeamId && (
+            <span className="block text-[10px] font-normal text-zinc-500">
+              {disc.nombreCorto}
+            </span>
+          )}
+        </td>
+        <td className="py-3.5 px-4 text-right">
+          <button
+            type="button"
+            onClick={() => onSelectPlayer(player)}
+            className="text-xs font-medium text-[#a5b0ff] hover:text-white transition-colors cursor-pointer"
+          >
+            Perfil →
+          </button>
+        </td>
+      </>
+    );
+  };
 
   const getInitials = getPlayerInitials;
   const inputClass =
@@ -513,69 +560,288 @@ export function PlayersView({
         </div>
       </div>
 
-      {/* Directory Table */}
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 mb-4">
-          <span className="tabular-nums">
-            {matchedProfiles.length}
-            {matchedProfiles.length !== unifiedPlayers.length
-              ? ` de ${unifiedPlayers.length}`
-              : ''}{' '}
-            perfiles
-            {multiTeamPlayerCount > 0 && (
-              <span className="text-[#a5b0ff]"> · {multiTeamPlayerCount} multirrama</span>
-            )}
-          </span>
-          <span>Selecciona un jugador para abrir su ficha</span>
+      {/* Directory Table (10-player preview OR selected team roster) */}
+      <div ref={rosterTopRef} className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+        <div className="space-y-4">
+          {selectedTeam && (
+            <div className="rounded-2xl border border-[#707ef9]/35 bg-[#0e101c] px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <TeamCrest
+                  escudo={selectedTeam.escudo}
+                  sigla={selectedTeam.sigla}
+                  nombre={selectedTeam.nombre}
+                  size="md"
+                  surface="dark"
+                />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-mono uppercase tracking-[0.14em] text-[#a5b0ff]">
+                    Plantel seleccionado · {DISCIPLINE_MAP[selectedTeam.disciplineId].nombreCorto}
+                  </p>
+                  <h2 className="text-xl font-medium tracking-[-0.02em] text-white truncate">
+                    {selectedTeam.nombre}
+                  </h2>
+                  <p className="text-xs text-zinc-400 truncate">
+                    {selectedTeam.carrera} · {selectedTeam.groupName}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onInspectTeam(selectedTeam.id)}
+                  className="px-3.5 py-2 rounded-full text-xs font-medium border border-white/[0.14] text-zinc-200 hover:border-white/30 hover:text-white transition-colors cursor-pointer"
+                >
+                  Ficha del equipo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamId(null)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white text-[#050507] hover:bg-zinc-200 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Ver vista general (10)</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+            <span className="tabular-nums flex items-center gap-2">
+              {loadingTeamRoster || searchingRemotePlayers ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 text-[#a5b0ff] animate-spin" />
+                  <span className="text-zinc-300">
+                    {loadingTeamRoster ? 'Cargando plantel del equipo...' : 'Buscando coincidencias...'}
+                  </span>
+                </>
+              ) : selectedTeam ? (
+                <>
+                  <strong className="text-white font-medium">{displayedProfiles.length}</strong>{' '}
+                  jugadores en {selectedTeam.nombre}
+                </>
+              ) : hasActiveSearchOrFilter ? (
+                <>
+                  <strong className="text-white font-medium">{displayedProfiles.length}</strong>{' '}
+                  resultados para tu búsqueda
+                </>
+              ) : (
+                <>
+                  Mostrando{' '}
+                  <strong className="text-white font-medium">{displayedProfiles.length}</strong>{' '}
+                  jugadores · Selecciona un equipo abajo o busca por nombre
+                  {multiTeamPlayerCount > 0 && (
+                    <span className="text-[#a5b0ff]"> · {multiTeamPlayerCount} multirrama</span>
+                  )}
+                </>
+              )}
+            </span>
+            <span>Selecciona un jugador para abrir su ficha</span>
+          </div>
+
+          {loadingTeamRoster && displayedProfiles.length === 0 ? (
+            <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c10] p-10 text-center space-y-2.5">
+              <Loader2 className="w-6 h-6 text-[#a5b0ff] animate-spin mx-auto" />
+              <p className="text-sm text-zinc-300">
+                Consultando el plantel de {selectedTeam?.nombre ?? 'este equipo'}...
+              </p>
+            </div>
+          ) : displayedProfiles.length === 0 ? (
+            <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-10 text-center space-y-3">
+              <p className="text-lg font-medium text-white">
+                {selectedTeam
+                  ? `Sin jugadores cargados en ${selectedTeam.nombre}`
+                  : state.players.length === 0
+                  ? `Busca un jugador por nombre o selecciona un equipo abajo`
+                  : 'Sin jugadores para los filtros aplicados'}
+              </p>
+              {(hasActiveSearchOrFilter || selectedTeam) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery('');
+                    setDisciplineFilter('ALL');
+                    setFacultyFilter('ALL');
+                    setLevelFilter('ALL');
+                    setOnlySelectedUfro(false);
+                    setSelectedTeamId(null);
+                  }}
+                  className="px-4 py-2 rounded-full text-xs font-medium bg-white text-[#050507] cursor-pointer"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              data-testid="players-directory-table"
+              className="rounded-2xl border border-white/[0.08] bg-[#0c0c10] overflow-x-auto"
+            >
+              <table className="w-full text-left border-collapse text-sm">
+                <thead className="bg-[#111117]">
+                  <tr className="bg-[#111117] text-[11px] text-zinc-500 shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.08)]">
+                    <th className="py-3 px-4 font-medium bg-[#111117]">Estudiante</th>
+                    <th className="py-3 px-3 font-medium bg-[#111117]">Equipos y Disciplinas</th>
+                    <th className="py-3 px-3 hidden md:table-cell font-medium bg-[#111117]">Carrera</th>
+                    <th className="py-3 px-3 hidden lg:table-cell font-medium bg-[#111117]">RUT</th>
+                    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#111117]">PJ</th>
+                    <th className="py-3 px-3 text-right font-medium tabular-nums bg-[#111117]">Rendimiento</th>
+                    <th className="py-3 px-4 text-right font-medium bg-[#111117]">Ficha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedProfiles.map((profile) => (
+                    <tr
+                      key={profile.personKey}
+                      className="border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.03] transition-colors bg-[#0c0c10]"
+                    >
+                      {renderPlayerRowCells(profile)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {matchedProfiles.length === 0 ? (
-          <div className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-12 text-center space-y-3">
-            <p className="text-lg font-medium text-white">
-              {state.players.length === 0
-                ? `Sin estudiantes inscritos en ${state.temporada}`
-                : 'Sin jugadores para los filtros aplicados'}
-            </p>
-            {state.players.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery('');
-                  setDisciplineFilter('ALL');
-                  setFacultyFilter('ALL');
-                  setLevelFilter('ALL');
-                  setOnlySelectedUfro(false);
-                }}
-                className="px-4 py-2 rounded-full text-xs font-medium bg-white text-[#050507] cursor-pointer"
+        {/* Directly Below the 10 Players: Direct Team Selector + Team Search */}
+        <section
+          aria-labelledby="players-explore-teams-heading"
+          className="rounded-3xl border border-white/[0.08] bg-[#0c0c10] p-6 sm:p-7 space-y-6"
+        >
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#a5b0ff]">
+                Explorar por plantel
+              </p>
+              <h2
+                id="players-explore-teams-heading"
+                className="text-2xl sm:text-3xl font-medium tracking-[-0.025em] text-white"
               >
-                Limpiar filtros
-              </button>
-            )}
+                Selecciona un <span className="font-editorial text-[#c8ceff]">equipo</span>
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-400 max-w-xl">
+                Elige uno de los equipos destacados o busca por nombre para ver únicamente su nómina completa.
+              </p>
+            </div>
+
+            <div className="w-full lg:w-80 relative">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={teamSearchQuery}
+                onChange={(e) => setTeamSearchQuery(e.target.value)}
+                placeholder="Buscar equipo o facultad..."
+                aria-label="Buscar equipo para ver su plantel"
+                className="w-full rounded-xl bg-[#111117] border border-white/[0.1] pl-10 pr-8 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-[#707ef9]"
+              />
+              {teamSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setTeamSearchQuery('')}
+                  aria-label="Limpiar búsqueda de equipo"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
-        ) : (
-          <div
-            data-testid="virtualized-players-container"
-            className={`rounded-2xl border border-white/[0.08] bg-[#0c0c10] overflow-hidden ${
-              matchedProfiles.length <= 3
-                ? 'h-[260px]'
-                : matchedProfiles.length <= 6
-                ? 'h-[450px]'
-                : 'h-[70vh] min-h-[480px] max-h-[760px]'
-            }`}
-          >
-            <TableVirtuoso
-              ref={virtuosoRef}
-              className="h-full w-full"
-              data={matchedProfiles}
-              defaultItemHeight={68}
-              increaseViewportBy={{ top: 240, bottom: 320 }}
-              computeItemKey={(_index, profile) => profile.personKey}
-              components={VIRTUOSO_TABLE_COMPONENTS}
-              fixedHeaderContent={renderPlayersTableHeader}
-              itemContent={renderPlayerRow}
-            />
+
+          {/* Compact Discipline Filter for Teams */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => setTeamDisciplineTab('ALL')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                teamDisciplineTab === 'ALL'
+                  ? 'bg-white text-[#050507]'
+                  : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
+              }`}
+            >
+              Todos ({state.teams.length})
+            </button>
+            {DISCIPLINES.map((d) => {
+              const active = teamDisciplineTab === d.id;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setTeamDisciplineTab(d.id)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-[#707ef9] text-white'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {d.nombreCorto}
+                </button>
+              );
+            })}
           </div>
-        )}
+
+          {quickSelectTeamsResult.teams.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/[0.1] bg-[#101016] p-8 text-center space-y-2">
+              <Shield className="w-6 h-6 text-zinc-600 mx-auto" />
+              <p className="text-xs text-zinc-400">
+                No se encontraron equipos para &ldquo;{teamSearchQuery}&rdquo;.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div
+                data-testid="players-quick-teams-grid"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+              >
+                {quickSelectTeamsResult.teams.map((team) => {
+                  const isSelected = selectedTeamId === team.id;
+                  const teamDisc = DISCIPLINE_MAP[team.disciplineId];
+                  return (
+                    <button
+                      key={team.id}
+                      type="button"
+                      onClick={() => void handleSelectDirectoryTeam(team)}
+                      aria-pressed={isSelected}
+                      className={`text-left rounded-2xl border p-4 flex items-center gap-3 transition-all cursor-pointer group ${
+                        isSelected
+                          ? 'border-[#707ef9] bg-[#707ef9]/12'
+                          : 'border-white/[0.08] bg-[#101016] hover:border-white/[0.22] hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      <TeamCrest
+                        escudo={team.escudo}
+                        sigla={team.sigla}
+                        nombre={team.nombre}
+                        size="sm"
+                        surface="dark"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-white truncate group-hover:text-[#c8ceff] transition-colors">
+                          {team.nombre}
+                        </p>
+                        <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                          {teamDisc.nombreCorto} · {team.groupName}
+                        </p>
+                      </div>
+                      <Users
+                        className={`w-4 h-4 shrink-0 ${
+                          isSelected ? 'text-[#a5b0ff]' : 'text-zinc-600 group-hover:text-zinc-300'
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {quickSelectTeamsResult.totalMatching > quickSelectTeamsResult.teams.length && (
+                <p className="text-xs text-zinc-500 text-center">
+                  Mostrando {quickSelectTeamsResult.teams.length} de {quickSelectTeamsResult.totalMatching}{' '}
+                  equipos disponibles · Usa el buscador de equipos para encontrar cualquier otro plantel.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
       </div>
 
       {/* Player Profile Modal */}

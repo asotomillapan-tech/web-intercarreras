@@ -24,11 +24,19 @@ import {
   CORE_REALTIME_STREAMS,
   computeInitialSyncPhase,
   mergePublicNewsPreservingDrafts,
-  mergePublicPlayersPreservingPii,
   mergePublicTransfersPreservingPrivate,
   type CoreRealtimeStreamKey,
   type PublicRealtimeStreamKey,
 } from './domain/realtimeSyncEngine';
+import {
+  getLazyCollectionsForSection,
+  isCacheTimestampFresh,
+  mergeLazyPlayersPreservingPii,
+  PLAYERS_PREVIEW_LIMIT,
+  PUBLIC_CORE_CACHE_TTL_MS,
+  SECTION_CACHE_TTL_MS,
+  TEAM_ROSTER_CACHE_TTL_MS,
+} from './domain/readOptimizationEngine';
 import {
   enqueueTotyBallotItem,
   mergeTotyBallotsIntoState,
@@ -75,7 +83,18 @@ import {
   deleteFirestoreTeam,
   deleteFirestoreTotyConfig,
   ensureAllConfigsInFirestore,
-  fetchFirestoreTotyForDiscipline,
+  fetchAllFirestoreTotyData,
+  fetchAllPlayersForAdmin,
+  fetchApprovedTransfersBounded,
+  fetchCorePublicTournamentSnapshot,
+  fetchPlayerById,
+  fetchPlayersByTeam,
+  fetchPlayersPreview,
+  fetchPublicNewsBounded,
+  fetchPublicPhotosBounded,
+  fetchPublicTotyConfigAndOwnBallot,
+  fetchVotingSecondaryForDiscipline,
+  fetchWeeklyLeyendasBounded,
   listAllFirestoreNews,
   listAllFirestoreTransfers,
   listDelegateFirestoreTransfers,
@@ -97,9 +116,7 @@ import {
   saveFirestoreTeam,
   saveFirestoreTotyBallotsBatch,
   saveFirestoreTotyConfig,
-  subscribeToPublicTournamentState,
-  subscribeToTotyBallots,
-  subscribeToTotyConfigs,
+  searchPlayersInFirestoreByName,
   syncGoogleUserToFirestore,
   syncRefereeRosterFromUsers,
   updateFirestorePlayerStats,
@@ -116,6 +133,7 @@ import {
   saveCachedPublicTournamentState,
 } from './services/localCache';
 import {
+  areAllTotyDisciplinesFresh,
   loadAllCachedTotyData,
   loadCachedTotyForDiscipline,
   removeCachedTotyConfig,
@@ -173,6 +191,7 @@ function AppContent() {
   const [initialBoot] = useState<{
     state: TournamentState;
     hasCachedSnapshot: boolean;
+    cachedAtMs: number | null;
     totyCachedAtIso: string | null;
   }>(() => {
     const base = createInitialTournamentState();
@@ -200,6 +219,7 @@ function AppContent() {
           totyConfigs: mergedTotyConfigs,
         },
         hasCachedSnapshot: false,
+        cachedAtMs: null,
         totyCachedAtIso,
       };
     }
@@ -228,7 +248,12 @@ function AppContent() {
       merged.matches.length > 0 ||
       merged.news.length > 0 ||
       Boolean(merged.homeFeatured);
-    return { state: merged, hasCachedSnapshot: hasMeaningfulData, totyCachedAtIso };
+    return {
+      state: merged,
+      hasCachedSnapshot: hasMeaningfulData,
+      cachedAtMs: cached.savedAt,
+      totyCachedAtIso,
+    };
   });
   const [state, setState] = useState<TournamentState>(() => initialBoot.state);
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
@@ -362,6 +387,10 @@ function AppContent() {
   }, []);
 
   const currentUserRoleRef = useRef<UserRole | null>(null);
+  const lazyFetchedAtRef = useRef<Record<string, number>>({});
+  const teamRosterFetchedAtRef = useRef<Record<string, number>>({});
+  const searchedQueriesAtRef = useRef<Record<string, number>>({});
+  const adminFullPlayersLoadedRef = useRef(false);
 
   const handleRetryInitialSync = useCallback(() => {
     setSettledCoreStreams(new Set());
@@ -372,132 +401,212 @@ function AppContent() {
     setSyncHealthState(createInitialSyncHealthState());
     setDismissedPublicNoticeKind(null);
     lastQuotaLogAtRef.current = null;
+    lazyFetchedAtRef.current = {};
+    teamRosterFetchedAtRef.current = {};
+    searchedQueriesAtRef.current = {};
+    adminFullPlayersLoadedRef.current = false;
     setRealtimeRetryNonce((n) => n + 1);
   }, []);
 
-  // 1. Live Real-Time Firestore Subscriptions for all public tournament collections
-  // Any change published by an Admin, Referee, Delegate, or Press user propagates instantly across devices.
+  // On-demand single-team roster loader (10-min per-team TTL -> 0 reads on repeat visits)
+  const handleLoadTeamPlayers = useCallback(
+    async (teamId: string, disciplineId?: DisciplineId): Promise<Player[]> => {
+      if (!teamId) return [];
+      const nowMs = Date.now();
+      const cachedLocal = stateRef.current.players.filter((p) => p.teamId === teamId);
+      if (
+        isCacheTimestampFresh(
+          teamRosterFetchedAtRef.current[teamId],
+          nowMs,
+          TEAM_ROSTER_CACHE_TTL_MS
+        )
+      ) {
+        return cachedLocal;
+      }
+
+      const resolvedDiscipline =
+        disciplineId ?? stateRef.current.teams.find((t) => t.id === teamId)?.disciplineId;
+      try {
+        const fetched = await fetchPlayersByTeam(teamId, resolvedDiscipline);
+        teamRosterFetchedAtRef.current[teamId] = Date.now();
+        setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'players'));
+        if (fetched.length > 0) {
+          setState((prev) => ({
+            ...prev,
+            players: mergeLazyPlayersPreservingPii(prev.players, fetched),
+          }));
+        }
+        return fetched.length > 0 ? fetched : cachedLocal;
+      } catch (err) {
+        reportCloudError('Cargando plantel del equipo', err, 'players');
+        return cachedLocal;
+      }
+    },
+    [reportCloudError]
+  );
+
+  // On-demand index-free name search across Firestore (5-min query TTL, never downloads all players)
+  const handleSearchPlayers = useCallback(
+    async (rawQuery: string, disciplineId?: DisciplineId): Promise<Player[]> => {
+      const cleaned = rawQuery.trim();
+      if (cleaned.length < 2) return [];
+      const cacheKey = `${disciplineId ?? 'ALL'}::${cleaned.toLowerCase()}`;
+      const nowMs = Date.now();
+      if (isCacheTimestampFresh(searchedQueriesAtRef.current[cacheKey], nowMs, SECTION_CACHE_TTL_MS)) {
+        return [];
+      }
+
+      try {
+        const fetched = await searchPlayersInFirestoreByName(cleaned, disciplineId);
+        searchedQueriesAtRef.current[cacheKey] = Date.now();
+        setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'players'));
+        if (fetched.length > 0) {
+          setState((prev) => ({
+            ...prev,
+            players: mergeLazyPlayersPreservingPii(prev.players, fetched),
+          }));
+        }
+        return fetched;
+      } catch (err) {
+        reportCloudError('Buscando jugadores por nombre', err, 'players');
+        return [];
+      }
+    },
+    [reportCloudError]
+  );
+
+  // 1. Optimized Cache-First Core Boot:
+  // Replaces 13 eager onSnapshot listeners with a lightweight 4-collection core fetch
+  // (settings, configs, teams, matches) skipped completely when the local cache is fresh (< 5 min).
   useEffect(() => {
-    const coreSet = new Set<string>(CORE_REALTIME_STREAMS);
-    const markStreamSettled = (streamKey: PublicRealtimeStreamKey) => {
-      setSyncHealthState((prev) => markSyncStreamHealthy(prev, streamKey));
-      if (!coreSet.has(streamKey)) return;
-      const coreKey = streamKey as CoreRealtimeStreamKey;
-      setSettledCoreStreams((prev) => {
-        if (prev.has(coreKey)) return prev;
-        const next = new Set(prev);
-        next.add(coreKey);
-        return next;
-      });
-      setFailedCoreStreams((prev) => {
-        if (!prev.has(coreKey)) return prev;
-        const next = new Set(prev);
-        next.delete(coreKey);
-        return next;
-      });
+    let cancelled = false;
+    const allCoreKeys: CoreRealtimeStreamKey[] = [...CORE_REALTIME_STREAMS];
+
+    const markAllCoreReady = () => {
+      setSettledCoreStreams(new Set(allCoreKeys));
+      setFailedCoreStreams(new Set());
+      setSyncHealthState((prev) =>
+        (['settings', 'configs', 'teams', 'matches'] as PublicRealtimeStreamKey[]).reduce(
+          (acc, k) => markSyncStreamHealthy(acc, k),
+          prev
+        )
+      );
     };
+
+    if (
+      realtimeRetryNonce === 0 &&
+      initialBoot.hasCachedSnapshot &&
+      isCacheTimestampFresh(initialBoot.cachedAtMs, Date.now(), PUBLIC_CORE_CACHE_TTL_MS)
+    ) {
+      markAllCoreReady();
+      return;
+    }
 
     const timeoutId = window.setTimeout(() => {
       setInitialSyncTimedOut(true);
     }, 10_000);
 
-    const unsubscribePublic = subscribeToPublicTournamentState({
-      onSettings: (patch) => {
+    fetchCorePublicTournamentSnapshot()
+      .then((core) => {
+        if (cancelled) return;
         setState((prev) => ({
           ...prev,
-          temporada: patch.temporada ?? prev.temporada,
-          homeFeatured: patch.homeFeatured !== undefined ? patch.homeFeatured : prev.homeFeatured,
-          driveUploadRootFolderId: patch.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
+          temporada: core.settings?.temporada ?? prev.temporada,
+          homeFeatured:
+            core.settings?.homeFeatured !== undefined
+              ? core.settings.homeFeatured
+              : prev.homeFeatured,
+          driveUploadRootFolderId:
+            core.settings?.driveUploadRootFolderId ?? prev.driveUploadRootFolderId,
           driveUploadRootFolderName:
-            patch.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
-          masterSheets: patch.masterSheets ?? prev.masterSheets,
-          autoSyncSheetsEnabled: patch.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
-          lastSyncedSpreadsheetId: patch.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
-          lastSyncedAt: patch.lastSyncedAt ?? prev.lastSyncedAt,
+            core.settings?.driveUploadRootFolderName ?? prev.driveUploadRootFolderName,
+          masterSheets: core.settings?.masterSheets ?? prev.masterSheets,
+          autoSyncSheetsEnabled:
+            core.settings?.autoSyncSheetsEnabled ?? prev.autoSyncSheetsEnabled,
+          lastSyncedSpreadsheetId:
+            core.settings?.lastSyncedSpreadsheetId ?? prev.lastSyncedSpreadsheetId,
+          lastSyncedAt: core.settings?.lastSyncedAt ?? prev.lastSyncedAt,
+          configs: core.configs ?? prev.configs,
+          teams: core.teams ?? prev.teams,
+          matches: core.matches ?? prev.matches,
         }));
-        markStreamSettled('settings');
-      },
-      onConfigs: (configs) => {
-        setState((prev) => ({ ...prev, configs }));
-        markStreamSettled('configs');
-      },
-      onTeams: (teams) => {
-        setState((prev) => ({ ...prev, teams }));
-        markStreamSettled('teams');
-      },
-      onPlayers: (incomingPlayers) => {
-        setState((prev) => ({
-          ...prev,
-          players: mergePublicPlayersPreservingPii(prev.players, incomingPlayers),
-        }));
-        markStreamSettled('players');
-      },
-      onMatches: (matches) => {
-        setState((prev) => ({ ...prev, matches }));
-        markStreamSettled('matches');
-      },
-      onNews: (publishedNews) => {
-        const keepDrafts =
-          currentUserRoleRef.current === 'admin' ||
-          currentUserRoleRef.current === 'moderador' ||
-          currentUserRoleRef.current === 'prensa';
-        setState((prev) => ({
-          ...prev,
-          news: mergePublicNewsPreservingDrafts(prev.news, publishedNews, keepDrafts),
-        }));
-        markStreamSettled('news');
-      },
-      onTransfers: (approvedTransfers) => {
-        const keepPrivate =
-          currentUserRoleRef.current === 'admin' ||
-          currentUserRoleRef.current === 'moderador' ||
-          currentUserRoleRef.current === 'delegado';
-        setState((prev) => ({
-          ...prev,
-          transfers: mergePublicTransfersPreservingPrivate(
-            prev.transfers,
-            approvedTransfers,
-            keepPrivate
-          ),
-        }));
-        markStreamSettled('transfers');
-      },
-      onPhotos: (photos) => {
-        setState((prev) => ({ ...prev, photos }));
-        markStreamSettled('photos');
-      },
-      onMvpVotes: (mvpVotes) => {
-        setState((prev) => ({ ...prev, mvpVotes }));
-        markStreamSettled('mvpVotes');
-      },
-      onAwardNominees: (awardNominees) => {
-        setState((prev) => ({ ...prev, awardNominees }));
-        markStreamSettled('awardNominees');
-      },
-      onChampionshipMvpVotes: (championshipMvpVotes) => {
-        setState((prev) => ({ ...prev, championshipMvpVotes }));
-        markStreamSettled('championshipMvpVotes');
-      },
-      onPositionAwardVotes: (positionAwardVotes) => {
-        setState((prev) => ({ ...prev, positionAwardVotes }));
-        markStreamSettled('positionAwardVotes');
-      },
-      onLeyendasLeaderboard: (leyendasLeaderboard) => {
-        setState((prev) => ({ ...prev, leyendasLeaderboard }));
-        markStreamSettled('leyendasLeaderboard');
-      },
-      onStreamError: (stream: PublicRealtimeStreamKey, err: unknown) => {
+
+        if (core.settledStreams.length > 0) {
+          setSyncHealthState((prev) =>
+            core.settledStreams.reduce((acc, k) => markSyncStreamHealthy(acc, k), prev)
+          );
+          setSettledCoreStreams((prev) => {
+            const next = new Set(prev);
+            for (const s of core.settledStreams) {
+              if (allCoreKeys.includes(s as CoreRealtimeStreamKey)) {
+                next.add(s as CoreRealtimeStreamKey);
+              }
+            }
+            // players & news are intentionally lazy-loaded per section
+            next.add('players');
+            next.add('news');
+            return next;
+          });
+        }
+
+        if (core.errors.length > 0) {
+          const failedKeys = new Set<CoreRealtimeStreamKey>();
+          let firstDetail: string | null = null;
+          let loggedQuota = false;
+
+          setSyncHealthState((prev) => {
+            let next = prev;
+            for (const item of core.errors) {
+              const kind = classifyFirestoreError(item.error);
+              if (kind === 'quota_exceeded' && !loggedQuota) {
+                loggedQuota = true;
+                const nowMs = Date.now();
+                if (shouldEmitThrottledQuotaLog(lastQuotaLogAtRef.current, nowMs)) {
+                  lastQuotaLogAtRef.current = nowMs;
+                  console.warn('[Firestore] Cuota diaria de lecturas alcanzada (carga principal).');
+                }
+              }
+              next = recordSyncIncident(next, {
+                streamKey: item.stream,
+                context:
+                  kind === 'quota_exceeded'
+                    ? 'Cuota diaria de Firestore alcanzada'
+                    : `Error leyendo colección ${item.stream}`,
+                err: item.error,
+              });
+              if (allCoreKeys.includes(item.stream as CoreRealtimeStreamKey)) {
+                failedKeys.add(item.stream as CoreRealtimeStreamKey);
+              }
+              if (!firstDetail && item.error instanceof Error) {
+                firstDetail = item.error.message;
+              }
+            }
+            return next;
+          });
+
+          if (failedKeys.size > 0) {
+            setFailedCoreStreams(failedKeys);
+            setInitialSyncErrorDetail(
+              (prev) => prev ?? firstDetail ?? 'Error al sincronizar los datos principales.'
+            );
+          }
+        } else {
+          markAllCoreReady();
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
         const detail =
-          err instanceof Error ? err.message : 'Error de conexión en tiempo real con Firestore.';
+          err instanceof Error ? err.message : 'Error al sincronizar los datos principales.';
         const kind = classifyFirestoreError(err);
 
         setSyncHealthState((prev) =>
           recordSyncIncident(prev, {
-            streamKey: stream,
+            streamKey: 'teams',
             context:
               kind === 'quota_exceeded'
                 ? 'Cuota diaria de Firestore alcanzada'
-                : `Error leyendo colección ${stream}`,
+                : 'Error leyendo datos principales del torneo',
             err,
           })
         );
@@ -506,28 +615,193 @@ function AppContent() {
           const nowMs = Date.now();
           if (shouldEmitThrottledQuotaLog(lastQuotaLogAtRef.current, nowMs)) {
             lastQuotaLogAtRef.current = nowMs;
-            console.warn('[Firestore] Cuota diaria de lecturas alcanzada (colecciones públicas).');
+            console.warn('[Firestore] Cuota diaria de lecturas alcanzada (carga principal).');
           }
         }
 
-        if (coreSet.has(stream)) {
-          const coreKey = stream as CoreRealtimeStreamKey;
-          setFailedCoreStreams((prev) => {
-            if (prev.has(coreKey)) return prev;
-            const next = new Set(prev);
-            next.add(coreKey);
-            return next;
-          });
-          setInitialSyncErrorDetail((prev) => prev ?? detail);
-        }
-      },
-    });
+        setFailedCoreStreams(new Set(['settings', 'configs', 'teams', 'matches']));
+        setInitialSyncErrorDetail((prev) => prev ?? detail);
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+      });
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timeoutId);
-      unsubscribePublic();
     };
-  }, [realtimeRetryNonce]);
+  }, [realtimeRetryNonce, initialBoot.hasCachedSnapshot, initialBoot.cachedAtMs]);
+
+  // 1-Lazy. Section-scoped bounded loaders (0 reads for unvisited sections or fresh cache hits)
+  useEffect(() => {
+    let cancelled = false;
+    const needed = getLazyCollectionsForSection(activeSection);
+    if (needed.length === 0) return;
+
+    const nowMs = Date.now();
+    const bootCacheFresh =
+      realtimeRetryNonce === 0 &&
+      initialBoot.hasCachedSnapshot &&
+      isCacheTimestampFresh(initialBoot.cachedAtMs, nowMs, PUBLIC_CORE_CACHE_TTL_MS);
+
+    for (const key of needed) {
+      const ttlKey = key === 'votingSecondary' ? `votingSecondary:${selectedDiscipline}` : key;
+      if (isCacheTimestampFresh(lazyFetchedAtRef.current[ttlKey], nowMs, SECTION_CACHE_TTL_MS)) {
+        continue;
+      }
+
+      if (key === 'news') {
+        if (bootCacheFresh && stateRef.current.news.length > 0) {
+          lazyFetchedAtRef.current[ttlKey] = nowMs;
+          continue;
+        }
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        fetchPublicNewsBounded(25)
+          .then((publishedNews) => {
+            if (cancelled) return;
+            const keepDrafts =
+              currentUserRoleRef.current === 'admin' ||
+              currentUserRoleRef.current === 'moderador' ||
+              currentUserRoleRef.current === 'prensa';
+            setState((prev) => ({
+              ...prev,
+              news: mergePublicNewsPreservingDrafts(prev.news, publishedNews, keepDrafts),
+            }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'news'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando noticias del campeonato', err, 'news');
+          });
+      } else if (key === 'playersPreview') {
+        if (bootCacheFresh && stateRef.current.players.length >= PLAYERS_PREVIEW_LIMIT) {
+          lazyFetchedAtRef.current[ttlKey] = nowMs;
+          continue;
+        }
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        fetchPlayersPreview(PLAYERS_PREVIEW_LIMIT)
+          .then((previewPlayers) => {
+            if (cancelled) return;
+            setState((prev) => ({
+              ...prev,
+              players: mergeLazyPlayersPreservingPii(prev.players, previewPlayers),
+            }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'players'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando vista previa de jugadores', err, 'players');
+          });
+      } else if (key === 'photos') {
+        if (bootCacheFresh && stateRef.current.photos.length > 0) {
+          lazyFetchedAtRef.current[ttlKey] = nowMs;
+          continue;
+        }
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        fetchPublicPhotosBounded(60)
+          .then((photos) => {
+            if (cancelled) return;
+            setState((prev) => ({ ...prev, photos }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'photos'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando galería fotográfica', err, 'photos');
+          });
+      } else if (key === 'transfers') {
+        if (bootCacheFresh && stateRef.current.transfers.length > 0) {
+          lazyFetchedAtRef.current[ttlKey] = nowMs;
+          continue;
+        }
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        fetchApprovedTransfersBounded(60)
+          .then((approvedTransfers) => {
+            if (cancelled) return;
+            const keepPrivate =
+              currentUserRoleRef.current === 'admin' ||
+              currentUserRoleRef.current === 'moderador' ||
+              currentUserRoleRef.current === 'delegado';
+            setState((prev) => ({
+              ...prev,
+              transfers: mergePublicTransfersPreservingPrivate(
+                prev.transfers,
+                approvedTransfers,
+                keepPrivate
+              ),
+            }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'transfers'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando registro de transferencias', err, 'transfers');
+          });
+      } else if (key === 'leyendasLeaderboard') {
+        if (bootCacheFresh && stateRef.current.leyendasLeaderboard.length > 0) {
+          lazyFetchedAtRef.current[ttlKey] = nowMs;
+          continue;
+        }
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        fetchWeeklyLeyendasBounded(50)
+          .then((leyendasLeaderboard) => {
+            if (cancelled) return;
+            setState((prev) => ({ ...prev, leyendasLeaderboard }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'leyendasLeaderboard'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando ranking de Leyendas UFRO', err, 'leyendasLeaderboard');
+          });
+      } else if (key === 'votingSecondary') {
+        lazyFetchedAtRef.current[ttlKey] = nowMs;
+        const disc = selectedDiscipline;
+        fetchVotingSecondaryForDiscipline(disc)
+          .then((res) => {
+            if (cancelled) return;
+            setState((prev) => ({
+              ...prev,
+              awardNominees: res.awardNominees
+                ? { ...prev.awardNominees, ...res.awardNominees }
+                : prev.awardNominees,
+              mvpVotes: res.mvpVotes
+                ? [...prev.mvpVotes.filter((v) => v.disciplineId !== disc), ...res.mvpVotes]
+                : prev.mvpVotes,
+              championshipMvpVotes: res.championshipMvpVotes
+                ? [
+                    ...prev.championshipMvpVotes.filter((v) => v.disciplineId !== disc),
+                    ...res.championshipMvpVotes,
+                  ]
+                : prev.championshipMvpVotes,
+              positionAwardVotes: res.positionAwardVotes
+                ? [
+                    ...prev.positionAwardVotes.filter((v) => v.disciplineId !== disc),
+                    ...res.positionAwardVotes,
+                  ]
+                : prev.positionAwardVotes,
+              players:
+                res.nominatedPlayers.length > 0
+                  ? mergeLazyPlayersPreservingPii(prev.players, res.nominatedPlayers)
+                  : prev.players,
+            }));
+            setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'mvpVotes'));
+          })
+          .catch((err) => {
+            delete lazyFetchedAtRef.current[ttlKey];
+            reportCloudError('Cargando nominados y votaciones de disciplina', err, 'mvpVotes');
+          });
+      }
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSection,
+    selectedDiscipline,
+    realtimeRetryNonce,
+    initialBoot.hasCachedSnapshot,
+    initialBoot.cachedAtMs,
+    reportCloudError,
+  ]);
 
   // 1A. Debounced persistence of public tournament snapshot to localStorage (only after initial hydration)
   useEffect(() => {
@@ -709,11 +983,46 @@ function AppContent() {
     return () => unsub();
   }, [hydrateForAuthenticatedProfile, reportCloudError]);
 
-  // 2B. Indexed localStorage cache-first TOTY sync:
-  // - On /votaciones: serves instantly from the per-discipline indexed localStorage cache
-  //   with 0 Firestore reads while fresh (5 min TTL), and fetches ONLY the active discipline
-  //   on cache miss/expiry (instead of re-subscribing all 8 disciplines on every tab switch).
-  // - On /panel: attaches live admin listeners and writes snapshots back to the indexed cache.
+  const currentUser: AppUserProfile | null = useMemo(() => {
+    if (!currentUserUid) return null;
+    return state.users.find((u) => u.uid === currentUserUid) ?? null;
+  }, [currentUserUid, state.users]);
+
+  useEffect(() => {
+    currentUserRoleRef.current = currentUser?.role ?? null;
+  }, [currentUser?.role]);
+
+  // 2A. Role-scoped auto-hydration: delegates load only their own team roster; linked players load only their own doc (1 read).
+  useEffect(() => {
+    if (!currentUser) return;
+    if (currentUser.role === 'delegado' && currentUser.delegatedTeamId) {
+      void handleLoadTeamPlayers(currentUser.delegatedTeamId);
+    }
+    if (currentUser.role === 'jugador' && currentUser.linkedPlayerId) {
+      const alreadyLoaded = stateRef.current.players.some(
+        (p) => p.id === currentUser.linkedPlayerId
+      );
+      if (!alreadyLoaded) {
+        fetchPlayerById(currentUser.linkedPlayerId)
+          .then((playerDoc) => {
+            if (!playerDoc) return;
+            setState((prev) => ({
+              ...prev,
+              players: mergeLazyPlayersPreservingPii(prev.players, [playerDoc]),
+            }));
+          })
+          .catch(() => {
+            // Non-blocking fallback
+          });
+      }
+    }
+  }, [currentUser, handleLoadTeamPlayers]);
+
+  // 2B. Write-Only Public TOTY Sync & On-Demand Admin Panel Loader:
+  // - On /votaciones: NEVER scans toty_ballots! Reads ONLY toty_configs/{disc} and the signed-in user's
+  //   own single ballot doc (0–2 reads total, served from localStorage cache when fresh).
+  // - On /panel (Admin/Moderator only): performs a single cache-first fetch of TOTY & full players on demand
+  //   instead of attaching permanent multi-discipline onSnapshot listeners.
   const applyDisciplineTotyToState = useCallback(
     (
       disciplineId: DisciplineId,
@@ -754,10 +1063,19 @@ function AppContent() {
 
     let cancelled = false;
     const cachedDisc = loadCachedTotyForDiscipline(selectedDiscipline);
+    const cachedOwnBallot =
+      currentUserUid && cachedDisc
+        ? cachedDisc.ballots.find((b) => b.voterUid === currentUserUid) ?? null
+        : null;
+
     if (cachedDisc) {
-      applyDisciplineTotyToState(selectedDiscipline, cachedDisc.ballots, cachedDisc.config);
+      applyDisciplineTotyToState(
+        selectedDiscipline,
+        cachedOwnBallot ? [cachedOwnBallot] : [],
+        cachedDisc.config
+      );
       setTotyLastSyncAt(new Date(cachedDisc.savedAt).toISOString());
-      if (cachedDisc.isFresh) {
+      if (cachedDisc.isFresh && (!currentUserUid || Boolean(cachedOwnBallot))) {
         // Fresh indexed cache hit -> 0 Firestore reads!
         return;
       }
@@ -768,20 +1086,40 @@ function AppContent() {
     }
 
     inFlightTotyDisciplinesRef.current.add(selectedDiscipline);
-    fetchFirestoreTotyForDiscipline(selectedDiscipline)
-      .then(({ ballots, config }) => {
+    fetchPublicTotyConfigAndOwnBallot(selectedDiscipline, currentUserUid ?? undefined)
+      .then(async ({ config, ownBallot }) => {
+        const ballotList = ownBallot ? [ownBallot] : [];
         saveCachedTotyForDiscipline(selectedDiscipline, {
-          ballots,
+          ballots: ballotList,
           config,
           temporada: stateRef.current.temporada,
         });
         if (!cancelled) {
-          applyDisciplineTotyToState(selectedDiscipline, ballots, config);
+          applyDisciplineTotyToState(selectedDiscipline, ballotList, config);
           setTotyLastSyncAt(new Date().toISOString());
+        }
+
+        // Hydrate ONLY the specific player docs referenced in the user's own saved ballot (if missing locally)
+        if (ownBallot && !cancelled) {
+          const existingIds = new Set(stateRef.current.players.map((p) => p.id));
+          const missingIds = Array.from(
+            new Set(Object.values(ownBallot.selections).filter((id) => Boolean(id) && !existingIds.has(id)))
+          );
+          if (missingIds.length > 0) {
+            const loaded = (await Promise.all(missingIds.map((id) => fetchPlayerById(id)))).filter(
+              (p): p is Player => p !== null
+            );
+            if (!cancelled && loaded.length > 0) {
+              setState((prev) => ({
+                ...prev,
+                players: mergeLazyPlayersPreservingPii(prev.players, loaded),
+              }));
+            }
+          }
         }
       })
       .catch((err) => {
-        console.warn(`Error sincronizando TOTY para ${selectedDiscipline}:`, err);
+        reportCloudError(`Cargando configuración TOTY (${selectedDiscipline})`, err, 'toty');
       })
       .finally(() => {
         inFlightTotyDisciplinesRef.current.delete(selectedDiscipline);
@@ -790,13 +1128,16 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeSection, selectedDiscipline, applyDisciplineTotyToState]);
+  }, [activeSection, selectedDiscipline, currentUserUid, applyDisciplineTotyToState, reportCloudError]);
 
   useEffect(() => {
     if (activeSection !== 'panel') {
       setTotyRealtimeActive(false);
       return;
     }
+
+    let cancelled = false;
+    const isAdminPanelUser = Boolean(currentUser && isAdminOrModerator(currentUser));
 
     const cachedAll = loadAllCachedTotyData();
     if (cachedAll.ballots.length > 0 || Object.keys(cachedAll.configs).length > 0) {
@@ -814,60 +1155,62 @@ function AppContent() {
       }
     }
 
-    const unsubBallots = subscribeToTotyBallots(
-      (ballots) => {
-        persistedTotyBallotsRef.current = ballots;
-        saveAllCachedTotySnapshot({
-          ballots,
-          configs: stateRef.current.totyConfigs,
-          temporada: stateRef.current.temporada,
+    if (!isAdminPanelUser) return;
+
+    // One-shot Admin TOTY fetch only when local cache is stale or retry requested (no permanent listeners)
+    if (!areAllTotyDisciplinesFresh() || realtimeRetryNonce > 0) {
+      fetchAllFirestoreTotyData()
+        .then(({ ballots, configs }) => {
+          if (cancelled) return;
+          persistedTotyBallotsRef.current = ballots;
+          saveAllCachedTotySnapshot({
+            ballots,
+            configs,
+            temporada: stateRef.current.temporada,
+          });
+          const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
+          setState((prev) => ({
+            ...prev,
+            totyBallots:
+              pendingBallots.length > 0
+                ? mergeTotyBallotsIntoState(ballots, pendingBallots)
+                : ballots,
+            totyConfigs: configs,
+          }));
+          setTotyLastSyncAt(new Date().toISOString());
+          setTotyRealtimeActive(true);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          reportCloudError('Cargando panel TOTY de administración', err, 'toty');
+          setTotyRealtimeActive(false);
         });
-        const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
-        setState((prev) => ({
-          ...prev,
-          totyBallots:
-            pendingBallots.length > 0
-              ? mergeTotyBallotsIntoState(ballots, pendingBallots)
-              : ballots,
-        }));
-        setTotyLastSyncAt(new Date().toISOString());
-        setTotyRealtimeActive(true);
-      },
-      (err) => {
-        console.warn('Error en suscripción en vivo de papeletas TOTY:', err);
-        setTotyRealtimeActive(false);
-      }
-    );
-    const unsubConfigs = subscribeToTotyConfigs(
-      (totyConfigs) => {
-        saveAllCachedTotySnapshot({
-          ballots: persistedTotyBallotsRef.current,
-          configs: totyConfigs,
-          temporada: stateRef.current.temporada,
+    } else {
+      setTotyRealtimeActive(true);
+    }
+
+    // Load full /players once per Admin/Moderator panel session for Sheets/Awards/Admin roster tools
+    if (!adminFullPlayersLoadedRef.current) {
+      adminFullPlayersLoadedRef.current = true;
+      fetchAllPlayersForAdmin()
+        .then((allPlayers) => {
+          if (cancelled) return;
+          setState((prev) => ({
+            ...prev,
+            players: mergeLazyPlayersPreservingPii(prev.players, allPlayers),
+          }));
+          setSyncHealthState((prev) => markSyncStreamHealthy(prev, 'players'));
+        })
+        .catch((err) => {
+          adminFullPlayersLoadedRef.current = false;
+          reportCloudError('Cargando padrón completo para panel admin', err, 'players');
         });
-        setState((prev) => ({ ...prev, totyConfigs }));
-        setTotyLastSyncAt(new Date().toISOString());
-        setTotyRealtimeActive(true);
-      },
-      (err) => {
-        console.warn('Error en suscripción en vivo de configuración TOTY:', err);
-      }
-    );
+    }
+
     return () => {
-      unsubBallots();
-      unsubConfigs();
-      setTotyRealtimeActive(false);
+      cancelled = true;
     };
-  }, [activeSection]);
-
-  const currentUser: AppUserProfile | null = useMemo(() => {
-    if (!currentUserUid) return null;
-    return state.users.find((u) => u.uid === currentUserUid) ?? null;
-  }, [currentUserUid, state.users]);
-
-  useEffect(() => {
-    currentUserRoleRef.current = currentUser?.role ?? null;
-  }, [currentUser?.role]);
+  }, [activeSection, currentUser, realtimeRetryNonce, reportCloudError]);
 
   // 2C. Hydrate authorized student PII once players stream finishes arriving for signed-in staff/delegates/players
   const piiHydratedKeyRef = useRef<string | null>(null);
@@ -2325,6 +2668,8 @@ function AppContent() {
                 onSelectPlayer={setInspectedPlayer}
                 onInspectTeam={setInspectedTeamId}
                 onUpdatePlayer={handleUpdatePlayer}
+                onLoadTeamPlayers={handleLoadTeamPlayers}
+                onSearchPlayers={handleSearchPlayers}
               />
             )}
 
@@ -2341,6 +2686,8 @@ function AppContent() {
                 onSubmitTotyBallot={handleSubmitTotyBallot}
                 pendingTotyDisciplines={pendingTotyDisciplines}
                 onFlushTotyBatch={flushPendingTotyBallots}
+                onLoadTeamPlayers={handleLoadTeamPlayers}
+                onSearchPlayers={handleSearchPlayers}
               />
             )}
 
@@ -2386,6 +2733,7 @@ function AppContent() {
                 onRejectTransferRequest={handleRejectTransferRequest}
                 onNavigate={handleNavigate}
                 onOpenAuth={() => setAuthModalOpen(true)}
+                onLoadTeamPlayers={handleLoadTeamPlayers}
               />
             )}
 
@@ -2492,6 +2840,7 @@ function AppContent() {
         onOpenMatchModal={(match) => setActiveMatchModalId(match.id)}
         onInspectPlayer={handleInspectPlayerFromHome}
         onAdminEditMatch={handleAdminEditMatch}
+        onLoadTeamPlayers={handleLoadTeamPlayers}
       />
 
       <MatchMvpModal
@@ -2505,6 +2854,7 @@ function AppContent() {
         onOpenAuth={() => setAuthModalOpen(true)}
         onOpenMatchInReferee={handleOpenMatchInReferee}
         onToggleFavoriteTeam={handleToggleFavoriteTeam}
+        onLoadTeamPlayers={handleLoadTeamPlayers}
       />
 
       <AuthModal

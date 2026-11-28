@@ -9,6 +9,10 @@ import {
 interface LeyendasMiniGameProps {
   scenario: LeyendasMiniGameScenario;
   onComplete: (outcome: LeyendasMiniGameOutcome) => void;
+  embedded?: boolean;
+  kickerOverride?: string;
+  continueLabelOverride?: string;
+  extraXpBonus?: number;
 }
 
 type AimZone = 'LEFT' | 'CENTER' | 'RIGHT';
@@ -62,7 +66,14 @@ function playSynthFeedback(tier: 'PERFECT' | 'GOOD' | 'MISS', muted: boolean) {
   }
 }
 
-export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps) {
+export function LeyendasMiniGame({
+  scenario,
+  onComplete,
+  embedded = false,
+  kickerOverride,
+  continueLabelOverride,
+  extraXpBonus = 0,
+}: LeyendasMiniGameProps) {
   const [aimZone, setAimZone] = useState<AimZone>('RIGHT');
   const [cursor, setCursor] = useState<number>(12); // 0..100
   const [motionPos, setMotionPos] = useState<number>(50); // 20..80
@@ -211,25 +222,39 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
         : 350
       : 100 + (motionPos / 100) * 280;
 
+  const totalDisplayXp = outcome
+    ? outcome.success
+      ? outcome.ovrXpDelta + extraXpBonus
+      : outcome.ovrXpDelta
+    : 0;
+
   return (
     <div className="space-y-5 leyendas-card-deal" data-minigame-kind={scenario.kind}>
-      <div className="bg-[#0d0d0d] text-white p-5 sm:p-6 border border-white/10 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-amber-400">
-              <Flame className="w-3.5 h-3.5" />
-              <span>Minijuego Decisivo · {scenario.venue}</span>
+      <div
+        className={
+          embedded
+            ? 'text-white space-y-5'
+            : 'rounded-3xl bg-[#0c0c10] text-white p-5 sm:p-7 border border-white/[0.08] space-y-5'
+        }
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5 min-w-0">
+            <div className="flex items-center gap-2 text-xs text-[#a5b0ff]">
+              <Flame className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                {kickerOverride ?? `Jugada decisiva · ${scenario.venue}`}
+              </span>
             </div>
-            <h3 className="font-display text-3xl sm:text-4xl font-bold uppercase tracking-tight">
+            <h3 className="text-2xl sm:text-3xl font-medium tracking-[-0.03em] text-white leading-tight">
               {scenario.title}
             </h3>
-            <p className="text-xs sm:text-sm text-neutral-300">{scenario.context}</p>
+            <p className="text-sm text-white/65 leading-relaxed">{scenario.context}</p>
           </div>
           <button
             type="button"
             onClick={() => setMuted((m) => !m)}
             aria-label={muted ? 'Activar sonido del minijuego' : 'Silenciar sonido del minijuego'}
-            className="p-2 border border-white/15 text-neutral-300 hover:text-white hover:border-[#707ef9] cursor-pointer shrink-0"
+            className="p-2.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-white/70 hover:text-white hover:border-[#707ef9]/60 transition-colors cursor-pointer shrink-0"
           >
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
@@ -237,7 +262,7 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
 
         {/* Visual Interactive SVG Stage */}
         <div
-          className={`relative bg-[#13151d] border border-white/15 overflow-hidden ${
+          className={`relative rounded-2xl bg-[#09090d] border border-white/[0.08] overflow-hidden ${
             phase === 'RESOLVED' && outcome && !outcome.success ? 'leyendas-shake' : ''
           }`}
         >
@@ -1015,18 +1040,19 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
 
         {/* Dynamic Choice Buttons for Aim / Move / Lane */}
         {scenario.actionChoices && scenario.actionChoices.length > 0 && phase === 'AIM' && (
-          <div className="grid grid-cols-3 gap-2">
-            {scenario.actionChoices.map((opt) => (
+          <div className="grid grid-cols-3 gap-2.5">
+            {scenario.actionChoices.map((opt, idx) => (
               <button
                 key={opt.id}
                 type="button"
                 onClick={() => setAimZone(opt.id)}
-                className={`py-2 px-3 text-xs font-display font-bold uppercase tracking-wider border transition-colors cursor-pointer ${
+                className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium border transition-all cursor-pointer ${
                   aimZone === opt.id
-                    ? 'bg-[#707ef9] text-white border-[#707ef9]'
-                    : 'bg-white/5 text-neutral-300 border-white/15 hover:border-white/40'
+                    ? 'bg-[#707ef9] text-white border-[#707ef9] shadow-[0_0_20px_rgba(112,126,249,0.28)]'
+                    : 'bg-[#111117] text-white/75 border-white/[0.08] hover:border-white/25 hover:text-white'
                 }`}
               >
+                <span className="text-[11px] opacity-60 mr-1.5 tabular-nums">{idx + 1}</span>
                 {opt.label}
               </button>
             ))}
@@ -1034,37 +1060,43 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
         )}
 
         {/* Timing Precision Meter */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider">
-            <span className="text-neutral-300">{scenario.subtitle}</span>
-            <span className="text-amber-300 font-bold">
-              {phase === 'AIM' ? 'Espacio / Clic' : outcome?.tier}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-white/65">{scenario.subtitle}</span>
+            <span className="text-[#c8ceff] font-medium shrink-0 tabular-nums">
+              {phase === 'AIM'
+                ? 'Espacio / Clic'
+                : outcome?.tier === 'PERFECT'
+                ? 'Ejecución perfecta'
+                : outcome?.tier === 'GOOD'
+                ? 'Buena ejecución'
+                : 'Fallado'}
             </span>
           </div>
 
-          <div className="relative h-7 bg-[#1d202b] border border-white/20 overflow-hidden">
+          <div className="relative h-8 rounded-full bg-[#13131b] border border-white/[0.1] overflow-hidden">
             <div
-              className="absolute top-0 bottom-0 bg-[#707ef9]/45"
+              className="absolute top-0 bottom-0 bg-[#707ef9]/35"
               style={{
                 left: `${50 - goodHalf}%`,
                 width: `${scenario.goodZoneWidth}%`,
               }}
             />
             <div
-              className="absolute top-0 bottom-0 bg-emerald-400/80 border-x border-emerald-200"
+              className="absolute top-0 bottom-0 bg-emerald-400/80 border-x border-emerald-200/90"
               style={{
                 left: `${50 - perfectHalf}%`,
                 width: `${scenario.sweetSpotWidth}%`,
               }}
             />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#0d0d0d]">
-                PERFECTO
+              <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-[#050507]">
+                Punto óptimo
               </span>
             </div>
 
             <div
-              className="absolute top-0 bottom-0 w-2 bg-white shadow-[0_0_12px_rgba(255,255,255,0.95)]"
+              className="absolute top-0.5 bottom-0.5 w-2 rounded-full bg-white shadow-[0_0_14px_rgba(255,255,255,0.95)]"
               style={{
                 left: `calc(${cursor}% - 4px)`,
               }}
@@ -1076,44 +1108,42 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
         {phase === 'AIM' ? (
           <button
             type="button"
+            id="btn-minigame-execute"
             onClick={handleExecuteAction}
-            className="w-full py-3.5 bg-[#707ef9] hover:bg-[#5766eb] text-white font-display text-lg font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-3.5 px-6 rounded-full bg-[#707ef9] hover:bg-[#5e6df5] text-white text-sm sm:text-base font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
-            <Zap className="w-5 h-5" />
+            <Zap className="w-4 h-4" />
             <span>{scenario.actionButtonLabel}</span>
           </button>
         ) : (
           outcome && (
             <div
-              className={`p-4 border space-y-3 ${
+              className={`rounded-2xl p-5 border space-y-3.5 ${
                 outcome.success
-                  ? 'bg-emerald-500/15 border-emerald-400/60'
-                  : 'bg-red-500/15 border-red-400/60'
+                  ? 'bg-emerald-500/[0.08] border-emerald-400/35'
+                  : 'bg-rose-500/[0.08] border-rose-400/35'
               }`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-display text-2xl sm:text-3xl font-bold uppercase text-white">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-xl sm:text-2xl font-medium tracking-[-0.02em] text-white">
                   {outcome.headline}
                 </p>
                 <span
-                  className={`font-mono text-xs font-bold uppercase px-2.5 py-1 ${
-                    outcome.ovrDelta > 0
-                      ? 'bg-emerald-400 text-[#0d0d0d]'
-                      : 'bg-red-500 text-white'
+                  className={`text-xs font-medium tabular-nums ${
+                    totalDisplayXp > 0 ? 'text-emerald-300' : 'text-rose-300'
                   }`}
                 >
-                  {outcome.ovrDelta > 0 ? `+${outcome.ovrDelta}` : outcome.ovrDelta} OVR
+                  {totalDisplayXp > 0 ? `+${totalDisplayXp}` : totalDisplayXp} XP OVR
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-neutral-200 leading-relaxed">
-                {outcome.narrative}
-              </p>
+              <p className="text-sm text-white/75 leading-relaxed">{outcome.narrative}</p>
               <button
                 type="button"
+                id="btn-minigame-continue"
                 onClick={() => onComplete(outcome)}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-white hover:bg-[#707ef9] text-[#0d0d0d] hover:text-white font-display font-bold uppercase tracking-widest text-sm transition-colors cursor-pointer"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-white hover:bg-[#c8ceff] text-[#050507] text-sm font-medium transition-colors cursor-pointer"
               >
-                <span>Ver Balance del Semestre</span>
+                <span>{continueLabelOverride ?? 'Ver balance del semestre'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -1123,3 +1153,4 @@ export function LeyendasMiniGame({ scenario, onComplete }: LeyendasMiniGameProps
     </div>
   );
 }
+

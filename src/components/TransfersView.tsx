@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   ArrowRight,
   Check,
@@ -19,6 +19,8 @@ import {
 } from '../domain/transfersEngine';
 import type {
   AppUserProfile,
+  DisciplineId,
+  Player,
   TournamentState,
   TransferRecord,
 } from '../types/tournament';
@@ -33,6 +35,7 @@ interface TransfersViewProps {
   onRejectTransferRequest: (updatedTransfer: TransferRecord) => void;
   onNavigate: (section: NavSection) => void;
   onOpenAuth: () => void;
+  onLoadTeamPlayers?: (teamId: string, disciplineId?: DisciplineId) => Promise<Player[]>;
 }
 
 type RequestDirection = 'INCOMING_REINFORCEMENT' | 'OUTGOING_RELEASE';
@@ -45,6 +48,7 @@ export function TransfersView({
   onRejectTransferRequest,
   onNavigate,
   onOpenAuth,
+  onLoadTeamPlayers,
 }: TransfersViewProps) {
   const [direction, setDirection] = useState<RequestDirection>('INCOMING_REINFORCEMENT');
   const [counterpartTeamId, setCounterpartTeamId] = useState('');
@@ -87,6 +91,11 @@ export function TransfersView({
     direction === 'INCOMING_REINFORCEMENT'
       ? delegatedTeam?.id ?? ''
       : effectiveCounterpartId;
+
+  useEffect(() => {
+    if (!effectiveFromTeamId || !onLoadTeamPlayers) return;
+    void onLoadTeamPlayers(effectiveFromTeamId, disciplineId);
+  }, [effectiveFromTeamId, disciplineId, onLoadTeamPlayers]);
 
   const eligiblePlayers = useMemo(
     () =>

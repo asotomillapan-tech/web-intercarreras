@@ -46,8 +46,6 @@ export function HomeTotySpotlight({
   onNavigate,
   onSelectDiscipline,
 }: HomeTotySpotlightProps) {
-  const ballotCount = state.totyBallots.length;
-
   return (
     <section
       aria-labelledby="home-toty-heading"
@@ -57,8 +55,7 @@ export function HomeTotySpotlight({
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-7">
           <SectionKicker index="02" label={`Premios Comunidad · ${state.temporada}`} />
           <p className="text-xs text-zinc-400">
-            {DISCIPLINES.length} categorías · {state.players.length} jugadores elegibles
-            {ballotCount > 0 ? ` · ${ballotCount} papeletas` : ''}
+            {DISCIPLINES.length} categorías · {state.teams.length} equipos en competencia
           </p>
         </div>
 
