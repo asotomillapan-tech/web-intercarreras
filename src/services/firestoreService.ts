@@ -626,6 +626,56 @@ export async function deleteFirestoreTotyConfig(disciplineId: DisciplineId): Pro
   });
 }
 
+export async function migrateTotyBallotsFromFirestoreToTurso(): Promise<{
+  migratedBallots: number;
+  migratedConfigs: number;
+  ballots: TotyBallotRecord[];
+  configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+}> {
+  const res = await tursoRequest<{
+    migratedBallots: number;
+    migratedConfigs: number;
+    ballots: TotyBallotRecord[];
+    configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+  }>('/toty/migrate-from-firestore', {
+    method: 'POST',
+    requiresAuth: true,
+  });
+  return {
+    migratedBallots: res.migratedBallots ?? 0,
+    migratedConfigs: res.migratedConfigs ?? 0,
+    ballots: res.ballots ?? [],
+    configs: res.configs ?? {},
+  };
+}
+
+export async function importAdminTotyBallotsToTurso(payload: {
+  ballots: TotyBallotRecord[];
+  configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+}): Promise<{
+  importedBallots: number;
+  importedConfigs: number;
+  ballots: TotyBallotRecord[];
+  configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+}> {
+  const res = await tursoRequest<{
+    importedBallots: number;
+    importedConfigs: number;
+    ballots: TotyBallotRecord[];
+    configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+  }>('/toty/import-admin', {
+    method: 'POST',
+    requiresAuth: true,
+    body: payload,
+  });
+  return {
+    importedBallots: res.importedBallots ?? 0,
+    importedConfigs: res.importedConfigs ?? 0,
+    ballots: res.ballots ?? [],
+    configs: res.configs ?? {},
+  };
+}
+
 export async function fetchWeeklyLeyendasBounded(
   maxDocs: number = 50
 ): Promise<LeyendasLeaderboardEntry[]> {

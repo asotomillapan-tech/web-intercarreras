@@ -201,3 +201,89 @@ test('resolveTursoCredentialsFromEnv strips accidental quotes and supports stand
   );
 });
 
+test('parseFirestoreTotyBallotDocument and parseFirestoreTotyConfigDocument decode Firestore REST payloads accurately', async () => {
+  const {
+    parseFirestoreTotyBallotDocument,
+    parseFirestoreTotyConfigDocument,
+    sanitizeAdminImportedTotyBallot,
+  } = await import('./tursoHelpers.ts');
+
+  const ballot = parseFirestoreTotyBallotDocument(
+    {
+      name: 'projects/p/databases/d/documents/toty_ballots/f7-h-1_user123',
+      fields: {
+        disciplineId: { stringValue: 'f7-h-1' },
+        temporada: { stringValue: '2026' },
+        voterUid: { stringValue: 'user123' },
+        updatedAt: { timestampValue: '2026-11-20T12:00:00Z' },
+        selections: {
+          mapValue: {
+            fields: {
+              'arquero-1': { stringValue: 'player-a' },
+              'delantero-1': { stringValue: 'player-b' },
+            },
+          },
+        },
+      },
+    },
+    '2026-11-28T00:00:00Z'
+  );
+
+  assert.deepEqual(ballot, {
+    id: 'f7-h-1_user123',
+    disciplineId: 'f7-h-1',
+    temporada: '2026',
+    voterUid: 'user123',
+    selections: {
+      'arquero-1': 'player-a',
+      'delantero-1': 'player-b',
+    },
+    updatedAt: '2026-11-20T12:00:00Z',
+  });
+
+  const cfg = parseFirestoreTotyConfigDocument(
+    {
+      name: 'projects/p/databases/d/documents/toty_configs/basquet-h',
+      fields: {
+        temporada: { stringValue: '2026' },
+        formationName: { stringValue: 'Quinteto Ideal' },
+        positionCounts: {
+          mapValue: {
+            fields: {
+              base: { integerValue: '1' },
+              escolta: { integerValue: '2' },
+              pivot: { integerValue: '2' },
+            },
+          },
+        },
+      },
+      updateTime: '2026-11-21T10:00:00Z',
+    },
+    '2026-11-28T00:00:00Z'
+  );
+
+  assert.deepEqual(cfg, {
+    disciplineId: 'basquet-h',
+    temporada: '2026',
+    formationName: 'Quinteto Ideal',
+    positionCounts: { base: 1, escolta: 2, pivot: 2 },
+    updatedAt: '2026-11-21T10:00:00Z',
+  });
+
+  assert.equal(
+    sanitizeAdminImportedTotyBallot(
+      { disciplineId: 'invalid-disc', voterUid: 'u1', selections: { a: 'p1' } },
+      '2026-11-28T00:00:00Z'
+    ),
+    null
+  );
+  assert.equal(
+    sanitizeAdminImportedTotyBallot(
+      { disciplineId: 'f7-h-1', voterUid: 'u1', selections: {} },
+      '2026-11-28T00:00:00Z'
+    ),
+    null
+  );
+});
+
+

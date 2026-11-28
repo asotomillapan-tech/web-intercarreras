@@ -155,6 +155,17 @@ interface AdminRefereeViewProps {
   totyRealtimeActive: boolean;
   onSaveTotyConfig: (config: DisciplineTotyConfig) => Promise<void>;
   onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
+  onMigrateTotyFromFirestore?: () => Promise<{
+    migratedBallots: number;
+    migratedConfigs: number;
+  }>;
+  onImportLocalTotyBackup?: (payload: {
+    ballots: TournamentState['totyBallots'];
+    configs: TournamentState['totyConfigs'];
+  }) => Promise<{
+    importedBallots: number;
+    importedConfigs: number;
+  }>;
   onSaveHomeFeatured: (config: HomeFeaturedConfig) => Promise<void>;
   onRefreshUsers?: () => Promise<void> | void;
   syncHealth: SyncHealthSummary;
@@ -317,6 +328,8 @@ export function AdminRefereeView({
   totyRealtimeActive,
   onSaveTotyConfig,
   onResetTotyConfig,
+  onMigrateTotyFromFirestore,
+  onImportLocalTotyBackup,
   onSaveHomeFeatured,
   onRefreshUsers,
   syncHealth,
@@ -2418,6 +2431,8 @@ export function AdminRefereeView({
             totyRealtimeActive={totyRealtimeActive}
             onSaveTotyConfig={onSaveTotyConfig}
             onResetTotyConfig={onResetTotyConfig}
+            onMigrateTotyFromFirestore={onMigrateTotyFromFirestore}
+            onImportLocalTotyBackup={onImportLocalTotyBackup}
           />
         )}
 

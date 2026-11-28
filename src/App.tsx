@@ -95,12 +95,14 @@ import {
   fetchPublicTotyConfigAndOwnBallot,
   fetchVotingSecondaryForDiscipline,
   fetchWeeklyLeyendasBounded,
+  importAdminTotyBallotsToTurso,
   listAllFirestoreNews,
   listAllFirestoreTransfers,
   listDelegateFirestoreTransfers,
   listFirestoreRefereeRoster,
   listFirestoreUsers,
   loadAuthorizedPlayerPrivateMap,
+  migrateTotyBallotsFromFirestoreToTurso,
   rejectFirestoreTransferRequest,
   saveFirestoreAwardNominees,
   saveFirestoreChampionshipMvpVote,
@@ -1089,7 +1091,25 @@ function AppContent() {
     inFlightTotyDisciplinesRef.current.add(selectedDiscipline);
     fetchPublicTotyConfigAndOwnBallot(selectedDiscipline, currentUserUid ?? undefined)
       .then(async ({ config, ownBallot }) => {
-        const ballotList = ownBallot ? [ownBallot] : [];
+        let resolvedBallot = ownBallot;
+        // Automatic self-migration: if the signed-in voter still has their own ballot in local cache
+        // from before the Turso migration and Turso doesn't have it yet, sync it to Turso automatically.
+        if (
+          !resolvedBallot &&
+          currentUserUid &&
+          cachedOwnBallot &&
+          cachedOwnBallot.voterUid === currentUserUid &&
+          Object.keys(cachedOwnBallot.selections || {}).length > 0
+        ) {
+          resolvedBallot = cachedOwnBallot;
+          void saveFirestoreTotyBallotsBatch([
+            { ballot: cachedOwnBallot, isUpdate: false },
+          ]).catch(() => {
+            // Will retry naturally on next visit or explicit save
+          });
+        }
+
+        const ballotList = resolvedBallot ? [resolvedBallot] : [];
         saveCachedTotyForDiscipline(selectedDiscipline, {
           ballots: ballotList,
           config,
@@ -1101,10 +1121,12 @@ function AppContent() {
         }
 
         // Hydrate ONLY the specific player docs referenced in the user's own saved ballot (if missing locally)
-        if (ownBallot && !cancelled) {
+        if (resolvedBallot && !cancelled) {
           const existingIds = new Set(stateRef.current.players.map((p) => p.id));
           const missingIds = Array.from(
-            new Set(Object.values(ownBallot.selections).filter((id) => Boolean(id) && !existingIds.has(id)))
+            new Set(
+              Object.values(resolvedBallot.selections).filter((id) => Boolean(id) && !existingIds.has(id))
+            )
           );
           if (missingIds.length > 0) {
             const loaded = (await Promise.all(missingIds.map((id) => fetchPlayerById(id)))).filter(
@@ -1164,11 +1186,14 @@ function AppContent() {
         .then(({ ballots, configs }) => {
           if (cancelled) return;
           persistedTotyBallotsRef.current = ballots;
-          saveAllCachedTotySnapshot({
-            ballots,
-            configs,
-            temporada: stateRef.current.temporada,
-          });
+          // Preserve any pre-migration local backup in localStorage if Turso doesn't have ballots yet
+          if (ballots.length > 0 || cachedAll.ballots.length === 0) {
+            saveAllCachedTotySnapshot({
+              ballots,
+              configs,
+              temporada: stateRef.current.temporada,
+            });
+          }
           const pendingBallots = pendingTotyQueueRef.current.map((item) => item.ballot);
           setState((prev) => ({
             ...prev,
@@ -1704,6 +1729,55 @@ function AppContent() {
       reportCloudError('Error restaurando formación TOTY estándar', err);
       throw err;
     }
+  };
+
+  const handleMigrateTotyFromFirestore = async () => {
+    if (!isAdminOrModerator(currentUser)) {
+      throw new Error('Solo administración puede migrar papeletas.');
+    }
+    const result = await migrateTotyBallotsFromFirestoreToTurso();
+    persistedTotyBallotsRef.current = result.ballots;
+    saveAllCachedTotySnapshot({
+      ballots: result.ballots,
+      configs: result.configs,
+      temporada: stateRef.current.temporada,
+    });
+    setState((prev) => ({
+      ...prev,
+      totyBallots: result.ballots,
+      totyConfigs: result.configs,
+    }));
+    setTotyLastSyncAt(new Date().toISOString());
+    return {
+      migratedBallots: result.migratedBallots,
+      migratedConfigs: result.migratedConfigs,
+    };
+  };
+
+  const handleImportLocalTotyBackup = async (payload: {
+    ballots: TotyBallotRecord[];
+    configs: Partial<Record<DisciplineId, DisciplineTotyConfig>>;
+  }) => {
+    if (!isAdminOrModerator(currentUser)) {
+      throw new Error('Solo administración puede importar papeletas.');
+    }
+    const result = await importAdminTotyBallotsToTurso(payload);
+    persistedTotyBallotsRef.current = result.ballots;
+    saveAllCachedTotySnapshot({
+      ballots: result.ballots,
+      configs: result.configs,
+      temporada: stateRef.current.temporada,
+    });
+    setState((prev) => ({
+      ...prev,
+      totyBallots: result.ballots,
+      totyConfigs: result.configs,
+    }));
+    setTotyLastSyncAt(new Date().toISOString());
+    return {
+      importedBallots: result.importedBallots,
+      importedConfigs: result.importedConfigs,
+    };
   };
 
   const handleVoteChampionshipMvp = async (disciplineId: DisciplineId, player: Player) => {
@@ -2801,6 +2875,8 @@ function AppContent() {
                 totyRealtimeActive={totyRealtimeActive}
                 onSaveTotyConfig={handleSaveTotyConfig}
                 onResetTotyConfig={handleResetTotyConfig}
+                onMigrateTotyFromFirestore={handleMigrateTotyFromFirestore}
+                onImportLocalTotyBackup={handleImportLocalTotyBackup}
                 onSaveHomeFeatured={handleSaveHomeFeatured}
                 onRefreshUsers={handleRefreshUsers}
                 syncHealth={syncHealth}

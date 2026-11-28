@@ -4,9 +4,11 @@ import {
   Check,
   CheckCircle2,
   ClipboardCopy,
+  CloudDownload,
   Crown,
   LayoutGrid,
   ListOrdered,
+  Loader2,
   Minus,
   Plus,
   Radio,
@@ -14,8 +16,10 @@ import {
   Save,
   Sparkles,
   Trophy,
+  Upload,
   Users,
 } from 'lucide-react';
+import { loadAllCachedTotyData } from '../services/totyIndexedCache';
 import { DISCIPLINES, DISCIPLINE_MAP } from '../data/ufroSeed';
 import { formatDorsalLabel } from '../domain/attendanceEngine';
 import {
@@ -45,6 +49,17 @@ interface AdminTotyManagerProps {
   totyRealtimeActive: boolean;
   onSaveTotyConfig: (config: DisciplineTotyConfig) => Promise<void>;
   onResetTotyConfig: (disciplineId: DisciplineId) => Promise<void>;
+  onMigrateTotyFromFirestore?: () => Promise<{
+    migratedBallots: number;
+    migratedConfigs: number;
+  }>;
+  onImportLocalTotyBackup?: (payload: {
+    ballots: TournamentState['totyBallots'];
+    configs: TournamentState['totyConfigs'];
+  }) => Promise<{
+    importedBallots: number;
+    importedConfigs: number;
+  }>;
 }
 
 type TallyViewMode = 'summary' | 'pitch' | 'table';
@@ -59,6 +74,8 @@ export function AdminTotyManager({
   totyRealtimeActive,
   onSaveTotyConfig,
   onResetTotyConfig,
+  onMigrateTotyFromFirestore,
+  onImportLocalTotyBackup,
 }: AdminTotyManagerProps) {
   const [selectedDiscId, setSelectedDiscId] = useState<DisciplineId>('f7-h-1');
   const [viewMode, setViewMode] = useState<TallyViewMode>('summary');
@@ -97,6 +114,70 @@ export function AdminTotyManager({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedActa, setCopiedActa] = useState(false);
+  const [migratingFirestore, setMigratingFirestore] = useState(false);
+  const [importingBackup, setImportingBackup] = useState(false);
+  const [migrationBanner, setMigrationBanner] = useState<{
+    tone: 'success' | 'warning' | 'error';
+    text: string;
+  } | null>(null);
+
+  const localBackupSummary = useMemo(() => {
+    const cached = loadAllCachedTotyData();
+    const existingIds = new Set(state.totyBallots.map((b) => b.id));
+    const missingFromTurso = cached.ballots.filter((b) => !existingIds.has(b.id));
+    return {
+      totalCached: cached.ballots.length,
+      missingCount: missingFromTurso.length,
+      ballots: cached.ballots,
+      configs: cached.configs,
+    };
+  }, [state.totyBallots]);
+
+  const handleMigrateFromFirestoreClick = async () => {
+    if (!onMigrateTotyFromFirestore || migratingFirestore) return;
+    setMigratingFirestore(true);
+    setMigrationBanner(null);
+    try {
+      const res = await onMigrateTotyFromFirestore();
+      setMigrationBanner({
+        tone: 'success',
+        text: `Migración completada: ${res.migratedBallots} papeletas de usuarios y ${res.migratedConfigs} configuraciones copiadas a Turso.`,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'No se pudieron migrar las papeletas desde Firestore.';
+      setMigrationBanner({
+        tone: /cuota|quota/i.test(msg) ? 'warning' : 'error',
+        text: msg,
+      });
+    } finally {
+      setMigratingFirestore(false);
+    }
+  };
+
+  const handleImportLocalBackupClick = async () => {
+    if (!onImportLocalTotyBackup || importingBackup || localBackupSummary.ballots.length === 0) return;
+    setImportingBackup(true);
+    setMigrationBanner(null);
+    try {
+      const res = await onImportLocalTotyBackup({
+        ballots: localBackupSummary.ballots,
+        configs: localBackupSummary.configs,
+      });
+      setMigrationBanner({
+        tone: 'success',
+        text: `Respaldo local subido a Turso: ${res.importedBallots} papeletas y ${res.importedConfigs} configuraciones restauradas.`,
+      });
+    } catch (err) {
+      setMigrationBanner({
+        tone: 'error',
+        text:
+          err instanceof Error ? err.message : 'No se pudo subir el respaldo local de papeletas.',
+      });
+    } finally {
+      setImportingBackup(false);
+    }
+  };
 
   useEffect(() => {
     const baseDefaults = getDefaultPositionCountsForSport(discMeta.sportType);
@@ -384,6 +465,77 @@ export function AdminTotyManager({
           </div>
         </div>
       </div>
+
+      {/* Firestore → Turso Ballot Migration Bar */}
+      {(onMigrateTotyFromFirestore || (onImportLocalTotyBackup && localBackupSummary.missingCount > 0)) && (
+        <div className="rounded-2xl border border-white/[0.08] bg-[#101016] p-4 flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-white">
+                Migración de papeletas de usuarios hacia Turso
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Copia automáticamente las papeletas guardadas de cada usuario desde Firestore a Turso sin duplicar votos.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {onImportLocalTotyBackup && localBackupSummary.missingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleImportLocalBackupClick}
+                  disabled={importingBackup || migratingFirestore}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-medium bg-[#707ef9] text-white hover:bg-[#5e6df5] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {importingBackup ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    Subir respaldo local ({localBackupSummary.missingCount})
+                  </span>
+                </button>
+              )}
+              {onMigrateTotyFromFirestore && (
+                <button
+                  type="button"
+                  onClick={handleMigrateFromFirestoreClick}
+                  disabled={migratingFirestore || importingBackup}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-medium border border-white/[0.14] bg-white/[0.04] text-zinc-100 hover:bg-white/[0.1] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {migratingFirestore ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CloudDownload className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {migratingFirestore ? 'Migrando papeletas…' : 'Migrar desde Firestore'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {migrationBanner && (
+            <div
+              className={`rounded-xl px-3.5 py-2.5 text-xs flex items-start gap-2 border ${
+                migrationBanner.tone === 'success'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                  : migrationBanner.tone === 'warning'
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                  : 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+              }`}
+            >
+              {migrationBanner.tone === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
+              <span>{migrationBanner.text}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 8-Discipline Selector Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">

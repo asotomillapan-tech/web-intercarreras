@@ -1,4 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import type { Client, InValue } from '@libsql/client';
 import { ensureTursoSchema, isTursoConfigured } from './tursoClient.ts';
 import {
@@ -14,7 +16,11 @@ import {
   isValidEntityId,
   isValidUserRole,
   normalizeSearchText,
+  parseFirestoreTotyBallotDocument,
+  parseFirestoreTotyConfigDocument,
   resolveBootstrapRole,
+  sanitizeAdminImportedTotyBallot,
+  sanitizeAdminImportedTotyConfig,
   stripPlayerPii,
   stripTeamPrivateFields,
 } from '../src/domain/tursoHelpers.ts';
@@ -72,6 +78,131 @@ function safeParseJson<T>(raw: unknown, fallback: T): T {
     return JSON.parse(raw) as T;
   } catch {
     return fallback;
+  }
+}
+
+interface FirestoreAppletMeta {
+  projectId: string;
+  firestoreDatabaseId: string;
+  apiKey: string;
+}
+
+function loadFirestoreAppletMeta(): FirestoreAppletMeta | null {
+  const candidates = [
+    path.resolve(process.cwd(), 'firebase-applet-config.json'),
+    path.resolve(process.cwd(), '..', 'firebase-applet-config.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as Partial<FirestoreAppletMeta>;
+        if (parsed.projectId && parsed.firestoreDatabaseId && parsed.apiKey) {
+          return {
+            projectId: parsed.projectId,
+            firestoreDatabaseId: parsed.firestoreDatabaseId,
+            apiKey: parsed.apiKey,
+          };
+        }
+      }
+    } catch {
+      // Try next candidate
+    }
+  }
+  return null;
+}
+
+async function fetchAllFirestoreRestCollection(params: {
+  meta: FirestoreAppletMeta;
+  collectionName: 'toty_ballots' | 'toty_configs';
+  authHeader?: string;
+}): Promise<{
+  quotaExceeded: boolean;
+  errorStatus?: number;
+  errorMessage?: string;
+  documents: Array<{ name?: string; fields?: Record<string, unknown>; updateTime?: string }>;
+}> {
+  const { meta, collectionName, authHeader } = params;
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(meta.projectId)}/databases/${encodeURIComponent(meta.firestoreDatabaseId)}/documents/${collectionName}`;
+  const documents: Array<{ name?: string; fields?: Record<string, unknown>; updateTime?: string }> = [];
+  let pageToken: string | undefined;
+
+  for (let page = 0; page < 60; page += 1) {
+    const qs = new URLSearchParams({
+      pageSize: '200',
+      key: meta.apiKey,
+    });
+    if (pageToken) qs.set('pageToken', pageToken);
+
+    const headers: Record<string, string> = {};
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      headers.Authorization = authHeader;
+    }
+
+    const res = await fetch(`${baseUrl}?${qs.toString()}`, { headers });
+    const body = (await res.json().catch(() => ({}))) as {
+      documents?: Array<{ name?: string; fields?: Record<string, unknown>; updateTime?: string }>;
+      nextPageToken?: string;
+      error?: { status?: string; message?: string };
+    };
+
+    if (!res.ok) {
+      const errMsg = body.error?.message || `HTTP ${res.status}`;
+      const isQuota =
+        res.status === 429 ||
+        body.error?.status === 'RESOURCE_EXHAUSTED' ||
+        /quota/i.test(errMsg);
+      return {
+        quotaExceeded: isQuota,
+        errorStatus: res.status,
+        errorMessage: errMsg,
+        documents,
+      };
+    }
+
+    if (Array.isArray(body.documents) && body.documents.length > 0) {
+      documents.push(...body.documents);
+    }
+
+    if (!body.nextPageToken) break;
+    pageToken = body.nextPageToken;
+  }
+
+  return { quotaExceeded: false, documents };
+}
+
+async function upsertTotyRecordsInTurso(
+  client: Client,
+  ballots: TotyBallotRecord[],
+  configs: DisciplineTotyConfig[]
+): Promise<void> {
+  const stmts: Array<{ sql: string; args: InValue[] }> = [];
+
+  for (const b of ballots) {
+    stmts.push({
+      sql: `INSERT INTO toty_ballots (id, discipline_id, voter_uid, data_json, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              data_json = excluded.data_json,
+              updated_at = excluded.updated_at`,
+      args: [b.id, b.disciplineId, b.voterUid, JSON.stringify(b), b.updatedAt],
+    });
+  }
+
+  const fallbackNow = new Date().toISOString();
+  for (const cfg of configs) {
+    const updatedAt = cfg.updatedAt || fallbackNow;
+    stmts.push({
+      sql: `INSERT INTO toty_configs (discipline_id, data_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(discipline_id) DO UPDATE SET
+              data_json = excluded.data_json,
+              updated_at = excluded.updated_at`,
+      args: [cfg.disciplineId, JSON.stringify({ ...cfg, updatedAt }), updatedAt],
+    });
+  }
+
+  for (let i = 0; i < stmts.length; i += 80) {
+    await client.batch(stmts.slice(i, i + 80), 'write');
   }
 }
 
@@ -2140,6 +2271,173 @@ export function createTursoRouter({
       res.status(500).json({ error: 'No se pudo restablecer la configuración TOTY.' });
     }
   });
+
+  router.post(
+    '/toty/migrate-from-firestore',
+    requireFirebaseAuth,
+    async (req: AuthedRequest, res: Response) => {
+      const client = await getDbOrRespond(res);
+      if (!client) return;
+      try {
+        const actor = await resolveActorProfile(client, req.firebaseUser);
+        if (!actor || !isAdminOrModeratorRole(actor.role)) {
+          res.status(403).json({
+            error: 'Solo administradores o moderadores pueden migrar papeletas desde Firestore.',
+          });
+          return;
+        }
+
+        const meta = loadFirestoreAppletMeta();
+        if (!meta) {
+          res.status(500).json({
+            error: 'No se encontró la configuración del proyecto Firestore para leer las papeletas.',
+          });
+          return;
+        }
+
+        const authHeader = req.headers.authorization;
+        const [ballotsRes, configsRes] = await Promise.all([
+          fetchAllFirestoreRestCollection({
+            meta,
+            collectionName: 'toty_ballots',
+            authHeader,
+          }),
+          fetchAllFirestoreRestCollection({
+            meta,
+            collectionName: 'toty_configs',
+            authHeader,
+          }),
+        ]);
+
+        if (ballotsRes.quotaExceeded || configsRes.quotaExceeded) {
+          res.status(429).json({
+            quotaExceeded: true,
+            error:
+              'La cuota diaria gratuita de lecturas de Firestore aún sigue agotada hoy. Cuando Google la reinicie mañana, vuelve a presionar este botón para copiar todas las papeletas a Turso automáticamente.',
+          });
+          return;
+        }
+
+        if (ballotsRes.errorStatus || configsRes.errorStatus) {
+          res.status(502).json({
+            error:
+              ballotsRes.errorMessage ||
+              configsRes.errorMessage ||
+              'No se pudieron leer las papeletas desde Firestore.',
+          });
+          return;
+        }
+
+        const now = new Date().toISOString();
+        const ballots = ballotsRes.documents
+          .map((d) => parseFirestoreTotyBallotDocument(d, now))
+          .filter((b): b is TotyBallotRecord => Boolean(b));
+        const configs = configsRes.documents
+          .map((d) => parseFirestoreTotyConfigDocument(d, now))
+          .filter((c): c is DisciplineTotyConfig => Boolean(c));
+
+        await upsertTotyRecordsInTurso(client, ballots, configs);
+
+        const [allBallotsRs, allConfigsRs] = await client.batch(
+          [
+            { sql: 'SELECT data_json FROM toty_ballots ORDER BY updated_at DESC', args: [] },
+            { sql: 'SELECT discipline_id, data_json FROM toty_configs', args: [] },
+          ],
+          'read'
+        );
+
+        const allBallots = allBallotsRs.rows
+          .map((r) => safeParseJson<TotyBallotRecord | null>(r.data_json, null))
+          .filter((b): b is TotyBallotRecord => Boolean(b));
+        const allConfigs: Partial<Record<DisciplineId, DisciplineTotyConfig>> = {};
+        for (const row of allConfigsRs.rows) {
+          const d = String(row.discipline_id);
+          if (isValidDisciplineId(d)) {
+            const parsed = safeParseJson<DisciplineTotyConfig | null>(row.data_json, null);
+            if (parsed) allConfigs[d] = parsed;
+          }
+        }
+
+        res.json({
+          ok: true,
+          migratedBallots: ballots.length,
+          migratedConfigs: configs.length,
+          ballots: allBallots,
+          configs: allConfigs,
+        });
+      } catch (err) {
+        console.error('[Turso] POST /toty/migrate-from-firestore failed:', err);
+        res.status(500).json({ error: 'No se pudo completar la migración de papeletas desde Firestore.' });
+      }
+    }
+  );
+
+  router.post(
+    '/toty/import-admin',
+    requireFirebaseAuth,
+    async (req: AuthedRequest, res: Response) => {
+      const client = await getDbOrRespond(res);
+      if (!client) return;
+      try {
+        const actor = await resolveActorProfile(client, req.firebaseUser);
+        if (!actor || !isAdminOrModeratorRole(actor.role)) {
+          res.status(403).json({
+            error: 'Solo administradores o moderadores pueden importar papeletas de usuarios.',
+          });
+          return;
+        }
+
+        const now = new Date().toISOString();
+        const rawBallots = Array.isArray(req.body?.ballots) ? req.body.ballots.slice(0, 5000) : [];
+        const rawConfigsObj =
+          req.body?.configs && typeof req.body.configs === 'object'
+            ? (req.body.configs as Record<string, unknown>)
+            : {};
+
+        const ballots = rawBallots
+          .map((item: unknown) => sanitizeAdminImportedTotyBallot(item, now))
+          .filter((b: TotyBallotRecord | null): b is TotyBallotRecord => Boolean(b));
+
+        const configs = Object.values(rawConfigsObj)
+          .slice(0, 16)
+          .map((item: unknown) => sanitizeAdminImportedTotyConfig(item, now))
+          .filter((c: DisciplineTotyConfig | null): c is DisciplineTotyConfig => Boolean(c));
+
+        await upsertTotyRecordsInTurso(client, ballots, configs);
+
+        const [allBallotsRs, allConfigsRs] = await client.batch(
+          [
+            { sql: 'SELECT data_json FROM toty_ballots ORDER BY updated_at DESC', args: [] },
+            { sql: 'SELECT discipline_id, data_json FROM toty_configs', args: [] },
+          ],
+          'read'
+        );
+
+        const allBallots = allBallotsRs.rows
+          .map((r) => safeParseJson<TotyBallotRecord | null>(r.data_json, null))
+          .filter((b): b is TotyBallotRecord => Boolean(b));
+        const allConfigs: Partial<Record<DisciplineId, DisciplineTotyConfig>> = {};
+        for (const row of allConfigsRs.rows) {
+          const d = String(row.discipline_id);
+          if (isValidDisciplineId(d)) {
+            const parsed = safeParseJson<DisciplineTotyConfig | null>(row.data_json, null);
+            if (parsed) allConfigs[d] = parsed;
+          }
+        }
+
+        res.json({
+          ok: true,
+          importedBallots: ballots.length,
+          importedConfigs: configs.length,
+          ballots: allBallots,
+          configs: allConfigs,
+        });
+      } catch (err) {
+        console.error('[Turso] POST /toty/import-admin failed:', err);
+        res.status(500).json({ error: 'No se pudieron importar las papeletas a Turso.' });
+      }
+    }
+  );
 
   router.post('/leyendas', requireFirebaseAuth, async (req: AuthedRequest, res: Response) => {
     const client = await getDbOrRespond(res);

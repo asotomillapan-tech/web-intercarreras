@@ -1,8 +1,10 @@
 import type {
   AppUserProfile,
   DisciplineId,
+  DisciplineTotyConfig,
   Player,
   Team,
+  TotyBallotRecord,
   TransferRecord,
   UserRole,
 } from '../types/tournament';
@@ -232,4 +234,159 @@ export function resolveTursoCredentialsFromEnv(
 
   return { url, authToken };
 }
+
+/**
+ * Decodes a single Firestore REST v1 Value object into a plain JS value.
+ */
+export function decodeFirestoreRestValue(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const v = raw as Record<string, unknown>;
+  if ('nullValue' in v) return null;
+  if ('stringValue' in v) return String(v.stringValue ?? '');
+  if ('booleanValue' in v) return Boolean(v.booleanValue);
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return Number(v.doubleValue);
+  if ('timestampValue' in v) return String(v.timestampValue ?? '');
+  if ('mapValue' in v && v.mapValue && typeof v.mapValue === 'object') {
+    const fields = (v.mapValue as { fields?: Record<string, unknown> }).fields;
+    const out: Record<string, unknown> = {};
+    if (fields && typeof fields === 'object') {
+      for (const [k, fv] of Object.entries(fields)) {
+        out[k] = decodeFirestoreRestValue(fv);
+      }
+    }
+    return out;
+  }
+  if ('arrayValue' in v && v.arrayValue && typeof v.arrayValue === 'object') {
+    const values = (v.arrayValue as { values?: unknown[] }).values;
+    return Array.isArray(values) ? values.map(decodeFirestoreRestValue) : [];
+  }
+  return undefined;
+}
+
+export function sanitizeAdminImportedTotyBallot(
+  raw: unknown,
+  fallbackNowIso: string
+): TotyBallotRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const disciplineId = typeof obj.disciplineId === 'string' ? obj.disciplineId.trim() : '';
+  const voterUid = typeof obj.voterUid === 'string' ? obj.voterUid.trim() : '';
+  if (!isValidDisciplineId(disciplineId) || !isValidEntityId(voterUid)) return null;
+
+  const selections: Record<string, string> = {};
+  if (obj.selections && typeof obj.selections === 'object') {
+    for (const [slotKey, playerId] of Object.entries(obj.selections as Record<string, unknown>).slice(
+      0,
+      16
+    )) {
+      if (typeof slotKey === 'string' && typeof playerId === 'string') {
+        const cleanSlot = slotKey.trim().slice(0, 40);
+        const cleanPlayer = playerId.trim().slice(0, 160);
+        if (cleanSlot && cleanPlayer) {
+          selections[cleanSlot] = cleanPlayer;
+        }
+      }
+    }
+  }
+  if (Object.keys(selections).length === 0) return null;
+
+  const temporada =
+    typeof obj.temporada === 'string' && obj.temporada.trim()
+      ? obj.temporada.trim().slice(0, 16)
+      : '2026';
+  const updatedAt =
+    typeof obj.updatedAt === 'string' && obj.updatedAt.trim()
+      ? obj.updatedAt.trim().slice(0, 40)
+      : fallbackNowIso;
+
+  return {
+    id: `${disciplineId}_${voterUid}`,
+    disciplineId,
+    temporada,
+    voterUid,
+    selections,
+    updatedAt,
+  };
+}
+
+export function sanitizeAdminImportedTotyConfig(
+  raw: unknown,
+  fallbackNowIso: string
+): DisciplineTotyConfig | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const disciplineId = typeof obj.disciplineId === 'string' ? obj.disciplineId.trim() : '';
+  if (!isValidDisciplineId(disciplineId)) return null;
+
+  const positionCounts: Record<string, number> = {};
+  if (obj.positionCounts && typeof obj.positionCounts === 'object') {
+    for (const [posKey, countVal] of Object.entries(
+      obj.positionCounts as Record<string, unknown>
+    ).slice(0, 16)) {
+      const cleanPos = posKey.trim().slice(0, 40);
+      const n = Number(countVal);
+      if (cleanPos && Number.isFinite(n) && n >= 0 && n <= 12) {
+        positionCounts[cleanPos] = Math.trunc(n);
+      }
+    }
+  }
+  if (Object.keys(positionCounts).length === 0) return null;
+
+  const temporada =
+    typeof obj.temporada === 'string' && obj.temporada.trim()
+      ? obj.temporada.trim().slice(0, 16)
+      : '2026';
+  const formationName =
+    typeof obj.formationName === 'string' && obj.formationName.trim()
+      ? obj.formationName.trim().slice(0, 60)
+      : 'Personalizada';
+  const updatedAt =
+    typeof obj.updatedAt === 'string' && obj.updatedAt.trim()
+      ? obj.updatedAt.trim().slice(0, 40)
+      : fallbackNowIso;
+
+  return {
+    disciplineId,
+    temporada,
+    formationName,
+    positionCounts,
+    updatedAt,
+  };
+}
+
+export function parseFirestoreTotyBallotDocument(
+  doc: { name?: string; fields?: Record<string, unknown>; updateTime?: string },
+  fallbackNowIso: string
+): TotyBallotRecord | null {
+  if (!doc || !doc.fields || typeof doc.fields !== 'object') return null;
+  const decoded: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    decoded[k] = decodeFirestoreRestValue(v);
+  }
+  if (!decoded.updatedAt && typeof doc.updateTime === 'string') {
+    decoded.updatedAt = doc.updateTime;
+  }
+  return sanitizeAdminImportedTotyBallot(decoded, fallbackNowIso);
+}
+
+export function parseFirestoreTotyConfigDocument(
+  doc: { name?: string; fields?: Record<string, unknown>; updateTime?: string },
+  fallbackNowIso: string
+): DisciplineTotyConfig | null {
+  if (!doc || !doc.fields || typeof doc.fields !== 'object') return null;
+  const decoded: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    decoded[k] = decodeFirestoreRestValue(v);
+  }
+  if (!decoded.disciplineId && typeof doc.name === 'string') {
+    const parts = doc.name.split('/');
+    decoded.disciplineId = parts[parts.length - 1] || '';
+  }
+  if (!decoded.updatedAt && typeof doc.updateTime === 'string') {
+    decoded.updatedAt = doc.updateTime;
+  }
+  return sanitizeAdminImportedTotyConfig(decoded, fallbackNowIso);
+}
+
 
